@@ -30,9 +30,10 @@ class RemoteEntry:
 class TestSyncerHelpers(unittest.TestCase):
     """These tests ensure manifest diffing and permission checks behave predictably."""
 
-    # ------------------------------------------------------------------------------
-    # This test confirms a file transfer is requested when no manifest entry exists.
-    # ------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # This test confirms a file transfer is requested when no manifest
+    # entry exists.
+    # --------------------------------------------------------------------------
     def test_needs_transfer_for_new_file(self) -> None:
         ENTRY = RemoteEntry(
             path="docs/a.txt",
@@ -43,9 +44,9 @@ class TestSyncerHelpers(unittest.TestCase):
 
         self.assertTrue(needs_transfer(ENTRY, {}))
 
-    # ------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     # This test confirms unchanged file metadata does not trigger a transfer.
-    # ------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     def test_no_transfer_for_unchanged_file(self) -> None:
         ENTRY = RemoteEntry(
             path="docs/a.txt",
@@ -63,9 +64,10 @@ class TestSyncerHelpers(unittest.TestCase):
 
         self.assertFalse(needs_transfer(ENTRY, MANIFEST))
 
-    # ------------------------------------------------------------------------------
-    # This test confirms mode counting and mismatch detection identify outlier permissions.
-    # ------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # This test confirms mode counting and mismatch detection identify
+    # outlier permissions.
+    # --------------------------------------------------------------------------
     def test_mode_counting_and_mismatch_detection(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             BASE = Path(TMPDIR)

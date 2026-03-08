@@ -15,9 +15,9 @@
 *.md
 CLAUDE.md
 README.md
+TODO.md
 scratchpad.sh
 test.sh
-TODO.md
 
 # ------------------------------------------------------------------------------
 # Environment and secrets.

@@ -16,9 +16,10 @@ from app.telegram_bot import parse_command
 class TestTelegramCommandParsing(unittest.TestCase):
     """These tests cover username-prefixed command parsing and filtering rules."""
 
-    # ------------------------------------------------------------------------------
-    # This test confirms a correctly formatted backup command is parsed for the configured chat.
-    # ------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # This test confirms a correctly formatted backup command is parsed
+    # for the configured chat.
+    # --------------------------------------------------------------------------
     def test_parse_backup_command(self) -> None:
         UPDATE = {
             "update_id": 101,
@@ -34,9 +35,10 @@ class TestTelegramCommandParsing(unittest.TestCase):
         self.assertEqual(EVENT.command, "backup")
         self.assertEqual(EVENT.args, "")
 
-    # ------------------------------------------------------------------------------
-    # This test confirms auth commands preserve argument payload, such as MFA codes.
-    # ------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # This test confirms auth commands preserve argument payload, such as
+    # MFA codes.
+    # --------------------------------------------------------------------------
     def test_parse_auth_command_with_arg(self) -> None:
         UPDATE = {
             "update_id": 102,
@@ -52,9 +54,9 @@ class TestTelegramCommandParsing(unittest.TestCase):
         self.assertEqual(EVENT.command, "auth")
         self.assertEqual(EVENT.args, "123456")
 
-    # ------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     # This test confirms messages from unexpected chats are ignored for safety.
-    # ------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     def test_ignore_wrong_chat(self) -> None:
         UPDATE = {
             "update_id": 103,
@@ -68,9 +70,10 @@ class TestTelegramCommandParsing(unittest.TestCase):
 
         self.assertIsNone(EVENT)
 
-    # ------------------------------------------------------------------------------
-    # This test confirms messages without the username prefix are not treated as commands.
-    # ------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # This test confirms messages without the username prefix are not
+    # treated as commands.
+    # --------------------------------------------------------------------------
     def test_ignore_without_prefix(self) -> None:
         UPDATE = {
             "update_id": 104,

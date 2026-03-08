@@ -104,7 +104,7 @@ def notify(TELEGRAM: TelegramConfig, MESSAGE: str) -> None:
 # 5. "USERNAME" is command prefix used by Telegram control.
 # 6. "PROVIDED_CODE" is optional MFA code.
 #
-# Returns: Tuple `(new_state, is_authenticated, details_message)`.
+# Returns: Tuple "(new_state, is_authenticated, details_message)".
 # ------------------------------------------------------------------------------
 def attempt_auth(
     CLIENT: ICloudDriveClient,
@@ -232,7 +232,7 @@ def process_reauth_reminders(
 # 2. "USERNAME" is command prefix.
 # 3. "UPDATE_OFFSET" is update offset cursor.
 #
-# Returns: Tuple `(commands, next_offset)` for command execution.
+# Returns: Tuple "(commands, next_offset)" for command execution.
 # ------------------------------------------------------------------------------
 def process_commands(
     TELEGRAM: TelegramConfig,
@@ -302,7 +302,7 @@ def run_backup(
 # 6. "IS_AUTHENTICATED" tracks current auth validity.
 # 7. "TELEGRAM" is Telegram integration configuration.
 #
-# Returns: Tuple `(auth_state, is_authenticated, backup_requested)`.
+# Returns: Tuple "(auth_state, is_authenticated, backup_requested)".
 # ------------------------------------------------------------------------------
 def handle_command(
     COMMAND: str,

@@ -13,9 +13,9 @@ from app.time_utils import configured_timezone
 class TestTimeUtils(unittest.TestCase):
     """These tests ensure valid and invalid TZ values are handled safely."""
 
-    # ------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     # This test confirms a valid TZ value is used when provided.
-    # ------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     def test_configured_timezone_uses_valid_tz(self) -> None:
         PREVIOUS = os.environ.get("TZ")
 
@@ -29,9 +29,9 @@ class TestTimeUtils(unittest.TestCase):
             else:
                 os.environ["TZ"] = PREVIOUS
 
-    # ------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     # This test confirms invalid TZ values fall back to UTC.
-    # ------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     def test_configured_timezone_falls_back_to_utc(self) -> None:
         PREVIOUS = os.environ.get("TZ")
 

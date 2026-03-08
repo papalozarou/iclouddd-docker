@@ -33,8 +33,8 @@ class AppConfig:
 # ------------------------------------------------------------------------------
 # This function reads an environment variable with default fallback.
 #
-# 1. `NAME` is the environment key.
-# 2. `DEFAULT` is returned when the key is unset.
+# 1. "NAME" is the environment key.
+# 2. "DEFAULT" is returned when the key is unset.
 #
 # The function returns a stripped string suitable for configuration.
 # ------------------------------------------------------------------------------
@@ -45,8 +45,8 @@ def env_value(NAME: str, DEFAULT: str = "") -> str:
 # ------------------------------------------------------------------------------
 # This function parses an environment variable as an integer.
 #
-# 1. `NAME` is the environment key.
-# 2. `DEFAULT` is used when parsing fails.
+# 1. "NAME" is the environment key.
+# 2. "DEFAULT" is used when parsing fails.
 #
 # The function returns the parsed integer or fallback default.
 # ------------------------------------------------------------------------------
@@ -62,9 +62,9 @@ def env_int(NAME: str, DEFAULT: int) -> int:
 # ------------------------------------------------------------------------------
 # This function ensures a directory exists before the worker starts.
 #
-# 1. `PATH` is the directory path to create when missing.
+# 1. "PATH" is the directory path to create when missing.
 #
-# The function returns the same `Path` instance.
+# The function returns the same "Path" instance.
 # ------------------------------------------------------------------------------
 def ensure_dir(PATH: Path) -> Path:
     PATH.mkdir(parents=True, exist_ok=True)

@@ -36,7 +36,7 @@ class SyncResult:
 #
 # Returns: "SafetyNetResult" describing whether sync should be blocked and why.
 #
-# Notes: Permission mode bits are read from `stat` values:
+# Notes: Permission mode bits are read from "stat" values:
 # https://docs.python.org/3/library/os.html#os.stat_result
 # ------------------------------------------------------------------------------
 def run_first_time_safety_net(OUTPUT_DIR: Path, SAMPLE_SIZE: int) -> SafetyNetResult:

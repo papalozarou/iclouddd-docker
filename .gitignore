@@ -10,9 +10,9 @@
 .github/copilot-instructions.md
 .shellcheckrc
 CLAUDE.md
+TODO.md
 scratchpad.sh
 test.sh
-TODO.md
 
 # ------------------------------------------------------------------------------
 # Environment and secrets.
@@ -38,10 +38,10 @@ secrets/
 *.so
 __pycache__/
 build/
-dist/
-venv/
 coverage.xml
+dist/
 htmlcov/
+venv/
 
 # ------------------------------------------------------------------------------
 # Node and frontend artifacts.
@@ -61,8 +61,8 @@ node_modules/
 *.sqlite3
 *.tmp
 compose.yml
-docker-compose.yml
 config/
+docker-compose.yml
 logs/
 output/
 

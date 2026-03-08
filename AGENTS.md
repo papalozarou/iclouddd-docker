@@ -20,6 +20,7 @@ This file defines various coding standards for agents to adhere to.
 - MUST: After each block of suggested and user-approved changes is applied, explicitly suggest a commit (with a clear commit message) before moving to the next change block
 - MUST: When a new rule is requested, ask whether it should be project-local (`AGENTS.local.md`) or added to the shared template (`AGENTS.md`) before editing rules
 - SHOULD: If the rule is project-local, suggest creating or updating `AGENTS.local.md` and ensure it is ignored by baseline ignore files
+- SHOULD: If a requested change set is focused but substantial, suggest creating and working on a dedicated Git branch before applying edits
 
 ## README.md and comments
 - MUST: Use UK English, not US
@@ -33,6 +34,7 @@ This file defines various coding standards for agents to adhere to.
 - MUST: Add comments directly above functions and methods, describing purpose, arguments, return values, and notable caveats
 - MUST: Wrap every comment block with separator lines above and below
 - MUST: A separator line must use the language comment prefix, one space, then hyphens filling the remainder of the line to the 80-character limit
+- MUST: Do not indent comment blocks; comment separators and comment prose lines must start at the first column allowed by the language syntax
 - MUST: Use sentence-case prose in comments with full sentences and terminal punctuation
 - MUST: For function comments include purpose, numbered arguments, behaviour notes, and failure or exit behaviour where relevant
 - MUST: Do not add inline comments inside function or method bodies unless external constraints require it
@@ -49,7 +51,7 @@ Examples:
 - SHOULD: Add source links for non-obvious logic as a short bullet list under the comment block
 - MUST: Use consistent separator and heading phrasing across files (for example `Imported ...`, `Run the script.`, `Functions for ...`)
 - MUST: Use paragraph spacing in comments, including blank comment lines between intro, argument lists, `N.B.`, and notes or reference sections
-- MUST: Keep all comment lines at or below 80 characters, including separator lines
+- MUST: Keep source-code comment lines at or below 80 characters, including separator lines
 
 ## Coding
 - MUST: Prefer DRY standards
@@ -73,6 +75,14 @@ Examples:
 - MUST: Keep concrete compose files such as `compose.yml` and `docker-compose.yml` out of template repositories unless explicitly required
 - MUST: Prefer checked-in example variants for compose files (for example `compose.yml.example` and `docker-compose.yml.example`)
 - MUST: When creating compose examples, ensure real local compose filenames are included in ignore files
+- MUST: For Docker and Compose environment variables, prefix host-scoped values with "H_" and container-scoped values with "C_"
+- MUST: For Docker and Compose variable identifiers tied to services, use compact three-character service codes by default (for example "RTT", "ATA", "PAR"), unless an external interface or existing project convention requires otherwise
+- MUST: For Compose example files, keep top-level declaration order as used in existing project examples: "name", then any "x-*" extension blocks, then "secrets", then "services", then "networks", then "volumes" when present
+- MUST: Keep environment variables in ".env" or ".env.example" files; Compose files should reference variables rather than hardcoding values where practical
+- MUST: Group env variables by domain and keep group ordering consistent with Compose structure (versions/core first, host variables, container variables, per-service variables, then networks)
+- MUST: For service-scoped variables, use three-character uppercase service codes (for example "TFK", "ATA", "RTT"), and keep related variable blocks in the same service order used in Compose files
+- MUST: For network variables, use "C_NW_<SCOPE>" for base ranges and "C_NW_<SCOPE>_<SVC>" for service IP assignments
+- MUST: In service blocks, use this key order unless project constraints require otherwise: "image", "container_name", "hostname", "build", "init", "networks", "ports", "expose", "mem_limit", "deploy", "secrets", "<<", "environment", "command", "volumes", "labels", "cap_drop", "read_only", "restart", "depends_on"
 - MUST: Add `TODO.md` to baseline ignore files to keep local project task tracking out of version control unless explicitly requested
 - MUST: In ignore files, order declarations within each section as follows: 1) dot-prefixed entries (".name"), 2) wildcard entries ("*name"), 3) exact matches; and keep alphabetical order within each group
 - MUST: Use UPPER_SNAKE_CASE for variable names by default unless language-specific standards override this

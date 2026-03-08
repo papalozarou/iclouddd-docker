@@ -6,12 +6,12 @@
 set -eu
 
 # ------------------------------------------------------------------------------
-# This function reads a secret from a direct value or `_FILE` path.
+# This function reads a secret from a direct value or "_FILE" path.
 #
-# 1. "${1:?}" is the base variable name, for example `ICLOUD_EMAIL`.
+# 1. "${1:?}" is the base variable name, for example "ICLOUD_EMAIL".
 #
 # N.B.
-# `_FILE` convention aligns with container secret patterns:
+# "_FILE" convention aligns with container secret patterns:
 # https://docs.docker.com/compose/how-tos/use-secrets/
 #
 # The function exits non-zero when a declared secret file is missing.
@@ -43,7 +43,7 @@ readSecretVar() {
 # This function creates or updates the runtime user and group.
 #
 # N.B.
-# Runtime identity defaults to `1000:1000` and user `icloudbot`.
+# Runtime identity defaults to "1000:1000" and user "icloudbot".
 # ------------------------------------------------------------------------------
 configureUser() {
   PUID="${PUID:-1000}"

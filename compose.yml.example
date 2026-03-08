@@ -24,6 +24,7 @@ services:
       - alice_icloud_email
       - alice_icloud_password
     restart: unless-stopped
+    init: true
     cap_drop:
       - ALL
     security_opt:
@@ -53,6 +54,7 @@ services:
       - bob_icloud_email
       - bob_icloud_password
     restart: unless-stopped
+    init: true
     cap_drop:
       - ALL
     security_opt:

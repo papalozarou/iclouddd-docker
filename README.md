@@ -1,25 +1,25 @@
 # iCloud Drive Backup Container
 
-This project provides a minimal Alpine-based Docker container that runs as a non-root process and performs incremental iCloud Drive backups with Telegram-driven control and authentication prompts.
+This project provides an Alpine-based Docker container that performs
+incremental iCloud Drive backups with Telegram-driven control and
+authentication prompts. The example Compose setup runs two isolated worker
+services, one for Alice and one for Bob, with separate state, output, and log
+paths.
 
 ## Features
 
-- Alpine Linux image with a reduced runtime footprint.
-- Runtime user and group mapping via `PUID` and `PGID` (default `1000:1000`).
-- Container username support via `CONTAINER_USERNAME` for Telegram commands.
-- Docker secrets support for iCloud credentials and Telegram bot token.
-- Incremental backup driven by a manifest at `/config/manifest.json`.
-- One-off backup trigger with `<username> backup`.
-- MFA auth and reauth flows via `<username> auth` and `<username> reauth`.
-- Reauth reminders at 5 days and 2 days before the configured auth window ends.
-- Session persistence in `/config/session` and cookie persistence in `/config/cookies`.
-- Compatibility symlinks in `/config/icloudpd/{cookies,session}` for interoperability.
-- First-run safety net that samples local file permissions and blocks risky overwrite attempts.
-- Healthcheck based on heartbeat freshness, with required `microcheck` checks.
+- Multi-stage image build with a reduced runtime footprint.
+- Required `microcheck`-backed health checks with heartbeat age validation.
+- Runtime user and group mapping via container `PUID` and `PGID`.
+- Incremental sync model backed by `/config/manifest.json`.
+- Session persistence in `/config/session` and cookies in `/config/cookies`.
+- Compatibility symlinks in `/config/icloudpd/{cookies,session}`.
+- First-run safety net to detect risky local permission mismatches.
+- Telegram command handling for backup and authentication workflows.
 
 ## Telegram commands
 
-Send commands from the configured `TELEGRAM_CHAT_ID`:
+Send commands from the chat configured by `H_TG_CHAT_ID`.
 
 - `<username> backup`
 - `<username> auth`
@@ -29,44 +29,71 @@ Send commands from the configured `TELEGRAM_CHAT_ID`:
 
 `<username>` must match `CONTAINER_USERNAME`.
 
-## Runtime configuration
+## Configuration model
 
-Core environment variables:
+The Compose example uses:
 
-- `PUID`, default `1000`
-- `PGID`, default `1000`
-- `CONTAINER_USERNAME`, default `icloudbot`
-- `BACKUP_INTERVAL_MINUTES`, default `720`
-- `STARTUP_DELAY_SECONDS`, default `0`
-- `REAUTH_INTERVAL_DAYS`, default `30`
-- `TZ`, default `UTC` in the compose example (used for app timestamps and reauth timing calculations)
-- `TELEGRAM_CHAT_ID`
-- `TELEGRAM_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN_FILE`
-- `ICLOUD_EMAIL` or `ICLOUD_EMAIL_FILE`
-- `ICLOUD_PASSWORD` or `ICLOUD_PASSWORD_FILE`
-- `KEYCHAIN_SERVICE_NAME`, default `icloud-drive-backup`
+- Host-scoped variables prefixed with `H_`.
+- Container-scoped variables prefixed with `C_<SVC>_`.
+- Service codes `ICA` and `ICB` for the two workers in
+  `compose.yml.example`.
 
-Path overrides (optional):
+### Host-scoped variables (`H_`)
 
-- `CONFIG_DIR`, default `/config`
-- `OUTPUT_DIR`, default `/output`
-- `LOGS_DIR`, default `/logs`
-- `COOKIE_DIR`, default `/config/cookies`
-- `SESSION_DIR`, default `/config/session`
-- `ICLOUDPD_COMPAT_DIR`, default `/config/icloudpd`
+- `H_UID`, host user ID mapped into containers.
+- `H_GID`, host group ID mapped into containers.
+- `H_TZ`, timezone used by worker time calculations.
+- `H_TG_CHAT_ID`, Telegram chat ID accepted by command parser.
+
+### Service-scoped variables (`C_ICA_*`, `C_ICB_*`)
+
+- `C_<SVC>_CONTAINER_USERNAME`, command prefix and runtime username.
+- `C_<SVC>_BACKUP_INTERVAL_MINUTES`, scheduled backup interval.
+- `C_<SVC>_STARTUP_DELAY_SECONDS`, startup delay to spread API load.
+- `C_<SVC>_REAUTH_INTERVAL_DAYS`, reauthentication window length.
+- `C_<SVC>_TELEGRAM_BOT_TOKEN_FILE`, bot token secret path.
+- `C_<SVC>_ICLOUD_EMAIL_FILE`, iCloud email secret path.
+- `C_<SVC>_ICLOUD_PASSWORD_FILE`, iCloud password secret path.
+
+### Worker path defaults
+
+- `/config` for auth state, manifest, session, and cookie data.
+- `/output` for downloaded iCloud Drive files.
+- `/logs` for worker logs and health heartbeat files.
 
 ## Run with Docker Compose
 
-1. Create secret files in `./secrets/`.
-2. Set `TELEGRAM_CHAT_ID` in your shell or `.env`.
-3. Build and run:
+1. Copy `compose.yml.example` to `compose.yml` for local use.
+2. Copy `.env.example` to `.env` and set host/service values.
+3. Create secret files under `./secrets/`:
+   `telegram_bot_token.txt`, `alice_icloud_email.txt`,
+   `alice_icloud_password.txt`, `bob_icloud_email.txt`,
+   `bob_icloud_password.txt`.
+4. Build and run:
 
 ```bash
 docker compose up -d --build
 ```
 
+5. Check container and health status:
+
+```bash
+docker compose ps
+docker inspect --format='{{json .State.Health}}' icloud_alice
+docker inspect --format='{{json .State.Health}}' icloud_bob
+```
+
+## Runtime notes
+
+- Compose `init: true` is required by the provided service definitions.
+- Health checks require `microcheck`, bundled into the image build.
+- Telegram commands are ignored unless they come from `H_TG_CHAT_ID`.
+
 ## Safety net behaviour
 
-On first run only, the worker samples existing files in `/output` and checks whether permissions are consistent.
+On first run only, each worker samples existing files in `/output` and checks
+whether permissions are consistent.
 
-If mismatches are found, the backup is blocked and details are written to logs and sent via Telegram. This prevents accidental destructive rewrites over pre-existing backups created with different ownership/mode patterns.
+If mismatches are found, backup is blocked. Details are written to worker logs
+and sent via Telegram. This prevents destructive rewrites over existing backup
+trees created with different ownership or mode patterns.

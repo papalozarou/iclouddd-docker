@@ -5,7 +5,13 @@
 # binary fetch steps from the final runtime stage. Runtime data is externalised
 # via mounted volumes for configuration, backup output, and logs.
 # ------------------------------------------------------------------------------
-FROM alpine:3.20 AS python-deps
+
+# ------------------------------------------------------------------------------
+# Pin Alpine image tag and digest for reproducible builds.
+# ------------------------------------------------------------------------------
+ARG ALPINE_IMAGE=alpine:3.20@sha256:a4f4213abb84c497377b8544c81b3564f313746700372ec4fe84653e4fb03805
+
+FROM ${ALPINE_IMAGE} AS python-deps
 
 # ------------------------------------------------------------------------------
 # Install Python tooling to build an isolated virtual environment.
@@ -39,7 +45,15 @@ FROM ghcr.io/tarampampam/microcheck:${MCK_VER} AS microcheck
 # ------------------------------------------------------------------------------
 # Build the final runtime image with only required runtime dependencies.
 # ------------------------------------------------------------------------------
-FROM alpine:3.20
+FROM ${ALPINE_IMAGE}
+
+# ------------------------------------------------------------------------------
+# Add OCI metadata labels for image provenance and tooling integrations.
+# ------------------------------------------------------------------------------
+LABEL org.opencontainers.image.title="iCloud Drive Backup Container" \
+      org.opencontainers.image.description="Incremental iCloud Drive backups with Telegram control." \
+      org.opencontainers.image.source="https://github.com/papalozarou/iclouddd-docker" \
+      org.opencontainers.image.licenses="UNLICENSED"
 
 # ------------------------------------------------------------------------------
 # Configure Python runtime defaults for container-friendly behaviour.
@@ -81,7 +95,9 @@ COPY --from=microcheck /usr/local/bin/microcheck /usr/local/bin/microcheck
 # Copy worker application source code and operational scripts into the image.
 # ------------------------------------------------------------------------------
 COPY app /app/app
-COPY scripts /app/scripts
+COPY scripts/entrypoint.sh /app/scripts/entrypoint.sh
+COPY scripts/start.sh /app/scripts/start.sh
+COPY scripts/healthcheck.sh /app/scripts/healthcheck.sh
 
 # ------------------------------------------------------------------------------
 # Mark startup scripts as executable so entrypoint and launcher can run.

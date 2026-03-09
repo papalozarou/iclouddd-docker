@@ -1,0 +1,55 @@
+# Telegram
+
+## Command format
+
+Commands are only accepted from the chat ID configured in `H_TGM_CHAT_ID`.
+
+Supported command forms:
+
+- `<username> backup`
+- `<username> auth`
+- `<username> auth 123456`
+- `<username> reauth`
+- `<username> reauth 123456`
+
+N.B.
+
+`<username>` must match the container username for that worker service.
+
+## Authentication and reauthentication flow
+
+1. On startup, the worker attempts iCloud authentication using saved session
+   state and configured credentials.
+2. If MFA is required, the worker marks auth pending and sends a prompt.
+3. The user sends either `auth <code>` or `reauth <code>` via Telegram.
+4. If successful, pending auth state is cleared and normal backup flow resumes.
+
+## Password file behaviour
+
+`<SVC>_ICLOUD_PASSWORD_FILE` can hold either:
+
+- an Apple Account password; or
+- an app-specific password.
+
+The value is passed directly to `pyicloud`, and final auth/MFA handling still
+follows Apple account policy.
+
+## Outbound Telegram messages
+
+These are the messages currently emitted by the worker:
+
+- `Authentication successful.`
+- `MFA required. Send '<username> auth 123456' or '<username> reauth 123456'.`
+- `Authentication failed: <details>`
+- `Backup requested.`
+- `Backup starting.`
+- `Backup complete. Transferred <transferred>/<total>, skipped <skipped>, errors <errors>.`
+- `Send '<username> auth 123456' with your current MFA code.`
+- `Send '<username> reauth 123456' to complete reauthentication.`
+- `Backup skipped because authentication is incomplete.`
+- `Backup skipped because reauthentication is pending.`
+- `One-shot backup skipped because authentication is incomplete.`
+- `One-shot backup skipped because reauthentication is pending.`
+- `Reauthentication will be required within five days.`
+- `Reauth required in two days. Send '<username> reauth'.`
+- `Safety net blocked backup. Expected permissions <mode>. Mismatches:\n<mismatch lines>`

@@ -16,6 +16,20 @@ Runs backup every `<SVC>_BACKUP_INTERVAL_MINUTES`.
 
 Runs backup at `<SVC>_BACKUP_DAILY_TIME` local time each day.
 
+### `weekly` mode
+
+Runs backup on `<SVC>_SCHEDULE_WEEKDAY` at `<SVC>_BACKUP_DAILY_TIME`.
+
+### `twice_weekly` mode
+
+Runs backup on the two days in `<SVC>_SCHEDULE_WEEKDAYS` at
+`<SVC>_BACKUP_DAILY_TIME`.
+
+### `monthly` mode
+
+Runs backup on the `<SVC>_SCHEDULE_MONTHLY_WEEK` `<SVC>_SCHEDULE_WEEKDAY` of
+the month at `<SVC>_BACKUP_DAILY_TIME` (for example: `first monday`).
+
 ## Manual backup command behaviour
 
 If a user sends `<username> backup`, backup runs immediately.
@@ -24,8 +38,9 @@ After that run:
 
 - in `interval` mode, the next scheduled run is recalculated from command run
   time;
-- in `daily_time` mode, the next scheduled run stays pinned to the next local
-  `BACKUP_DAILY_TIME` slot.
+- in all calendar-based modes (`daily_time`, `weekly`, `twice_weekly`,
+  `monthly`), the next scheduled run stays pinned to the next valid calendar
+  slot for that mode.
 
 ## One-shot mode
 

@@ -18,7 +18,13 @@ install_dependency_stubs()
 from app.config import AppConfig
 from app.main import (
     calculate_next_daily_run_epoch,
+    calculate_next_monthly_run_epoch,
+    calculate_next_twice_weekly_run_epoch,
+    calculate_next_weekly_run_epoch,
+    get_monthly_weekday_day,
     parse_daily_time,
+    parse_weekday,
+    parse_weekday_list,
     process_reauth_reminders,
     reauth_days_left,
     validate_config,
@@ -48,6 +54,9 @@ def build_config(**OVERRIDES: object) -> AppConfig:
         run_once=False,
         schedule_mode="interval",
         backup_daily_time="02:00",
+        schedule_weekdays="monday,thursday",
+        schedule_weekday="monday",
+        schedule_monthly_week="first",
         backup_interval_minutes=1440,
         startup_delay_seconds=0,
         reauth_interval_days=30,
@@ -154,11 +163,14 @@ class TestMainValidation(unittest.TestCase):
 # This test confirms invalid schedule mode values are rejected.
 # --------------------------------------------------------------------------
     def test_validate_config_rejects_invalid_schedule_mode(self) -> None:
-        CONFIG = build_config(schedule_mode="weekly")
+        CONFIG = build_config(schedule_mode="yearly")
 
         ERRORS = validate_config(CONFIG)
 
-        self.assertIn("SCHEDULE_MODE must be either 'interval' or 'daily_time'.", ERRORS)
+        self.assertIn(
+            "SCHEDULE_MODE must be one of: interval, daily_time, weekly, twice_weekly, monthly.",
+            ERRORS,
+        )
 
 # --------------------------------------------------------------------------
 # This test confirms invalid daily-time values are rejected in daily mode.
@@ -185,6 +197,46 @@ class TestMainValidation(unittest.TestCase):
 
         self.assertEqual(ERRORS, [])
 
+# --------------------------------------------------------------------------
+# This test confirms weekly mode rejects invalid weekday values.
+# --------------------------------------------------------------------------
+    def test_validate_config_rejects_invalid_weekday(self) -> None:
+        CONFIG = build_config(schedule_mode="weekly", schedule_weekday="funday")
+
+        ERRORS = validate_config(CONFIG)
+
+        self.assertIn("SCHEDULE_WEEKDAY must be a valid weekday name.", ERRORS)
+
+# --------------------------------------------------------------------------
+# This test confirms twice-weekly mode requires two distinct weekdays.
+# --------------------------------------------------------------------------
+    def test_validate_config_rejects_invalid_twice_weekly_days(self) -> None:
+        CONFIG = build_config(schedule_mode="twice_weekly", schedule_weekdays="monday,monday")
+
+        ERRORS = validate_config(CONFIG)
+
+        self.assertIn(
+            "SCHEDULE_WEEKDAYS must contain exactly two distinct weekday names.",
+            ERRORS,
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms monthly mode rejects invalid monthly week tokens.
+# --------------------------------------------------------------------------
+    def test_validate_config_rejects_invalid_monthly_week(self) -> None:
+        CONFIG = build_config(
+            schedule_mode="monthly",
+            schedule_weekday="monday",
+            schedule_monthly_week="fifth",
+        )
+
+        ERRORS = validate_config(CONFIG)
+
+        self.assertIn(
+            "SCHEDULE_MONTHLY_WEEK must be one of: first, second, third, fourth, last.",
+            ERRORS,
+        )
+
 
 # ------------------------------------------------------------------------------
 # These tests verify daily schedule parsing and next-run timestamp logic.
@@ -201,6 +253,20 @@ class TestMainDailySchedule(unittest.TestCase):
 # --------------------------------------------------------------------------
     def test_parse_daily_time_invalid(self) -> None:
         self.assertIsNone(parse_daily_time("2pm"))
+
+# --------------------------------------------------------------------------
+# This test confirms weekday parsing handles valid and invalid values.
+# --------------------------------------------------------------------------
+    def test_parse_weekday(self) -> None:
+        self.assertEqual(parse_weekday("monday"), 0)
+        self.assertIsNone(parse_weekday("funday"))
+
+# --------------------------------------------------------------------------
+# This test confirms weekday list parsing enforces two distinct entries.
+# --------------------------------------------------------------------------
+    def test_parse_weekday_list(self) -> None:
+        self.assertEqual(parse_weekday_list("monday,thursday"), [0, 3])
+        self.assertIsNone(parse_weekday_list("monday,monday"))
 
 # --------------------------------------------------------------------------
 # This test confirms next daily run uses same-day target when still ahead.
@@ -222,6 +288,45 @@ class TestMainDailySchedule(unittest.TestCase):
         NEXT_EPOCH = calculate_next_daily_run_epoch(NOW, "02:00")
 
         EXPECTED = int(datetime(2026, 3, 11, 2, 0, 0, tzinfo=timezone.utc).timestamp())
+        self.assertEqual(NEXT_EPOCH, EXPECTED)
+
+# --------------------------------------------------------------------------
+# This test confirms weekly schedules target the requested weekday/time.
+# --------------------------------------------------------------------------
+    def test_calculate_next_weekly_run(self) -> None:
+        NOW = datetime(2026, 3, 10, 1, 30, 0, tzinfo=timezone.utc)  # Tuesday
+
+        NEXT_EPOCH = calculate_next_weekly_run_epoch(NOW, "thursday", "02:00")
+
+        EXPECTED = int(datetime(2026, 3, 12, 2, 0, 0, tzinfo=timezone.utc).timestamp())
+        self.assertEqual(NEXT_EPOCH, EXPECTED)
+
+# --------------------------------------------------------------------------
+# This test confirms twice-weekly schedules choose the nearest configured day.
+# --------------------------------------------------------------------------
+    def test_calculate_next_twice_weekly_run(self) -> None:
+        NOW = datetime(2026, 3, 10, 1, 30, 0, tzinfo=timezone.utc)  # Tuesday
+
+        NEXT_EPOCH = calculate_next_twice_weekly_run_epoch(NOW, "monday,thursday", "02:00")
+
+        EXPECTED = int(datetime(2026, 3, 12, 2, 0, 0, tzinfo=timezone.utc).timestamp())
+        self.assertEqual(NEXT_EPOCH, EXPECTED)
+
+# --------------------------------------------------------------------------
+# This test confirms monthly helper resolves first Monday correctly.
+# --------------------------------------------------------------------------
+    def test_get_monthly_weekday_day(self) -> None:
+        self.assertEqual(get_monthly_weekday_day(2026, 3, 0, "first"), 2)
+
+# --------------------------------------------------------------------------
+# This test confirms monthly schedules move to next month after passing target.
+# --------------------------------------------------------------------------
+    def test_calculate_next_monthly_run(self) -> None:
+        NOW = datetime(2026, 3, 3, 3, 0, 0, tzinfo=timezone.utc)
+
+        NEXT_EPOCH = calculate_next_monthly_run_epoch(NOW, "monday", "first", "02:00")
+
+        EXPECTED = int(datetime(2026, 4, 6, 2, 0, 0, tzinfo=timezone.utc).timestamp())
         self.assertEqual(NEXT_EPOCH, EXPECTED)
 
 

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,6 +20,25 @@ from app.state import AuthState, load_auth_state, load_manifest, now_iso, save_a
 from app.syncer import perform_incremental_sync, run_first_time_safety_net
 from app.telegram_bot import TelegramConfig, fetch_updates, parse_command, send_message
 from app.time_utils import now_local
+
+WEEKDAY_MAP = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+WEEKDAY_NAME_BY_INDEX = {VALUE: KEY for KEY, VALUE in WEEKDAY_MAP.items()}
+
+MONTHLY_WEEK_MAP = {
+    "first": 1,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+    "last": -1,
+}
 
 
 # ------------------------------------------------------------------------------
@@ -37,11 +57,29 @@ def validate_config(CONFIG: AppConfig) -> list[str]:
     if not CONFIG.icloud_password:
         ERRORS.append("ICLOUD_PASSWORD is required.")
 
-    if CONFIG.schedule_mode not in {"interval", "daily_time"}:
-        ERRORS.append("SCHEDULE_MODE must be either 'interval' or 'daily_time'.")
+    if CONFIG.schedule_mode not in {"interval", "daily_time", "weekly", "twice_weekly", "monthly"}:
+        ERRORS.append(
+            "SCHEDULE_MODE must be one of: interval, daily_time, weekly, twice_weekly, monthly."
+        )
 
     if CONFIG.schedule_mode == "daily_time" and parse_daily_time(CONFIG.backup_daily_time) is None:
         ERRORS.append("BACKUP_DAILY_TIME must use 24-hour HH:MM format.")
+
+    if CONFIG.schedule_mode == "weekly" and parse_weekday(CONFIG.schedule_weekday) is None:
+        ERRORS.append("SCHEDULE_WEEKDAY must be a valid weekday name.")
+
+    if CONFIG.schedule_mode == "twice_weekly" and parse_weekday_list(CONFIG.schedule_weekdays) is None:
+        ERRORS.append("SCHEDULE_WEEKDAYS must contain exactly two distinct weekday names.")
+
+    if CONFIG.schedule_mode == "monthly":
+        if parse_weekday(CONFIG.schedule_weekday) is None:
+            ERRORS.append("SCHEDULE_WEEKDAY must be a valid weekday name.")
+
+        if CONFIG.schedule_monthly_week not in MONTHLY_WEEK_MAP:
+            ERRORS.append("SCHEDULE_MONTHLY_WEEK must be one of: first, second, third, fourth, last.")
+
+        if parse_daily_time(CONFIG.backup_daily_time) is None:
+            ERRORS.append("BACKUP_DAILY_TIME must use 24-hour HH:MM format.")
 
     if (
         CONFIG.schedule_mode == "interval"
@@ -103,6 +141,41 @@ def parse_daily_time(VALUE: str) -> tuple[int, int] | None:
 
 
 # ------------------------------------------------------------------------------
+# This function parses weekday text to Python weekday index.
+#
+# 1. "VALUE" is weekday text.
+#
+# Returns: Integer weekday index where Monday is "0"; otherwise None.
+# ------------------------------------------------------------------------------
+def parse_weekday(VALUE: str) -> int | None:
+    return WEEKDAY_MAP.get(VALUE.strip().lower())
+
+
+# ------------------------------------------------------------------------------
+# This function parses two distinct weekdays for twice-weekly schedules.
+#
+# 1. "VALUE" is comma-separated weekday text list.
+#
+# Returns: Two-item weekday index list; otherwise None.
+# ------------------------------------------------------------------------------
+def parse_weekday_list(VALUE: str) -> list[int] | None:
+    PARTS = [ITEM.strip().lower() for ITEM in VALUE.split(",") if ITEM.strip()]
+
+    if len(PARTS) != 2:
+        return None
+
+    INDICES = [parse_weekday(PARTS[0]), parse_weekday(PARTS[1])]
+
+    if INDICES[0] is None or INDICES[1] is None:
+        return None
+
+    if INDICES[0] == INDICES[1]:
+        return None
+
+    return [INDICES[0], INDICES[1]]
+
+
+# ------------------------------------------------------------------------------
 # This function calculates next daily run epoch for a configured local time.
 #
 # 1. "NOW_LOCAL" is current configured-timezone datetime.
@@ -126,6 +199,167 @@ def calculate_next_daily_run_epoch(NOW_LOCAL: datetime, DAILY_TIME: str) -> int:
 
 
 # ------------------------------------------------------------------------------
+# This function calculates next weekly run epoch for weekday and time settings.
+#
+# 1. "NOW_LOCAL" is current configured-timezone datetime.
+# 2. "WEEKDAY_TEXT" is weekday name.
+# 3. "DAILY_TIME" is local schedule in "HH:MM" format.
+#
+# Returns: Epoch seconds for next scheduled run time.
+# ------------------------------------------------------------------------------
+def calculate_next_weekly_run_epoch(
+    NOW_LOCAL: datetime,
+    WEEKDAY_TEXT: str,
+    DAILY_TIME: str,
+) -> int:
+    TIME_PARTS = parse_daily_time(DAILY_TIME)
+    WEEKDAY = parse_weekday(WEEKDAY_TEXT)
+
+    if TIME_PARTS is None or WEEKDAY is None:
+        return int(NOW_LOCAL.timestamp())
+
+    HOUR, MINUTE = TIME_PARTS
+    DAYS_AHEAD = (WEEKDAY - NOW_LOCAL.weekday()) % 7
+    TARGET = (NOW_LOCAL + timedelta(days=DAYS_AHEAD)).replace(
+        hour=HOUR,
+        minute=MINUTE,
+        second=0,
+        microsecond=0,
+    )
+
+    if TARGET <= NOW_LOCAL:
+        TARGET = TARGET + timedelta(days=7)
+
+    return int(TARGET.timestamp())
+
+
+# ------------------------------------------------------------------------------
+# This function calculates next twice-weekly run epoch from weekday pair.
+#
+# 1. "NOW_LOCAL" is current configured-timezone datetime.
+# 2. "WEEKDAYS_TEXT" is comma-separated weekday list.
+# 3. "DAILY_TIME" is local schedule in "HH:MM" format.
+#
+# Returns: Epoch seconds for next scheduled run time.
+# ------------------------------------------------------------------------------
+def calculate_next_twice_weekly_run_epoch(
+    NOW_LOCAL: datetime,
+    WEEKDAYS_TEXT: str,
+    DAILY_TIME: str,
+) -> int:
+    WEEKDAYS = parse_weekday_list(WEEKDAYS_TEXT)
+
+    if WEEKDAYS is None:
+        return int(NOW_LOCAL.timestamp())
+
+    CANDIDATES = [
+        calculate_next_weekly_run_epoch(
+            NOW_LOCAL,
+            WEEKDAY_NAME_BY_INDEX[WEEKDAY],
+            DAILY_TIME,
+        )
+        for WEEKDAY in WEEKDAYS
+    ]
+    return min(CANDIDATES)
+
+
+# ------------------------------------------------------------------------------
+# This function returns calendar day number for nth weekday in a month.
+#
+# 1. "YEAR" and "MONTH" identify the month.
+# 2. "WEEKDAY" is weekday index where Monday is "0".
+# 3. "MONTHLY_WEEK_TEXT" is one of first/second/third/fourth/last.
+#
+# Returns: Day number in month; otherwise None.
+# ------------------------------------------------------------------------------
+def get_monthly_weekday_day(
+    YEAR: int,
+    MONTH: int,
+    WEEKDAY: int,
+    MONTHLY_WEEK_TEXT: str,
+) -> int | None:
+    WEEK_ORDER = MONTHLY_WEEK_MAP.get(MONTHLY_WEEK_TEXT.lower())
+
+    if WEEK_ORDER is None:
+        return None
+
+    _, DAYS_IN_MONTH = calendar.monthrange(YEAR, MONTH)
+
+    if WEEK_ORDER == -1:
+        DAY = DAYS_IN_MONTH
+
+        while DAY > 0:
+            if datetime(YEAR, MONTH, DAY).weekday() == WEEKDAY:
+                return DAY
+
+            DAY -= 1
+
+        return None
+
+    COUNT = 0
+    DAY = 1
+
+    while DAY <= DAYS_IN_MONTH:
+        if datetime(YEAR, MONTH, DAY).weekday() == WEEKDAY:
+            COUNT += 1
+
+            if COUNT == WEEK_ORDER:
+                return DAY
+
+        DAY += 1
+
+    return None
+
+
+# ------------------------------------------------------------------------------
+# This function calculates next monthly run epoch for weekday-in-month schedules.
+#
+# 1. "NOW_LOCAL" is current configured-timezone datetime.
+# 2. "WEEKDAY_TEXT" is weekday name.
+# 3. "MONTHLY_WEEK_TEXT" is ordinal week in month.
+# 4. "DAILY_TIME" is local schedule in "HH:MM" format.
+#
+# Returns: Epoch seconds for next scheduled run time.
+# ------------------------------------------------------------------------------
+def calculate_next_monthly_run_epoch(
+    NOW_LOCAL: datetime,
+    WEEKDAY_TEXT: str,
+    MONTHLY_WEEK_TEXT: str,
+    DAILY_TIME: str,
+) -> int:
+    TIME_PARTS = parse_daily_time(DAILY_TIME)
+    WEEKDAY = parse_weekday(WEEKDAY_TEXT)
+
+    if TIME_PARTS is None or WEEKDAY is None:
+        return int(NOW_LOCAL.timestamp())
+
+    HOUR, MINUTE = TIME_PARTS
+
+    for MONTH_OFFSET in [0, 1, 2]:
+        YEAR = NOW_LOCAL.year + ((NOW_LOCAL.month - 1 + MONTH_OFFSET) // 12)
+        MONTH = ((NOW_LOCAL.month - 1 + MONTH_OFFSET) % 12) + 1
+        DAY = get_monthly_weekday_day(YEAR, MONTH, WEEKDAY, MONTHLY_WEEK_TEXT)
+
+        if DAY is None:
+            continue
+
+        TARGET = NOW_LOCAL.replace(
+            year=YEAR,
+            month=MONTH,
+            day=DAY,
+            hour=HOUR,
+            minute=MINUTE,
+            second=0,
+            microsecond=0,
+        )
+
+        if TARGET > NOW_LOCAL:
+            return int(TARGET.timestamp())
+
+    return int(NOW_LOCAL.timestamp())
+
+
+# ------------------------------------------------------------------------------
 # This function returns next scheduled run epoch for active schedule mode.
 #
 # 1. "CONFIG" is runtime configuration.
@@ -136,6 +370,28 @@ def calculate_next_daily_run_epoch(NOW_LOCAL: datetime, DAILY_TIME: str) -> int:
 def get_next_run_epoch(CONFIG: AppConfig, NOW_EPOCH: int) -> int:
     if CONFIG.schedule_mode == "daily_time":
         return calculate_next_daily_run_epoch(now_local(), CONFIG.backup_daily_time)
+
+    if CONFIG.schedule_mode == "weekly":
+        return calculate_next_weekly_run_epoch(
+            now_local(),
+            CONFIG.schedule_weekday,
+            CONFIG.backup_daily_time,
+        )
+
+    if CONFIG.schedule_mode == "twice_weekly":
+        return calculate_next_twice_weekly_run_epoch(
+            now_local(),
+            CONFIG.schedule_weekdays,
+            CONFIG.backup_daily_time,
+        )
+
+    if CONFIG.schedule_mode == "monthly":
+        return calculate_next_monthly_run_epoch(
+            now_local(),
+            CONFIG.schedule_weekday,
+            CONFIG.schedule_monthly_week,
+            CONFIG.backup_daily_time,
+        )
 
     return NOW_EPOCH + (CONFIG.backup_interval_minutes * 60)
 
@@ -501,10 +757,10 @@ def main() -> int:
     NEXT_UPDATE_OFFSET: int | None = None
     INITIAL_EPOCH = int(time.time())
 
-    if CONFIG.schedule_mode == "daily_time":
-        NEXT_RUN_EPOCH = calculate_next_daily_run_epoch(now_local(), CONFIG.backup_daily_time)
-    else:
+    if CONFIG.schedule_mode == "interval":
         NEXT_RUN_EPOCH = INITIAL_EPOCH
+    else:
+        NEXT_RUN_EPOCH = get_next_run_epoch(CONFIG, INITIAL_EPOCH)
 
     while True:
         update_heartbeat(CONFIG.heartbeat_path)

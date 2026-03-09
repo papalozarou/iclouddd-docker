@@ -47,15 +47,14 @@ These are usually left as-is unless you have a specific reason to change them.
   `1440`).
 - `<SVC>_BACKUP_DAILY_TIME`: local run time in `HH:MM` 24-hour format
   (default `02:00`).
-- `<SVC>_SCHEDULE_WEEKDAY`: single weekday name (`monday`..`sunday`).
-- `<SVC>_SCHEDULE_WEEKDAYS`: two comma-separated distinct weekday names,
-  for example `monday,thursday`.
+- `<SVC>_SCHEDULE_WEEKDAYS`: comma-separated weekday names.
+  Use one day for `weekly` mode, or two distinct days for `twice_weekly`
+  mode, and one day for `monthly` mode, for example `monday` or
+  `monday,thursday`.
 - `<SVC>_SCHEDULE_MONTHLY_WEEK`: one of `first`, `second`, `third`, `fourth`,
   `last`.
 - `<SVC>_RUN_ONCE`: run one backup pass and exit (`true`/`false`, default
   `false`).
-- `<SVC>_STARTUP_DELAY_SECONDS`: startup delay to spread API load (defaults:
-  Alice `15`, Bob `60`).
 - `<SVC>_REAUTH_INTERVAL_DAYS`: reauthentication window (default `30`).
 
 N.B.

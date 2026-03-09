@@ -19,7 +19,7 @@ paths.
 
 ## Telegram commands
 
-Send commands from the chat configured by `H_TG_CHAT_ID`.
+Send commands from the chat configured by `H_TGM_CHAT_ID`.
 
 - `<username> backup`
 - `<username> auth`
@@ -34,26 +34,36 @@ Send commands from the chat configured by `H_TG_CHAT_ID`.
 The Compose example uses:
 
 - Host-scoped variables prefixed with `H_`.
-- Container-scoped variables prefixed with `C_<SVC>_`.
-- Service codes `ICA` and `ICB` for the two workers in
-  `compose.yml.example`.
+- Shared container variables prefixed with `C_`.
+- Service-specific variables prefixed with `ALICE_` and `BOB_`.
 
 ### Host-scoped variables (`H_`)
 
 - `H_UID`, host user ID mapped into containers.
 - `H_GID`, host group ID mapped into containers.
 - `H_TZ`, timezone used by worker time calculations.
-- `H_TG_CHAT_ID`, Telegram chat ID accepted by command parser.
+- `H_TGM_CHAT_ID`, Telegram chat ID accepted by command parser.
+- `H_DKR_SECRETS`, host path used for Docker secret source files.
 
-### Service-scoped variables (`C_ICA_*`, `C_ICB_*`)
+### Shared container variables (`C_`)
 
-- `C_<SVC>_CONTAINER_USERNAME`, command prefix and runtime username.
-- `C_<SVC>_BACKUP_INTERVAL_MINUTES`, scheduled backup interval.
-- `C_<SVC>_STARTUP_DELAY_SECONDS`, startup delay to spread API load.
-- `C_<SVC>_REAUTH_INTERVAL_DAYS`, reauthentication window length.
-- `C_<SVC>_TELEGRAM_BOT_TOKEN_FILE`, bot token secret path.
-- `C_<SVC>_ICLOUD_EMAIL_FILE`, iCloud email secret path.
-- `C_<SVC>_ICLOUD_PASSWORD_FILE`, iCloud password secret path.
+- `C_UID`, container user ID mapped from host.
+- `C_GID`, container group ID mapped from host.
+- `C_DKR_SECRETS`, in-container secret path root for `_FILE` variables.
+
+### Service-scoped variables (`ALICE_*`, `BOB_*`)
+
+- `<SVC>_CONTAINER_USERNAME`, command prefix and runtime username.
+- `<SVC>_BACKUP_INTERVAL_MINUTES`, scheduled backup interval.
+- `<SVC>_STARTUP_DELAY_SECONDS`, startup delay to spread API load.
+- `<SVC>_REAUTH_INTERVAL_DAYS`, reauthentication window length.
+- `<SVC>_TELEGRAM_BOT_TOKEN_FILE`, bot token secret path.
+- `<SVC>_ICLOUD_EMAIL_FILE`, iCloud email secret path.
+- `<SVC>_ICLOUD_PASSWORD_FILE`, iCloud password secret path.
+
+### Build variables
+
+- `ALP_VER`, Alpine base image version passed as a Compose build argument.
 
 ### Worker path defaults
 
@@ -65,7 +75,8 @@ The Compose example uses:
 
 1. Copy `compose.yml.example` to `compose.yml` for local use.
 2. Copy `.env.example` to `.env` and set host/service values.
-3. Create secret files under `./secrets/`:
+3. Create secret files under `${H_DKR_SECRETS}` (default
+   `/var/lib/docker/secrets`):
    `telegram_bot_token.txt`, `alice_icloud_email.txt`,
    `alice_icloud_password.txt`, `bob_icloud_email.txt`,
    `bob_icloud_password.txt`.
@@ -87,7 +98,24 @@ docker inspect --format='{{json .State.Health}}' icloud_bob
 
 - Compose `init: true` is required by the provided service definitions.
 - Health checks require `microcheck`, bundled into the image build.
-- Telegram commands are ignored unless they come from `H_TG_CHAT_ID`.
+- Telegram commands are ignored unless they come from `H_TGM_CHAT_ID`.
+
+## First-run authentication behaviour
+
+On startup, each worker attempts iCloud authentication immediately using the
+configured credentials and persisted session/cookie state under `/config`.
+
+If authentication requires MFA, the worker sends a Telegram prompt and marks
+authentication as pending. Backups are skipped while authentication is
+incomplete.
+
+To complete MFA, send one of:
+
+- `<username> auth 123456`
+- `<username> reauth 123456`
+
+When authentication succeeds, the worker clears pending auth state and resumes
+scheduled or manually requested backups.
 
 ## Safety net behaviour
 

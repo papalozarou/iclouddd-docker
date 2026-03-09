@@ -9,7 +9,8 @@
 # ------------------------------------------------------------------------------
 # Pin Alpine image tag and digest for reproducible builds.
 # ------------------------------------------------------------------------------
-ARG ALPINE_IMAGE=alpine:3.20@sha256:a4f4213abb84c497377b8544c81b3564f313746700372ec4fe84653e4fb03805
+ARG ALP_VER
+ARG ALPINE_IMAGE=alpine:${ALP_VER}
 
 FROM ${ALPINE_IMAGE} AS python-deps
 

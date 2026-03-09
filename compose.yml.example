@@ -59,7 +59,10 @@ services:
 # ------------------------------------------------------------------------------
   icloud_alice:
     container_name: icloud_alice
-    build: .
+    build:
+      context: .
+      args:
+        ALP_VER: "${ALP_VER}"
     init: true
     secrets:
       - telegram_bot_token
@@ -88,7 +91,10 @@ services:
 # ------------------------------------------------------------------------------
   icloud_bob:
     container_name: icloud_bob
-    build: .
+    build:
+      context: .
+      args:
+        ALP_VER: "${ALP_VER}"
     init: true
     secrets:
       - telegram_bot_token

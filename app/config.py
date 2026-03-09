@@ -21,6 +21,8 @@ class AppConfig:
     telegram_chat_id: str
     keychain_service_name: str
     run_once: bool
+    schedule_mode: str
+    backup_daily_time: str
     backup_interval_minutes: int
     startup_delay_seconds: int
     reauth_interval_days: int
@@ -120,6 +122,8 @@ def load_config() -> AppConfig:
         telegram_chat_id=env_value("TELEGRAM_CHAT_ID"),
         keychain_service_name=env_value("KEYCHAIN_SERVICE_NAME", "icloud-drive-backup"),
         run_once=env_bool("RUN_ONCE", False),
+        schedule_mode=env_value("SCHEDULE_MODE", "interval").lower(),
+        backup_daily_time=env_value("BACKUP_DAILY_TIME", "02:00"),
         backup_interval_minutes=env_int("BACKUP_INTERVAL_MINUTES", 1440),
         startup_delay_seconds=env_int("STARTUP_DELAY_SECONDS", 0),
         reauth_interval_days=env_int("REAUTH_INTERVAL_DAYS", 30),

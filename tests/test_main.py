@@ -16,7 +16,13 @@ from tests._stubs import install_dependency_stubs
 install_dependency_stubs()
 
 from app.config import AppConfig
-from app.main import process_reauth_reminders, reauth_days_left, validate_config
+from app.main import (
+    calculate_next_daily_run_epoch,
+    parse_daily_time,
+    process_reauth_reminders,
+    reauth_days_left,
+    validate_config,
+)
 from app.state import AuthState
 from app.telegram_bot import TelegramConfig
 
@@ -40,6 +46,8 @@ def build_config(**OVERRIDES: object) -> AppConfig:
         telegram_chat_id="12345",
         keychain_service_name="icloud-drive-backup",
         run_once=False,
+        schedule_mode="interval",
+        backup_daily_time="02:00",
         backup_interval_minutes=1440,
         startup_delay_seconds=0,
         reauth_interval_days=30,
@@ -141,6 +149,80 @@ class TestMainValidation(unittest.TestCase):
         ERRORS = validate_config(CONFIG)
 
         self.assertEqual(ERRORS, [])
+
+# --------------------------------------------------------------------------
+# This test confirms invalid schedule mode values are rejected.
+# --------------------------------------------------------------------------
+    def test_validate_config_rejects_invalid_schedule_mode(self) -> None:
+        CONFIG = build_config(schedule_mode="weekly")
+
+        ERRORS = validate_config(CONFIG)
+
+        self.assertIn("SCHEDULE_MODE must be either 'interval' or 'daily_time'.", ERRORS)
+
+# --------------------------------------------------------------------------
+# This test confirms invalid daily-time values are rejected in daily mode.
+# --------------------------------------------------------------------------
+    def test_validate_config_rejects_invalid_daily_time(self) -> None:
+        CONFIG = build_config(schedule_mode="daily_time", backup_daily_time="25:61")
+
+        ERRORS = validate_config(CONFIG)
+
+        self.assertIn("BACKUP_DAILY_TIME must use 24-hour HH:MM format.", ERRORS)
+
+# --------------------------------------------------------------------------
+# This test confirms daily mode does not require interval minimum.
+# --------------------------------------------------------------------------
+    def test_validate_config_allows_zero_interval_in_daily_mode(self) -> None:
+        CONFIG = build_config(
+            run_once=False,
+            schedule_mode="daily_time",
+            backup_daily_time="02:00",
+            backup_interval_minutes=0,
+        )
+
+        ERRORS = validate_config(CONFIG)
+
+        self.assertEqual(ERRORS, [])
+
+
+# ------------------------------------------------------------------------------
+# These tests verify daily schedule parsing and next-run timestamp logic.
+# ------------------------------------------------------------------------------
+class TestMainDailySchedule(unittest.TestCase):
+# --------------------------------------------------------------------------
+# This test confirms "HH:MM" parsing accepts valid 24-hour values.
+# --------------------------------------------------------------------------
+    def test_parse_daily_time_valid(self) -> None:
+        self.assertEqual(parse_daily_time("02:30"), (2, 30))
+
+# --------------------------------------------------------------------------
+# This test confirms invalid daily-time text is rejected.
+# --------------------------------------------------------------------------
+    def test_parse_daily_time_invalid(self) -> None:
+        self.assertIsNone(parse_daily_time("2pm"))
+
+# --------------------------------------------------------------------------
+# This test confirms next daily run uses same-day target when still ahead.
+# --------------------------------------------------------------------------
+    def test_calculate_next_daily_run_same_day(self) -> None:
+        NOW = datetime(2026, 3, 10, 1, 30, 0, tzinfo=timezone.utc)
+
+        NEXT_EPOCH = calculate_next_daily_run_epoch(NOW, "02:00")
+
+        EXPECTED = int(datetime(2026, 3, 10, 2, 0, 0, tzinfo=timezone.utc).timestamp())
+        self.assertEqual(NEXT_EPOCH, EXPECTED)
+
+# --------------------------------------------------------------------------
+# This test confirms next daily run rolls to tomorrow when time has passed.
+# --------------------------------------------------------------------------
+    def test_calculate_next_daily_run_next_day(self) -> None:
+        NOW = datetime(2026, 3, 10, 3, 0, 0, tzinfo=timezone.utc)
+
+        NEXT_EPOCH = calculate_next_daily_run_epoch(NOW, "02:00")
+
+        EXPECTED = int(datetime(2026, 3, 11, 2, 0, 0, tzinfo=timezone.utc).timestamp())
+        self.assertEqual(NEXT_EPOCH, EXPECTED)
 
 
 if __name__ == "__main__":

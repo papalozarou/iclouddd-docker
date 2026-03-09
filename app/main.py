@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import time
 
@@ -37,7 +37,17 @@ def validate_config(CONFIG: AppConfig) -> list[str]:
     if not CONFIG.icloud_password:
         ERRORS.append("ICLOUD_PASSWORD is required.")
 
-    if not CONFIG.run_once and CONFIG.backup_interval_minutes < 1:
+    if CONFIG.schedule_mode not in {"interval", "daily_time"}:
+        ERRORS.append("SCHEDULE_MODE must be either 'interval' or 'daily_time'.")
+
+    if CONFIG.schedule_mode == "daily_time" and parse_daily_time(CONFIG.backup_daily_time) is None:
+        ERRORS.append("BACKUP_DAILY_TIME must use 24-hour HH:MM format.")
+
+    if (
+        CONFIG.schedule_mode == "interval"
+        and not CONFIG.run_once
+        and CONFIG.backup_interval_minutes < 1
+    ):
         ERRORS.append(
             "BACKUP_INTERVAL_MINUTES must be at least 1 when RUN_ONCE is false."
         )
@@ -60,6 +70,74 @@ def parse_iso(VALUE: str) -> datetime:
         return date_parser.isoparse(VALUE)
     except (TypeError, ValueError, OverflowError):
         return datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+# ------------------------------------------------------------------------------
+# This function parses a daily schedule time in 24-hour "HH:MM" format.
+#
+# 1. "VALUE" is time text to parse.
+#
+# Returns: Tuple "(hour, minute)" when valid; otherwise None.
+# ------------------------------------------------------------------------------
+def parse_daily_time(VALUE: str) -> tuple[int, int] | None:
+    PARTS = VALUE.strip().split(":")
+
+    if len(PARTS) != 2:
+        return None
+
+    HOUR_TEXT, MINUTE_TEXT = PARTS
+
+    if not HOUR_TEXT.isdigit() or not MINUTE_TEXT.isdigit():
+        return None
+
+    HOUR = int(HOUR_TEXT)
+    MINUTE = int(MINUTE_TEXT)
+
+    if HOUR < 0 or HOUR > 23:
+        return None
+
+    if MINUTE < 0 or MINUTE > 59:
+        return None
+
+    return HOUR, MINUTE
+
+
+# ------------------------------------------------------------------------------
+# This function calculates next daily run epoch for a configured local time.
+#
+# 1. "NOW_LOCAL" is current configured-timezone datetime.
+# 2. "DAILY_TIME" is local schedule in "HH:MM" format.
+#
+# Returns: Epoch seconds for next scheduled run time.
+# ------------------------------------------------------------------------------
+def calculate_next_daily_run_epoch(NOW_LOCAL: datetime, DAILY_TIME: str) -> int:
+    PARSED = parse_daily_time(DAILY_TIME)
+
+    if PARSED is None:
+        return int(NOW_LOCAL.timestamp())
+
+    HOUR, MINUTE = PARSED
+    TARGET = NOW_LOCAL.replace(hour=HOUR, minute=MINUTE, second=0, microsecond=0)
+
+    if TARGET <= NOW_LOCAL:
+        TARGET = TARGET + timedelta(days=1)
+
+    return int(TARGET.timestamp())
+
+
+# ------------------------------------------------------------------------------
+# This function returns next scheduled run epoch for active schedule mode.
+#
+# 1. "CONFIG" is runtime configuration.
+# 2. "NOW_EPOCH" is current epoch timestamp.
+#
+# Returns: Epoch seconds for next scheduled backup execution.
+# ------------------------------------------------------------------------------
+def get_next_run_epoch(CONFIG: AppConfig, NOW_EPOCH: int) -> int:
+    if CONFIG.schedule_mode == "daily_time":
+        return calculate_next_daily_run_epoch(now_local(), CONFIG.backup_daily_time)
+
+    return NOW_EPOCH + (CONFIG.backup_interval_minutes * 60)
 
 
 # ------------------------------------------------------------------------------
@@ -421,7 +499,12 @@ def main() -> int:
 
     BACKUP_REQUESTED = False
     NEXT_UPDATE_OFFSET: int | None = None
-    NEXT_RUN_EPOCH = int(time.time())
+    INITIAL_EPOCH = int(time.time())
+
+    if CONFIG.schedule_mode == "daily_time":
+        NEXT_RUN_EPOCH = calculate_next_daily_run_epoch(now_local(), CONFIG.backup_daily_time)
+    else:
+        NEXT_RUN_EPOCH = INITIAL_EPOCH
 
     while True:
         update_heartbeat(CONFIG.heartbeat_path)
@@ -457,7 +540,7 @@ def main() -> int:
             time.sleep(5)
             continue
 
-        NEXT_RUN_EPOCH = NOW_EPOCH + (CONFIG.backup_interval_minutes * 60)
+        NEXT_RUN_EPOCH = get_next_run_epoch(CONFIG, NOW_EPOCH)
 
         if not IS_AUTHENTICATED:
             notify(TELEGRAM, "Backup skipped because authentication is incomplete.")

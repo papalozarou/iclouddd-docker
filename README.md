@@ -57,7 +57,11 @@ The Compose example uses:
 - `<SVC>_OUTPUT_PATH`, host path mounted to `/output`.
 - `<SVC>_LOGS_PATH`, host path mounted to `/logs`.
 - `<SVC>_BACKUP_INTERVAL_MINUTES`, scheduled backup interval in minutes
-  (default `1440`).
+  (default `1440`, used when `<SVC>_SCHEDULE_MODE=interval`).
+- `<SVC>_SCHEDULE_MODE`, backup schedule type:
+  `interval` or `daily_time` (default `interval`).
+- `<SVC>_BACKUP_DAILY_TIME`, pinned local backup time in `HH:MM` 24-hour
+  format (default `02:00`, used when `<SVC>_SCHEDULE_MODE=daily_time`).
 - `<SVC>_RUN_ONCE`, run one backup pass and exit when set to `true`
   (default `false`).
 - `<SVC>_STARTUP_DELAY_SECONDS`, startup delay to spread API load
@@ -140,6 +144,9 @@ docker inspect --format='{{json .State.Health}}' icloud_bob
 - Compose `init: true` is required by the provided service definitions.
 - Health checks require `microcheck`, bundled into the image build.
 - Telegram commands are ignored unless they come from `H_TGM_CHAT_ID`.
+- Schedule behaviour:
+  - `interval` mode runs backups every `<SVC>_BACKUP_INTERVAL_MINUTES`.
+  - `daily_time` mode runs backups at `<SVC>_BACKUP_DAILY_TIME` local time.
 - One-shot mode is enabled per service with `<SVC>_RUN_ONCE=true`.
 - For one-shot runs, use `restart: "no"` to avoid automatic restarts.
 - In one-shot mode, the container exits after a single backup attempt.

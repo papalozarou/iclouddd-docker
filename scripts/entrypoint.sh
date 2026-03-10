@@ -45,16 +45,4 @@ readSecretVar TELEGRAM_BOT_TOKEN
 readSecretVar TELEGRAM_CHAT_ID
 
 CONTAINER_USERNAME="${CONTAINER_USERNAME:-icloudbot}"
-TARGET_UID="${PUID:-1000}"
-TARGET_GID="${PGID:-1000}"
-
-if [ "$(id -u)" -ne 0 ]; then
-  exec /app/scripts/start.sh "$CONTAINER_USERNAME"
-fi
-
-if ! command -v su-exec >/dev/null 2>&1; then
-  echo "su-exec is required but not installed in the image." >&2
-  exit 1
-fi
-
-exec su-exec "${TARGET_UID}:${TARGET_GID}" /app/scripts/start.sh "$CONTAINER_USERNAME"
+exec /app/scripts/start.sh "$CONTAINER_USERNAME"

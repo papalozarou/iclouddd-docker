@@ -5,17 +5,14 @@
 - Compose `init: true` is required by the provided service definitions.
 - Health checks use `parallel` from the microcheck toolbox image.
 - Telegram commands are ignored unless they come from `H_TGM_CHAT_ID`.
-- Entrypoint starts as root only to read Docker secret files, then drops to
-  `PUID:PGID` before launching the worker process.
-- Services keep `cap_drop: ALL` and add only `SETUID` and `SETGID` so
-  privilege drop works.
+- Secret files are bind-mounted read-only from `H_DKR_SECRETS` to
+  `${C_DKR_SECRETS}`.
 
 ## Privilege model
 
 - Worker runtime is non-root.
-- Root is used at startup only for secret file access under `/run/secrets`.
-- If your Docker runtime blocks group switching (`setgroups`), startup can fail
-  during the privilege drop step.
+- Services start as `C_UID:C_GID` and stay at that identity.
+- No runtime privilege drop step is used.
 
 ## Scheduling
 

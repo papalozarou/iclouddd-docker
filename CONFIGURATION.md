@@ -20,12 +20,19 @@ Start here first.
 - `H_DKR_SECRETS`: host path containing source secret files.
 - `H_DATA_PATH`: base host path for service data directories.
 
+## Runtime identity mapping
+
+These are usually left as-is unless you need explicit UID or GID mapping.
+
+- `C_UID`: source UID value in `.env` (normally mirrors `H_UID`).
+- `C_GID`: source GID value in `.env` (normally mirrors `H_GID`).
+- Compose maps `PUID=${C_UID}` and `PGID=${C_GID}` into each service.
+- Entrypoint drops from root to `PUID:PGID` before starting the worker.
+
 ## Shared container variables (`C_`)
 
 These are usually left as-is unless you have a specific reason to change them.
 
-- `C_UID`: container user ID (normally mirrors `H_UID`).
-- `C_GID`: container group ID (normally mirrors `H_GID`).
 - `C_DKR_SECRETS`: in-container secret root used by `_FILE` env vars.
 
 ## Service variables (`ALICE_*`, `BOB_*`)
@@ -64,10 +71,10 @@ For scheduling compatibility and mode-specific behaviour, see
 
 ## Build variable
 
+- `IMG_NAME`: image repository/name used for service image tags, with
+  `:alpine-${ALP_VER}` appended in Compose.
 - `ALP_VER`: Alpine base image version used during Docker build.
 - `MCK_VER`: Microcheck image version used during Docker build.
-- `H_IMG_NAME`: image repository/name used for service image tags, with
-  `:alpine-${ALP_VER}` appended in Compose.
 
 ## Default container paths
 

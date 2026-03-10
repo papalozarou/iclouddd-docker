@@ -89,6 +89,8 @@ ALICE_SCHEDULE_BACKUP_TIME=02:00
 - `RUN_ONCE=true`
   - Works with any `SCHEDULE_MODE` value.
   - Recurring schedule settings are not used for repeated runs.
+  - Set `<SVC>_RESTART_POLICY=no` so Compose does not restart the one-shot
+    container after completion.
 
 - `SCHEDULE_MODE=interval`
   - Uses: `SCHEDULE_INTERVAL_MINUTES`.

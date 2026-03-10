@@ -62,6 +62,8 @@ These are usually left as-is unless you have a specific reason to change them.
   `last`.
 - `<SVC>_RUN_ONCE`: run one backup pass and exit (`true`/`false`, default
   `false`).
+- `<SVC>_RESTART_POLICY`: Compose restart policy for the service, for example
+  `unless-stopped` or `no`.
 - `<SVC>_REAUTH_INTERVAL_DAYS`: reauthentication window (default `30`).
 
 ## Logging

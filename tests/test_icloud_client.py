@@ -294,6 +294,38 @@ class TestICloudClientTraversal(unittest.TestCase):
             self.assertEqual(len(RESULT["dirs"]), 1)
             self.assertEqual(len(RESULT["files"]), 1)
 
+    def test_node_dir_supports_children_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            NODE = FakeNode(
+                {
+                    "children": [
+                        {"filename": "docs", "type": "folder", "modified": "d1"},
+                        {"filename": "d.txt", "type": "file", "bytes": 4, "modified": "d2"},
+                    ]
+                }
+            )
+
+            RESULT = CLIENT._node_dir(NODE)
+
+            self.assertEqual(len(RESULT["dirs"]), 1)
+            self.assertEqual(len(RESULT["files"]), 1)
+
+    def test_entries_from_files_supports_filename_and_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            RESULT = CLIENT._entries_from_files(
+                "",
+                [{"filename": "x.bin", "bytes": "9", "modified": "m"}],
+            )
+
+            self.assertEqual(len(RESULT), 1)
+            self.assertEqual(RESULT[0].path, "x.bin")
+            self.assertEqual(RESULT[0].size, 9)
+            self.assertEqual(RESULT[0].modified, "m")
+
 
 # ------------------------------------------------------------------------------
 # These tests validate download-path resolution and local write helpers.

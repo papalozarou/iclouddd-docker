@@ -268,12 +268,13 @@ class ICloudDriveClient:
                 "files": PAYLOAD.get("files", []),
             }
 
-        ITEMS = PAYLOAD.get("items")
+        for KEY in ("items", "children", "entries", "contents"):
+            ITEMS = PAYLOAD.get(KEY)
 
-        if not isinstance(ITEMS, list):
-            return {"dirs": [], "files": []}
+            if isinstance(ITEMS, list):
+                return self._normalise_items_payload(ITEMS)
 
-        return self._normalise_items_payload(ITEMS)
+        return {"dirs": [], "files": []}
 
 # --------------------------------------------------------------------------
 # This function splits mixed item payloads into canonical directories/files.
@@ -290,9 +291,12 @@ class ICloudDriveClient:
             if not isinstance(ITEM, dict):
                 continue
 
-            ITEM_TYPE = str(ITEM.get("type", ITEM.get("item_type", ""))).lower()
+            ITEM_TYPE = str(
+                ITEM.get("type", ITEM.get("item_type", ITEM.get("itemType", "")))
+            ).lower()
             IS_DIR = bool(ITEM.get("isFolder", False))
             IS_DIR = IS_DIR or ITEM_TYPE in {"folder", "directory", "dir"}
+            IS_DIR = IS_DIR or bool(ITEM.get("is_folder", False))
 
             if IS_DIR:
                 DIRS.append(ITEM)
@@ -321,7 +325,7 @@ class ICloudDriveClient:
         RESULT: list[RemoteEntry] = []
 
         for ITEM in DIRS:
-            NAME = str(ITEM.get("name", ""))
+            NAME = self._item_name(ITEM)
 
             if not NAME:
                 continue
@@ -332,7 +336,7 @@ class ICloudDriveClient:
                     path=RELATIVE_PATH,
                     is_dir=True,
                     size=0,
-                    modified=str(ITEM.get("dateModified", "")),
+                    modified=self._item_modified(ITEM),
                 )
             )
 
@@ -357,14 +361,14 @@ class ICloudDriveClient:
         RESULT: list[RemoteEntry] = []
 
         for ITEM in FILES:
-            NAME = str(ITEM.get("name", ""))
+            NAME = self._item_name(ITEM)
 
             if not NAME:
                 continue
 
             RELATIVE_PATH = f"{CURRENT_PATH}/{NAME}".strip("/")
-            SIZE = int(ITEM.get("size") or 0)
-            MODIFIED = str(ITEM.get("dateModified", ""))
+            SIZE = self._item_size(ITEM)
+            MODIFIED = self._item_modified(ITEM)
             RESULT.append(
                 RemoteEntry(
                     path=RELATIVE_PATH,
@@ -375,6 +379,61 @@ class ICloudDriveClient:
             )
 
         return RESULT
+
+# --------------------------------------------------------------------------
+# This function extracts a filesystem name from varied pyicloud item shapes.
+#
+# 1. "ITEM" is a metadata dictionary for a drive node.
+#
+# Returns: Item name string, or empty string when missing.
+# --------------------------------------------------------------------------
+    def _item_name(self, ITEM: dict[str, Any]) -> str:
+        for KEY in ("name", "filename", "displayName", "title"):
+            VALUE = str(ITEM.get(KEY, "")).strip()
+
+            if VALUE:
+                return VALUE
+
+        return ""
+
+# --------------------------------------------------------------------------
+# This function extracts a modified timestamp from metadata variants.
+#
+# 1. "ITEM" is a metadata dictionary for a drive node.
+#
+# Returns: Modified timestamp string, or empty string.
+# --------------------------------------------------------------------------
+    def _item_modified(self, ITEM: dict[str, Any]) -> str:
+        for KEY in ("dateModified", "modified", "date_modified"):
+            VALUE = str(ITEM.get(KEY, "")).strip()
+
+            if VALUE:
+                return VALUE
+
+        return ""
+
+# --------------------------------------------------------------------------
+# This function extracts item byte size with robust integer fallback.
+#
+# 1. "ITEM" is a metadata dictionary for a drive node.
+#
+# Returns: Non-negative file size.
+# --------------------------------------------------------------------------
+    def _item_size(self, ITEM: dict[str, Any]) -> int:
+        for KEY in ("size", "bytes", "itemSize"):
+            RAW_VALUE = ITEM.get(KEY)
+
+            if RAW_VALUE is None:
+                continue
+
+            try:
+                VALUE = int(RAW_VALUE)
+            except (TypeError, ValueError):
+                continue
+
+            return VALUE if VALUE >= 0 else 0
+
+        return 0
 
 # --------------------------------------------------------------------------
 # This function safely resolves a named child node from a drive node.

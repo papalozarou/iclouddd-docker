@@ -124,8 +124,9 @@ class TestICloudClientAuth(unittest.TestCase):
             CLIENT = ICloudDriveClient(CONFIG)
             API = Mock()
 
-            with patch("app.icloud_client.PyiCloudService", return_value=API) as SERVICE:
-                RESULT = CLIENT._create_service()
+            with patch.object(CLIENT, "_supports_session_directory", return_value=True):
+                with patch("app.icloud_client.PyiCloudService", return_value=API) as SERVICE:
+                    RESULT = CLIENT._create_service()
 
             self.assertIs(RESULT, API)
             SERVICE.assert_called_once_with(
@@ -135,31 +136,40 @@ class TestICloudClientAuth(unittest.TestCase):
                 session_directory=str(CONFIG.session_dir),
             )
 
-    def test_create_service_falls_back_when_session_directory_is_unsupported(self) -> None:
+    def test_create_service_omits_session_directory_when_unsupported(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_icloud(TMPDIR)
             CLIENT = ICloudDriveClient(CONFIG)
             API = Mock()
 
-            with patch(
-                "app.icloud_client.PyiCloudService",
-                side_effect=[TypeError("unexpected keyword argument 'session_directory'"), API],
-            ) as SERVICE:
-                RESULT = CLIENT._create_service()
+            with patch.object(CLIENT, "_supports_session_directory", return_value=False):
+                with patch("app.icloud_client.PyiCloudService", return_value=API) as SERVICE:
+                    RESULT = CLIENT._create_service()
 
             self.assertIs(RESULT, API)
-            self.assertEqual(SERVICE.call_count, 2)
-            self.assertEqual(
-                SERVICE.call_args_list[0].kwargs,
-                {
-                    "cookie_directory": str(CONFIG.cookie_dir),
-                    "session_directory": str(CONFIG.session_dir),
-                },
+            SERVICE.assert_called_once_with(
+                CONFIG.icloud_email,
+                CONFIG.icloud_password,
+                cookie_directory=str(CONFIG.cookie_dir),
             )
-            self.assertEqual(
-                SERVICE.call_args_list[1].kwargs,
-                {"cookie_directory": str(CONFIG.cookie_dir)},
-            )
+
+    def test_supports_session_directory_true_when_constructor_has_parameter(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+
+            SIGNATURE = SimpleNamespace(parameters={"self": object(), "session_directory": object()})
+
+            with patch("app.icloud_client.inspect.signature", return_value=SIGNATURE):
+                self.assertTrue(CLIENT._supports_session_directory())
+
+    def test_supports_session_directory_false_when_signature_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+
+            with patch("app.icloud_client.inspect.signature", side_effect=ValueError("no signature")):
+                self.assertFalse(CLIENT._supports_session_directory())
 
     def test_authenticate_success_without_2fa(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:

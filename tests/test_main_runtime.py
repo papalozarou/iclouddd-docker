@@ -24,6 +24,7 @@ from app.main import (
     parse_iso,
     process_commands,
     run_backup,
+    start_heartbeat_updater,
     update_heartbeat,
     wait_for_one_shot_auth,
 )
@@ -122,6 +123,24 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             HEARTBEAT_PATH = Path(TMPDIR) / "logs" / "heartbeat.txt"
             update_heartbeat(HEARTBEAT_PATH)
             self.assertTrue(HEARTBEAT_PATH.exists())
+
+# --------------------------------------------------------------------------
+# This test confirms heartbeat updater starts a daemon thread and returns
+# a stop event.
+# --------------------------------------------------------------------------
+    def test_start_heartbeat_updater_starts_daemon_thread(self) -> None:
+        HEARTBEAT_PATH = Path("/tmp/heartbeat.txt")
+
+        with patch("app.main.threading.Thread") as THREAD:
+            THREAD_INSTANCE = Mock()
+            THREAD.return_value = THREAD_INSTANCE
+
+            STOP_EVENT = start_heartbeat_updater(HEARTBEAT_PATH)
+
+        THREAD.assert_called_once()
+        self.assertEqual(THREAD.call_args.kwargs.get("daemon"), True)
+        THREAD_INSTANCE.start.assert_called_once()
+        self.assertFalse(STOP_EVENT.is_set())
 
 # --------------------------------------------------------------------------
 # This test confirms one-shot auth wait returns immediately when ready.

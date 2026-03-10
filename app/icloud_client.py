@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import inspect
 from pathlib import Path
 from typing import Callable, Any
 import shutil
@@ -108,27 +109,29 @@ class ICloudDriveClient:
     def _create_service(self) -> PyiCloudService:
         SERVICE_KWARGS = {
             "cookie_directory": str(self.config.cookie_dir),
-            "session_directory": str(self.config.session_dir),
         }
 
+        if self._supports_session_directory():
+            SERVICE_KWARGS["session_directory"] = str(self.config.session_dir)
+
+        return PyiCloudService(
+            self.config.icloud_email,
+            self.config.icloud_password,
+            **SERVICE_KWARGS,
+        )
+
+# --------------------------------------------------------------------------
+# This function checks whether pyicloud supports "session_directory".
+#
+# Returns: True when the constructor supports "session_directory".
+# --------------------------------------------------------------------------
+    def _supports_session_directory(self) -> bool:
         try:
-            return PyiCloudService(
-                self.config.icloud_email,
-                self.config.icloud_password,
-                **SERVICE_KWARGS,
-            )
-        except TypeError as ERROR:
-            ERROR_TEXT = str(ERROR)
+            PARAMETERS = inspect.signature(PyiCloudService.__init__).parameters
+        except (TypeError, ValueError):
+            return False
 
-            if "session_directory" not in ERROR_TEXT:
-                raise
-
-            SERVICE_KWARGS.pop("session_directory", None)
-            return PyiCloudService(
-                self.config.icloud_email,
-                self.config.icloud_password,
-                **SERVICE_KWARGS,
-            )
+        return "session_directory" in PARAMETERS
 
 # --------------------------------------------------------------------------
 # This function starts an iCloud authentication attempt.

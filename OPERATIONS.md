@@ -26,7 +26,10 @@ validation rules, see [SCHEDULING.md](SCHEDULING.md).
 
 - Enable with `<SVC>_RUN_ONCE=true`.
 - Recommended with `restart: "no"` to avoid automatic restarts.
-- Worker exits after one backup attempt.
+- Worker waits for Telegram `auth` or `reauth` commands when MFA or reauth is
+  pending, then runs one backup attempt and exits.
+- If auth does not complete within the one-shot wait window, worker exits
+  non-zero.
 - Exit is non-zero when auth is incomplete, reauth is pending, or first-run
   safety net blocks backup.
 

@@ -7,7 +7,8 @@ one-shot mode.
 
 ### `RUN_ONCE=true`
 
-- Runs one backup attempt and exits.
+- Waits for authentication completion when MFA or reauth is pending, runs one
+  backup attempt, then exits.
 - Recurring scheduling values are effectively ignored for execution.
 
 ### `SCHEDULE_MODE=interval`

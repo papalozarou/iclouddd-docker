@@ -25,6 +25,7 @@ from app.main import (
     process_commands,
     run_backup,
     update_heartbeat,
+    wait_for_one_shot_auth,
 )
 from app.state import AuthState
 from app.telegram_bot import CommandEvent, TelegramConfig
@@ -121,6 +122,26 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             HEARTBEAT_PATH = Path(TMPDIR) / "logs" / "heartbeat.txt"
             update_heartbeat(HEARTBEAT_PATH)
             self.assertTrue(HEARTBEAT_PATH.exists())
+
+# --------------------------------------------------------------------------
+# This test confirms one-shot auth wait returns immediately when ready.
+# --------------------------------------------------------------------------
+    def test_wait_for_one_shot_auth_returns_immediately_when_authenticated(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_runtime(TMPDIR)
+            STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
+            TELEGRAM = TelegramConfig("token", "12345")
+
+            RESULT_STATE, RESULT_AUTH = wait_for_one_shot_auth(
+                CONFIG,
+                Mock(),
+                STATE,
+                True,
+                TELEGRAM,
+            )
+
+        self.assertEqual(RESULT_STATE, STATE)
+        self.assertTrue(RESULT_AUTH)
 
 # --------------------------------------------------------------------------
 # This test confirms notify delegates to send_message.
@@ -457,8 +478,12 @@ class TestMainEntrypoint(unittest.TestCase):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, False, "fail")):
-                                            with patch("app.main.notify") as NOTIFY:
-                                                RESULT = __import__("app.main", fromlist=["main"]).main()
+                                            with patch(
+                                                "app.main.wait_for_one_shot_auth",
+                                                return_value=(STATE, False),
+                                            ):
+                                                with patch("app.main.notify") as NOTIFY:
+                                                    RESULT = __import__("app.main", fromlist=["main"]).main()
 
             self.assertEqual(RESULT, 2)
             NOTIFY.assert_called_with(
@@ -482,7 +507,11 @@ class TestMainEntrypoint(unittest.TestCase):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
-                                            RESULT = __import__("app.main", fromlist=["main"]).main()
+                                            with patch(
+                                                "app.main.wait_for_one_shot_auth",
+                                                return_value=(STATE, True),
+                                            ):
+                                                RESULT = __import__("app.main", fromlist=["main"]).main()
 
             self.assertEqual(RESULT, 3)
 
@@ -528,6 +557,35 @@ class TestMainEntrypoint(unittest.TestCase):
                                                     RESULT = __import__("app.main", fromlist=["main"]).main()
 
             self.assertEqual(RESULT, 0)
+            RUN_BACKUP.assert_called_once()
+
+# --------------------------------------------------------------------------
+# This test confirms one-shot mode runs backup after auth wait succeeds.
+# --------------------------------------------------------------------------
+    def test_main_run_once_runs_backup_after_waited_auth(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = AppConfig(**(build_config_for_runtime(TMPDIR).__dict__ | {"run_once": True}))
+            INITIAL_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
+            READY_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
+
+            with patch("app.main.load_config", return_value=CONFIG):
+                with patch("app.main.configure_keyring"):
+                    with patch("app.main.load_credentials", return_value=("", "")):
+                        with patch("app.main.validate_config", return_value=[]):
+                            with patch("app.main.save_credentials"):
+                                with patch("app.main.ICloudDriveClient", return_value=Mock()):
+                                    with patch("app.main.load_auth_state", return_value=INITIAL_STATE):
+                                        with patch("app.main.attempt_auth", return_value=(INITIAL_STATE, False, "mfa")):
+                                            with patch(
+                                                "app.main.wait_for_one_shot_auth",
+                                                return_value=(READY_STATE, True),
+                                            ) as WAIT_AUTH:
+                                                with patch("app.main.enforce_safety_net", return_value=True):
+                                                    with patch("app.main.run_backup") as RUN_BACKUP:
+                                                        RESULT = __import__("app.main", fromlist=["main"]).main()
+
+            self.assertEqual(RESULT, 0)
+            WAIT_AUTH.assert_called_once()
             RUN_BACKUP.assert_called_once()
 
 # --------------------------------------------------------------------------

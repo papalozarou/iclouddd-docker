@@ -39,6 +39,8 @@ MONTHLY_WEEK_MAP = {
     "fourth": 4,
     "last": -1,
 }
+RUN_ONCE_AUTH_WAIT_SECONDS = 900
+RUN_ONCE_AUTH_POLL_SECONDS = 5
 
 
 # ------------------------------------------------------------------------------
@@ -714,6 +716,57 @@ def handle_command(
 
 
 # ------------------------------------------------------------------------------
+# This function waits for one-shot authentication commands before exit.
+#
+# 1. "CONFIG" is runtime configuration.
+# 2. "CLIENT" is iCloud client wrapper.
+# 3. "AUTH_STATE" is current auth state.
+# 4. "IS_AUTHENTICATED" tracks current auth validity.
+# 5. "TELEGRAM" is Telegram integration configuration.
+#
+# Returns: Tuple "(auth_state, is_authenticated)".
+# ------------------------------------------------------------------------------
+def wait_for_one_shot_auth(
+    CONFIG: AppConfig,
+    CLIENT: ICloudDriveClient,
+    AUTH_STATE: AuthState,
+    IS_AUTHENTICATED: bool,
+    TELEGRAM: TelegramConfig,
+) -> tuple[AuthState, bool]:
+    START_EPOCH = int(time.time())
+    UPDATE_OFFSET: int | None = None
+
+    while True:
+        if IS_AUTHENTICATED and not AUTH_STATE.reauth_pending:
+            return AUTH_STATE, IS_AUTHENTICATED
+
+        NOW_EPOCH = int(time.time())
+        ELAPSED_SECONDS = NOW_EPOCH - START_EPOCH
+
+        if ELAPSED_SECONDS >= RUN_ONCE_AUTH_WAIT_SECONDS:
+            return AUTH_STATE, IS_AUTHENTICATED
+
+        COMMANDS, UPDATE_OFFSET = process_commands(
+            TELEGRAM,
+            CONFIG.container_username,
+            UPDATE_OFFSET,
+        )
+
+        for COMMAND, ARGS in COMMANDS:
+            AUTH_STATE, IS_AUTHENTICATED, _ = handle_command(
+                COMMAND,
+                ARGS,
+                CONFIG,
+                CLIENT,
+                AUTH_STATE,
+                IS_AUTHENTICATED,
+                TELEGRAM,
+            )
+
+        time.sleep(RUN_ONCE_AUTH_POLL_SECONDS)
+
+
+# ------------------------------------------------------------------------------
 # This function is the worker entrypoint used by the container launcher.
 #
 # Returns: Non-zero on startup validation/runtime failure.
@@ -762,6 +815,19 @@ def main() -> int:
     log_line(LOG_FILE, "info", DETAILS)
 
     if CONFIG.run_once:
+        if not IS_AUTHENTICATED or AUTH_STATE.reauth_pending:
+            notify(
+                TELEGRAM,
+                "One-shot mode waiting for authentication command before backup.",
+            )
+            AUTH_STATE, IS_AUTHENTICATED = wait_for_one_shot_auth(
+                CONFIG,
+                CLIENT,
+                AUTH_STATE,
+                IS_AUTHENTICATED,
+                TELEGRAM,
+            )
+
         if not IS_AUTHENTICATED:
             notify(TELEGRAM, "One-shot backup skipped because authentication is incomplete.")
             return 2

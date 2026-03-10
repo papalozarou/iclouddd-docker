@@ -42,7 +42,7 @@ class TestConfigLoad(unittest.TestCase):
         self.assertEqual(CONFIG.container_username, "icloudbot")
         self.assertEqual(CONFIG.keychain_service_name, "icloud-drive-backup")
         self.assertEqual(CONFIG.schedule_mode, "interval")
-        self.assertEqual(CONFIG.backup_time, "02:00")
+        self.assertEqual(CONFIG.schedule_backup_time, "02:00")
         self.assertEqual(CONFIG.schedule_weekdays, "monday")
         self.assertEqual(CONFIG.schedule_monthly_week, "first")
         self.assertEqual(CONFIG.schedule_interval_minutes, 1440)
@@ -69,7 +69,7 @@ class TestConfigLoad(unittest.TestCase):
                 "KEYCHAIN_SERVICE_NAME": "custom-service",
                 "RUN_ONCE": "true",
                 "SCHEDULE_MODE": "WEEKLY",
-                "BACKUP_TIME": "06:30",
+                "SCHEDULE_BACKUP_TIME": "06:30",
                 "SCHEDULE_WEEKDAYS": "Thursday",
                 "SCHEDULE_MONTHLY_WEEK": "LAST",
                 "SCHEDULE_INTERVAL_MINUTES": "90",
@@ -87,7 +87,7 @@ class TestConfigLoad(unittest.TestCase):
         self.assertEqual(CONFIG.keychain_service_name, "custom-service")
         self.assertTrue(CONFIG.run_once)
         self.assertEqual(CONFIG.schedule_mode, "weekly")
-        self.assertEqual(CONFIG.backup_time, "06:30")
+        self.assertEqual(CONFIG.schedule_backup_time, "06:30")
         self.assertEqual(CONFIG.schedule_weekdays, "thursday")
         self.assertEqual(CONFIG.schedule_monthly_week, "last")
         self.assertEqual(CONFIG.schedule_interval_minutes, 90)

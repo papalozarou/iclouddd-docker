@@ -16,23 +16,23 @@ one-shot mode.
 
 ### `SCHEDULE_MODE=daily`
 
-- Runs once per day at `<SVC>_BACKUP_TIME` local time.
+- Runs once per day at `<SVC>_SCHEDULE_BACKUP_TIME` local time.
 
 ### `SCHEDULE_MODE=weekly`
 
 - Runs on the single day set in `<SVC>_SCHEDULE_WEEKDAYS` at
-  `<SVC>_BACKUP_TIME`.
+  `<SVC>_SCHEDULE_BACKUP_TIME`.
 
 ### `SCHEDULE_MODE=twice_weekly`
 
 - Runs on both days in `<SVC>_SCHEDULE_WEEKDAYS` at
-  `<SVC>_BACKUP_TIME`.
+  `<SVC>_SCHEDULE_BACKUP_TIME`.
 
 ### `SCHEDULE_MODE=monthly`
 
 - Runs on `<SVC>_SCHEDULE_MONTHLY_WEEK` day from
   `<SVC>_SCHEDULE_WEEKDAYS` at
-  `<SVC>_BACKUP_TIME`.
+  `<SVC>_SCHEDULE_BACKUP_TIME`.
 - Example: `first monday` at `02:00`.
 
 ## Example values
@@ -50,7 +50,7 @@ ALICE_SCHEDULE_INTERVAL_MINUTES=1440
 
 ```env
 ALICE_SCHEDULE_MODE=daily
-ALICE_BACKUP_TIME=02:00
+ALICE_SCHEDULE_BACKUP_TIME=02:00
 ```
 
 ### Weekly
@@ -58,7 +58,7 @@ ALICE_BACKUP_TIME=02:00
 ```env
 ALICE_SCHEDULE_MODE=weekly
 ALICE_SCHEDULE_WEEKDAYS=monday
-ALICE_BACKUP_TIME=02:00
+ALICE_SCHEDULE_BACKUP_TIME=02:00
 ```
 
 ### Twice-weekly
@@ -66,7 +66,7 @@ ALICE_BACKUP_TIME=02:00
 ```env
 ALICE_SCHEDULE_MODE=twice_weekly
 ALICE_SCHEDULE_WEEKDAYS=monday,thursday
-ALICE_BACKUP_TIME=02:00
+ALICE_SCHEDULE_BACKUP_TIME=02:00
 ```
 
 N.B.
@@ -80,7 +80,7 @@ N.B.
 ALICE_SCHEDULE_MODE=monthly
 ALICE_SCHEDULE_MONTHLY_WEEK=first
 ALICE_SCHEDULE_WEEKDAYS=monday
-ALICE_BACKUP_TIME=02:00
+ALICE_SCHEDULE_BACKUP_TIME=02:00
 ```
 
 ## Which options work together
@@ -91,26 +91,26 @@ ALICE_BACKUP_TIME=02:00
 
 - `SCHEDULE_MODE=interval`
   - Uses: `SCHEDULE_INTERVAL_MINUTES`.
-  - Ignores: `BACKUP_TIME`, `SCHEDULE_WEEKDAYS`,
+  - Ignores: `SCHEDULE_BACKUP_TIME`, `SCHEDULE_WEEKDAYS`,
     `SCHEDULE_MONTHLY_WEEK`.
 
 - `SCHEDULE_MODE=daily`
-  - Uses: `BACKUP_TIME`.
+  - Uses: `SCHEDULE_BACKUP_TIME`.
   - Ignores: `SCHEDULE_INTERVAL_MINUTES`, `SCHEDULE_WEEKDAYS`,
     `SCHEDULE_MONTHLY_WEEK`.
 
 - `SCHEDULE_MODE=weekly`
-  - Uses: `SCHEDULE_WEEKDAYS` (exactly one day), `BACKUP_TIME`.
+  - Uses: `SCHEDULE_WEEKDAYS` (exactly one day), `SCHEDULE_BACKUP_TIME`.
   - Ignores: `SCHEDULE_INTERVAL_MINUTES`, `SCHEDULE_MONTHLY_WEEK`.
 
 - `SCHEDULE_MODE=twice_weekly`
   - Uses: `SCHEDULE_WEEKDAYS` (exactly two distinct days),
-    `BACKUP_TIME`.
+    `SCHEDULE_BACKUP_TIME`.
   - Ignores: `SCHEDULE_INTERVAL_MINUTES`, `SCHEDULE_MONTHLY_WEEK`.
 
 - `SCHEDULE_MODE=monthly`
   - Uses: `SCHEDULE_MONTHLY_WEEK`, `SCHEDULE_WEEKDAYS` (exactly one day),
-    `BACKUP_TIME`.
+    `SCHEDULE_BACKUP_TIME`.
   - Ignores: `SCHEDULE_INTERVAL_MINUTES`.
 
 ## Validation rules
@@ -118,7 +118,7 @@ ALICE_BACKUP_TIME=02:00
 Startup validation fails when:
 
 - `SCHEDULE_MODE` is invalid.
-- `BACKUP_TIME` is not valid `HH:MM` for calendar modes.
+- `SCHEDULE_BACKUP_TIME` is not valid `HH:MM` for calendar modes.
 - `SCHEDULE_WEEKDAYS` is not exactly one valid weekday for `weekly`.
 - `SCHEDULE_WEEKDAYS` is not exactly two distinct weekdays for
   `twice_weekly`.

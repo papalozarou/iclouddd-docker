@@ -53,7 +53,7 @@ def build_config(**OVERRIDES: object) -> AppConfig:
         keychain_service_name="icloud-drive-backup",
         run_once=False,
         schedule_mode="interval",
-        backup_time="02:00",
+        schedule_backup_time="02:00",
         schedule_weekdays="monday,thursday",
         schedule_monthly_week="first",
         schedule_interval_minutes=1440,
@@ -174,11 +174,11 @@ class TestMainValidation(unittest.TestCase):
 # This test confirms invalid daily-time values are rejected in daily mode.
 # --------------------------------------------------------------------------
     def test_validate_config_rejects_invalid_daily(self) -> None:
-        CONFIG = build_config(schedule_mode="daily", backup_time="25:61")
+        CONFIG = build_config(schedule_mode="daily", schedule_backup_time="25:61")
 
         ERRORS = validate_config(CONFIG)
 
-        self.assertIn("BACKUP_TIME must use 24-hour HH:MM format.", ERRORS)
+        self.assertIn("SCHEDULE_BACKUP_TIME must use 24-hour HH:MM format.", ERRORS)
 
 # --------------------------------------------------------------------------
 # This test confirms daily mode does not require interval minimum.
@@ -187,7 +187,7 @@ class TestMainValidation(unittest.TestCase):
         CONFIG = build_config(
             run_once=False,
             schedule_mode="daily",
-            backup_time="02:00",
+            schedule_backup_time="02:00",
             schedule_interval_minutes=0,
         )
 

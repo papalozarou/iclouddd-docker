@@ -41,7 +41,7 @@ def build_config_for_icloud(TMPDIR: str) -> AppConfig:
         keychain_service_name="icloud-drive-backup",
         run_once=False,
         schedule_mode="interval",
-        backup_time="02:00",
+        schedule_backup_time="02:00",
         schedule_weekdays="monday",
         schedule_monthly_week="first",
         schedule_interval_minutes=60,

@@ -250,6 +250,9 @@ class ICloudDriveClient:
 # Returns: Dictionary with canonical "dirs" and "files" lists.
 # --------------------------------------------------------------------------
     def _normalise_dir_payload(self, PAYLOAD: Any) -> dict[str, Any]:
+        if isinstance(PAYLOAD, list):
+            return self._normalise_items_payload(PAYLOAD)
+
         if not isinstance(PAYLOAD, dict):
             return {"dirs": [], "files": []}
 
@@ -270,6 +273,16 @@ class ICloudDriveClient:
         if not isinstance(ITEMS, list):
             return {"dirs": [], "files": []}
 
+        return self._normalise_items_payload(ITEMS)
+
+# --------------------------------------------------------------------------
+# This function splits mixed item payloads into canonical directories/files.
+#
+# 1. "ITEMS" is a list of drive item dictionaries.
+#
+# Returns: Dictionary with canonical "dirs" and "files" lists.
+# --------------------------------------------------------------------------
+    def _normalise_items_payload(self, ITEMS: list[Any]) -> dict[str, Any]:
         DIRS: list[Any] = []
         FILES: list[Any] = []
 

@@ -278,6 +278,22 @@ class TestICloudClientTraversal(unittest.TestCase):
             self.assertEqual(len(RESULT["dirs"]), 1)
             self.assertEqual(len(RESULT["files"]), 1)
 
+    def test_node_dir_supports_list_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            NODE = FakeNode(
+                [
+                    {"name": "docs", "type": "folder", "dateModified": "d1"},
+                    {"name": "c.txt", "type": "file", "size": 3, "dateModified": "d2"},
+                ]
+            )
+
+            RESULT = CLIENT._node_dir(NODE)
+
+            self.assertEqual(len(RESULT["dirs"]), 1)
+            self.assertEqual(len(RESULT["files"]), 1)
+
 
 # ------------------------------------------------------------------------------
 # These tests validate download-path resolution and local write helpers.

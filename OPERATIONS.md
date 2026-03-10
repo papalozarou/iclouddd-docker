@@ -6,7 +6,7 @@
 - Health checks use `parallel` from the microcheck toolbox image.
 - Telegram commands are ignored unless they come from `H_TGM_CHAT_ID`.
 - Entrypoint starts as root only to read Docker secret files, then drops to
-  `C_UID:C_GID` before launching the worker process.
+  `PUID:PGID` before launching the worker process.
 - Services keep `cap_drop: ALL` and add only `SETUID` and `SETGID` so
   privilege drop works.
 

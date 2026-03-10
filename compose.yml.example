@@ -13,8 +13,8 @@ name: iclouddd-docker
 x-env:
   &default-env
   TZ: ${H_TZ}
-  C_UID: ${C_UID}
-  C_GID: ${C_GID}
+  PUID: ${C_UID}
+  PGID: ${C_GID}
 
 # ------------------------------------------------------------------------------
 # Docker extension fields for default security options that disallow privilege

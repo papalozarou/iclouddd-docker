@@ -45,8 +45,8 @@ readSecretVar TELEGRAM_BOT_TOKEN
 readSecretVar TELEGRAM_CHAT_ID
 
 CONTAINER_USERNAME="${CONTAINER_USERNAME:-icloudbot}"
-TARGET_UID="${C_UID:-1000}"
-TARGET_GID="${C_GID:-1000}"
+TARGET_UID="${PUID:-1000}"
+TARGET_GID="${PGID:-1000}"
 
 if [ "$(id -u)" -ne 0 ]; then
   exec /app/scripts/start.sh "$CONTAINER_USERNAME"

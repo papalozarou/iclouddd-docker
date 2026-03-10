@@ -58,6 +58,7 @@ services:
 # This service reads configuration from "ALICE_*" and shared host values.
 # ------------------------------------------------------------------------------
   icloud_alice:
+    image: "${IMG_NAME}:alpine-${ALP_VER}"
     container_name: icloud_alice
     build:
       context: .
@@ -95,6 +96,7 @@ services:
 # This service reads configuration from "BOB_*" and shared host values.
 # ------------------------------------------------------------------------------
   icloud_bob:
+    image: "${IMG_NAME}:alpine-${ALP_VER}"
     container_name: icloud_bob
     build:
       context: .

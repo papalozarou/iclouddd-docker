@@ -65,6 +65,9 @@ For scheduling compatibility and mode-specific behaviour, see
 ## Build variable
 
 - `ALP_VER`: Alpine base image version used during Docker build.
+- `MCK_VER`: Microcheck image version used during Docker build.
+- `H_IMG_NAME`: image repository/name used for service image tags, with
+  `:alpine-${ALP_VER}` appended in Compose.
 
 ## Default container paths
 

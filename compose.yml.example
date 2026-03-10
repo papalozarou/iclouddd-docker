@@ -58,7 +58,6 @@ services:
   icloud_alice:
     image: "${IMG_NAME}:alpine-${ALP_VER}"
     container_name: icloud_alice
-    user: "${C_UID}:${C_GID}"
     build:
       context: .
       args:
@@ -69,6 +68,7 @@ services:
       - telegram_bot_token
       - alice_icloud_email
       - alice_icloud_password
+    user: "${C_UID}:${C_GID}"
     environment:
       <<: *default-env
       CONTAINER_USERNAME: "alice"
@@ -108,6 +108,7 @@ services:
       - telegram_bot_token
       - bob_icloud_email
       - bob_icloud_password
+    user: "${C_UID}:${C_GID}"
     environment:
       <<: *default-env
       CONTAINER_USERNAME: "bob"

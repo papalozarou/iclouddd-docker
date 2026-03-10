@@ -1,6 +1,6 @@
 #!/bin/sh
 # ------------------------------------------------------------------------------
-# This entrypoint configures runtime identity and starts the worker.
+# This entrypoint resolves secrets and starts the worker.
 # ------------------------------------------------------------------------------
 
 set -eu
@@ -39,32 +39,11 @@ readSecretVar() {
   export "$VAR_NAME=$SECRET_VALUE"
 }
 
-# ------------------------------------------------------------------------------
-# This function creates or updates the runtime user and group.
-#
-# N.B.
-# Runtime identity defaults to "1000:1000" and user "icloudbot".
-# ------------------------------------------------------------------------------
-configureUser() {
-  PUID="${PUID:-1000}"
-  PGID="${PGID:-1000}"
-  CONTAINER_USERNAME="${CONTAINER_USERNAME:-icloudbot}"
-
-  addgroup -g "$PGID" -S "$CONTAINER_USERNAME" >/dev/null 2>&1 || true
-  adduser -u "$PUID" -S -D -h "/home/$CONTAINER_USERNAME" -G "$CONTAINER_USERNAME" "$CONTAINER_USERNAME" >/dev/null 2>&1 || true
-
-  mkdir -p /config /output /logs "/home/$CONTAINER_USERNAME"
-}
-
 readSecretVar ICLOUD_EMAIL
 readSecretVar ICLOUD_PASSWORD
 readSecretVar TELEGRAM_BOT_TOKEN
 readSecretVar TELEGRAM_CHAT_ID
 
-configureUser
-
-PUID="${PUID:-1000}"
-PGID="${PGID:-1000}"
 CONTAINER_USERNAME="${CONTAINER_USERNAME:-icloudbot}"
 
-exec su-exec "$PUID:$PGID" /app/scripts/start.sh "$CONTAINER_USERNAME"
+exec /app/scripts/start.sh "$CONTAINER_USERNAME"

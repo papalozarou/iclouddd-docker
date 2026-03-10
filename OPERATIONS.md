@@ -3,7 +3,7 @@
 ## Runtime notes
 
 - Compose `init: true` is required by the provided service definitions.
-- Health checks use `microcheck` (bundled in the image).
+- Health checks use `parallel` from the microcheck toolbox image.
 - Telegram commands are ignored unless they come from `H_TGM_CHAT_ID`.
 
 ## Scheduling

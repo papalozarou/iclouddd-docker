@@ -13,8 +13,6 @@ name: iclouddd-docker
 x-env:
   &default-env
   TZ: ${H_TZ}  
-  PUID: ${C_UID}
-  PGID: ${C_GID}
 
 # ------------------------------------------------------------------------------
 # Docker extension fields for default security options that disallow privilege
@@ -60,6 +58,7 @@ services:
   icloud_alice:
     image: "${IMG_NAME}:alpine-${ALP_VER}"
     container_name: icloud_alice
+    user: "${C_UID}:${C_GID}"
     build:
       context: .
       args:
@@ -98,6 +97,7 @@ services:
   icloud_bob:
     image: "${IMG_NAME}:alpine-${ALP_VER}"
     container_name: icloud_bob
+    user: "${C_UID}:${C_GID}"
     build:
       context: .
       args:

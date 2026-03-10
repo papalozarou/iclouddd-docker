@@ -36,7 +36,7 @@ RUN python3 -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir -r /build/requirements.txt
 
 # ------------------------------------------------------------------------------
-# Fetch architecture-specific "microcheck" as a required runtime binary.
+# Fetch architecture-specific microcheck toolbox binary used by healthcheck.
 #
 # N.B.
 # Pinning "MCK_VER" makes the build reproducible across environments.
@@ -71,13 +71,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Install runtime packages only.
 #
 # 1. "python3" provides the interpreter used by installed dependencies.
-# 2. "su-exec" supports user switching in entrypoint workflows.
-# 3. "ca-certificates" supports secure outbound HTTPS requests.
-# 4. "tzdata" ensures timezone-aware behaviour when required.
+# 2. "ca-certificates" supports secure outbound HTTPS requests.
+# 3. "tzdata" ensures timezone-aware behaviour when required.
 # ------------------------------------------------------------------------------
 RUN apk add --no-cache \
     python3 \
-    su-exec \
     ca-certificates \
     tzdata
 

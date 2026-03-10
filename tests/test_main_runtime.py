@@ -161,7 +161,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             TELEGRAM = TelegramConfig("token", "12345")
             AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", True, True, "prompt2")
             CLIENT = Mock()
-            CLIENT.authenticate.return_value = (True, "ok")
+            CLIENT.complete_authentication.return_value = (True, "ok")
 
             with patch("app.main.now_iso", return_value="2026-03-10T10:00:00+00:00"):
                 with patch("app.main.notify") as NOTIFY:
@@ -179,6 +179,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertEqual(NEW_STATE.last_auth_utc, "2026-03-10T10:00:00+00:00")
             self.assertFalse(NEW_STATE.auth_pending)
             self.assertFalse(NEW_STATE.reauth_pending)
+            CLIENT.complete_authentication.assert_called_once_with("123456")
             NOTIFY.assert_called_once_with(TELEGRAM, "Authentication successful.")
 
 # --------------------------------------------------------------------------
@@ -190,7 +191,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             TELEGRAM = TelegramConfig("token", "12345")
             AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
             CLIENT = Mock()
-            CLIENT.authenticate.return_value = (False, "Two-factor code is required")
+            CLIENT.start_authentication.return_value = (False, "Two-factor code is required")
 
             with patch("app.main.notify") as NOTIFY:
                 NEW_STATE, IS_AUTHENTICATED, DETAILS = attempt_auth(
@@ -206,6 +207,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertIn("Two-factor code is required", DETAILS)
             self.assertTrue(NEW_STATE.auth_pending)
             self.assertFalse(NEW_STATE.reauth_pending)
+            CLIENT.start_authentication.assert_called_once()
             self.assertIn("MFA required", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
@@ -217,7 +219,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             TELEGRAM = TelegramConfig("token", "12345")
             AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
             CLIENT = Mock()
-            CLIENT.authenticate.return_value = (False, "Bad credentials")
+            CLIENT.start_authentication.return_value = (False, "Bad credentials")
 
             with patch("app.main.notify") as NOTIFY:
                 NEW_STATE, IS_AUTHENTICATED, _ = attempt_auth(
@@ -231,6 +233,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
 
             self.assertFalse(IS_AUTHENTICATED)
             self.assertTrue(NEW_STATE.auth_pending)
+            CLIENT.start_authentication.assert_called_once()
             self.assertIn("Authentication failed", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------

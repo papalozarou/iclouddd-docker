@@ -481,7 +481,11 @@ def attempt_auth(
     PROVIDED_CODE: str,
 ) -> tuple[AuthState, bool, str]:
     CODE = PROVIDED_CODE.strip()
-    IS_SUCCESS, DETAILS = CLIENT.authenticate(lambda: CODE)
+
+    if CODE:
+        IS_SUCCESS, DETAILS = CLIENT.complete_authentication(CODE)
+    else:
+        IS_SUCCESS, DETAILS = CLIENT.start_authentication()
 
     if IS_SUCCESS:
         NEW_STATE = AuthState(

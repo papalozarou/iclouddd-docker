@@ -131,23 +131,16 @@ class ICloudDriveClient:
             )
 
 # --------------------------------------------------------------------------
-# This function authenticates with iCloud and completes MFA using a
-# callback-supplied code.
-#
-# 1. "CODE_PROVIDER" is a zero-argument callable returning an MFA code when
-#    needed.
+# This function starts an iCloud authentication attempt.
 #
 # Returns: Tuple "(is_authenticated, details_message)".
-#
-# Notes: Client behaviour follows pyicloud session/cookie usage:
-# https://github.com/picklepete/pyicloud
 # --------------------------------------------------------------------------
-    def authenticate(self, CODE_PROVIDER: Callable[[], str]) -> tuple[bool, str]:
+    def start_authentication(self) -> tuple[bool, str]:
         self.prepare_compat_paths()
         self.api = self._create_service()
 
         if self.api.requires_2fa:
-            return self._handle_2fa(CODE_PROVIDER)
+            return False, "Two-factor code is required."
 
         if getattr(self.api, "requires_2sa", False):
             return False, "Two-step authentication is required; use app-specific passwords where possible."
@@ -155,21 +148,23 @@ class ICloudDriveClient:
         return True, "Authenticated successfully."
 
 # --------------------------------------------------------------------------
-# This function validates a two-factor code and attempts to trust the
-# session for reduced prompts.
+# This function completes a pending authentication challenge with an MFA code.
 #
-# 1. "CODE_PROVIDER" is a zero-argument callable returning an MFA code.
+# 1. "CODE" is the MFA code to validate.
 #
 # Returns: Tuple "(is_authenticated, details_message)".
 # --------------------------------------------------------------------------
-    def _handle_2fa(self, CODE_PROVIDER: Callable[[], str]) -> tuple[bool, str]:
+    def complete_authentication(self, CODE: str) -> tuple[bool, str]:
         if self.api is None:
-            return False, "Authentication state unavailable."
+            return False, "Authentication session is not initialised."
 
-        CODE = CODE_PROVIDER().strip()
+        CODE = CODE.strip()
 
         if not CODE:
             return False, "Two-factor code is required."
+
+        if not self.api.requires_2fa:
+            return True, "Authenticated successfully."
 
         IS_VALID = self.api.validate_2fa_code(CODE)
 
@@ -181,6 +176,22 @@ class ICloudDriveClient:
 
         self.api.trust_session()
         return True, "Authenticated successfully with trusted 2FA session."
+
+# --------------------------------------------------------------------------
+# This function authenticates with iCloud and optionally completes MFA.
+#
+# 1. "CODE_PROVIDER" is a zero-argument callable returning an MFA code when
+#    needed.
+#
+# Returns: Tuple "(is_authenticated, details_message)".
+# --------------------------------------------------------------------------
+    def authenticate(self, CODE_PROVIDER: Callable[[], str]) -> tuple[bool, str]:
+        CODE = CODE_PROVIDER().strip()
+
+        if CODE:
+            return self.complete_authentication(CODE)
+
+        return self.start_authentication()
 
 # --------------------------------------------------------------------------
 # This function traverses iCloud Drive and yields flattened entries
@@ -229,10 +240,54 @@ class ICloudDriveClient:
         except (AttributeError, TypeError, ValueError):
             return {"dirs": [], "files": []}
 
-        if isinstance(PAYLOAD, dict):
-            return PAYLOAD
+        return self._normalise_dir_payload(PAYLOAD)
 
-        return {"dirs": [], "files": []}
+# --------------------------------------------------------------------------
+# This function normalises pyicloud directory payload variants.
+#
+# 1. "PAYLOAD" is the value returned from "NODE.dir()".
+#
+# Returns: Dictionary with canonical "dirs" and "files" lists.
+# --------------------------------------------------------------------------
+    def _normalise_dir_payload(self, PAYLOAD: Any) -> dict[str, Any]:
+        if not isinstance(PAYLOAD, dict):
+            return {"dirs": [], "files": []}
+
+        if isinstance(PAYLOAD.get("dirs"), list) and isinstance(PAYLOAD.get("files"), list):
+            return {
+                "dirs": PAYLOAD.get("dirs", []),
+                "files": PAYLOAD.get("files", []),
+            }
+
+        if isinstance(PAYLOAD.get("folders"), list) and isinstance(PAYLOAD.get("files"), list):
+            return {
+                "dirs": PAYLOAD.get("folders", []),
+                "files": PAYLOAD.get("files", []),
+            }
+
+        ITEMS = PAYLOAD.get("items")
+
+        if not isinstance(ITEMS, list):
+            return {"dirs": [], "files": []}
+
+        DIRS: list[Any] = []
+        FILES: list[Any] = []
+
+        for ITEM in ITEMS:
+            if not isinstance(ITEM, dict):
+                continue
+
+            ITEM_TYPE = str(ITEM.get("type", ITEM.get("item_type", ""))).lower()
+            IS_DIR = bool(ITEM.get("isFolder", False))
+            IS_DIR = IS_DIR or ITEM_TYPE in {"folder", "directory", "dir"}
+
+            if IS_DIR:
+                DIRS.append(ITEM)
+                continue
+
+            FILES.append(ITEM)
+
+        return {"dirs": DIRS, "files": FILES}
 
 # --------------------------------------------------------------------------
 # This function converts directory items to entries and recursively

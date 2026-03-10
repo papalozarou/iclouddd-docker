@@ -170,26 +170,36 @@ class TestICloudClientAuth(unittest.TestCase):
             self.assertFalse(IS_AUTHENTICATED)
             self.assertIn("Two-step authentication is required", DETAILS)
 
-    def test_handle_2fa_paths(self) -> None:
+    def test_complete_authentication_paths(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_icloud(TMPDIR)
             CLIENT = ICloudDriveClient(CONFIG)
 
             CLIENT.api = None
-            self.assertEqual(CLIENT._handle_2fa(lambda: ""), (False, "Authentication state unavailable."))
+            self.assertEqual(
+                CLIENT.complete_authentication(""),
+                (False, "Authentication session is not initialised."),
+            )
 
             API = Mock()
+            API.requires_2fa = True
             API.validate_2fa_code.return_value = False
             CLIENT.api = API
-            self.assertEqual(CLIENT._handle_2fa(lambda: "123456"), (False, "Two-factor code was rejected by Apple."))
+            self.assertEqual(
+                CLIENT.complete_authentication("123456"),
+                (False, "Two-factor code was rejected by Apple."),
+            )
 
             API.validate_2fa_code.return_value = True
             API.is_trusted_session = True
-            self.assertEqual(CLIENT._handle_2fa(lambda: "123456"), (True, "Authenticated successfully with 2FA."))
+            self.assertEqual(
+                CLIENT.complete_authentication("123456"),
+                (True, "Authenticated successfully with 2FA."),
+            )
 
             API.is_trusted_session = False
             self.assertEqual(
-                CLIENT._handle_2fa(lambda: "123456"),
+                CLIENT.complete_authentication("123456"),
                 (True, "Authenticated successfully with trusted 2FA session."),
             )
             API.trust_session.assert_called()
@@ -233,6 +243,40 @@ class TestICloudClientTraversal(unittest.TestCase):
             BROKEN_NODE.dir.side_effect = ValueError("bad")
             self.assertEqual(CLIENT._node_dir(BROKEN_NODE), {"dirs": [], "files": []})
             self.assertIsNone(CLIENT._child_node({}, "missing"))
+
+    def test_node_dir_supports_folders_and_files_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            NODE = FakeNode(
+                {
+                    "folders": [{"name": "docs", "dateModified": "d1"}],
+                    "files": [{"name": "a.txt", "size": 1, "dateModified": "d2"}],
+                }
+            )
+
+            RESULT = CLIENT._node_dir(NODE)
+
+            self.assertEqual(len(RESULT["dirs"]), 1)
+            self.assertEqual(len(RESULT["files"]), 1)
+
+    def test_node_dir_supports_items_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            NODE = FakeNode(
+                {
+                    "items": [
+                        {"name": "docs", "type": "folder", "dateModified": "d1"},
+                        {"name": "b.txt", "type": "file", "size": 2, "dateModified": "d2"},
+                    ]
+                }
+            )
+
+            RESULT = CLIENT._node_dir(NODE)
+
+            self.assertEqual(len(RESULT["dirs"]), 1)
+            self.assertEqual(len(RESULT["files"]), 1)
 
 
 # ------------------------------------------------------------------------------

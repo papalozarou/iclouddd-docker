@@ -282,6 +282,10 @@ class TestICloudClientTraversal(unittest.TestCase):
             self.assertEqual(CLIENT._node_dir(BROKEN_NODE), {"dirs": [], "files": [], "names": []})
             self.assertIsNone(CLIENT._child_node({}, "missing"))
 
+            FILE_CHILD = Mock()
+            FILE_CHILD.dir.side_effect = NotADirectoryError("file.bin")
+            self.assertFalse(CLIENT._child_is_dir(FILE_CHILD))
+
     def test_node_dir_supports_folders_and_files_payload(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_icloud(TMPDIR)

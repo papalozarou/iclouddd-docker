@@ -242,7 +242,7 @@ class ICloudDriveClient:
     def _node_dir(self, NODE: Any) -> dict[str, Any]:
         try:
             PAYLOAD = NODE.dir()
-        except (AttributeError, TypeError, ValueError):
+        except (AttributeError, NotADirectoryError, TypeError, ValueError):
             return {"dirs": [], "files": [], "names": []}
 
         return self._normalise_dir_payload(PAYLOAD)
@@ -383,15 +383,15 @@ class ICloudDriveClient:
         if CHILD_TYPE in {"folder", "directory", "dir"}:
             return True
 
-        if bool(getattr(CHILD, "is_folder", False)):
+        if getattr(CHILD, "is_folder", None) is True:
             return True
 
-        if bool(getattr(CHILD, "isFolder", False)):
+        if getattr(CHILD, "isFolder", None) is True:
             return True
 
         try:
             PAYLOAD = CHILD.dir()
-        except (AttributeError, TypeError, ValueError):
+        except (AttributeError, NotADirectoryError, TypeError, ValueError):
             return False
 
         return isinstance(PAYLOAD, (dict, list))

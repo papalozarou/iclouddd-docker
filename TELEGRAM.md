@@ -61,3 +61,7 @@ Current message templates include:
 - `*⏭️ Backup skipped*`
 - `*⚠️ Safety net blocked*`
 - `*📣 Reauth reminder*`
+
+Safety-net blocked messages include an explicit expected ownership line:
+
+- `Expected: uid <uid>, gid <gid>`

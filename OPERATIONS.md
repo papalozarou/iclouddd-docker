@@ -49,8 +49,8 @@ validation rules, see [SCHEDULING.md](SCHEDULING.md).
 ## Safety-net behaviour
 
 On first run only, each worker samples existing files in `/output` and checks
-permissions for consistency.
+UID and GID for consistency against the container runtime user.
 
 If mismatches are found, backup is blocked. Details are written to worker logs
 and sent via Telegram. This is intended to avoid destructive rewrites over
-existing backup trees with mixed ownership/modes.
+existing backup trees with mixed ownership.

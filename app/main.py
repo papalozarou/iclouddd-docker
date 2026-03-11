@@ -662,7 +662,9 @@ def enforce_safety_net(CONFIG: AppConfig, TELEGRAM: TelegramConfig, LOG_FILE: Pa
             f"Backup blocked for Apple ID {APPLE_ID_LABEL}.",
             [
                 "Permission mismatches detected in existing files.",
-                f"Expected: mode {RESULT.expected_mode}",
+                "Expected: "
+                f"uid {RESULT.expected_uid}, "
+                f"gid {RESULT.expected_gid}",
                 f"Sample mismatches: {SAMPLE_TEXT}",
             ],
         ),

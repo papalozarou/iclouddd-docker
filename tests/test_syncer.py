@@ -19,9 +19,7 @@ install_dependency_stubs()
 
 from app.syncer import (
     collect_mismatches,
-    count_modes,
     get_auto_worker_count,
-    most_common_mode,
     needs_transfer,
     perform_incremental_sync,
 )
@@ -96,32 +94,42 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertFalse(needs_transfer(ENTRY, MANIFEST))
 
 # --------------------------------------------------------------------------
-# This test confirms mode counting and mismatch detection identify
-# outlier permissions.
+# This test confirms ownership mismatch detection identifies outlier files.
 # --------------------------------------------------------------------------
-    def test_mode_counting_and_mismatch_detection(self) -> None:
+    def test_ownership_mismatch_detection(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             BASE = Path(TMPDIR)
             FILE_ONE = BASE / "one.txt"
             FILE_TWO = BASE / "two.txt"
-            FILE_THREE = BASE / "three.txt"
 
             FILE_ONE.write_text("1", encoding="utf-8")
             FILE_TWO.write_text("2", encoding="utf-8")
-            FILE_THREE.write_text("3", encoding="utf-8")
 
-            FILE_ONE.chmod(0o644)
-            FILE_TWO.chmod(0o644)
-            FILE_THREE.chmod(0o600)
+            FILES = [FILE_ONE, FILE_TWO]
+            EXPECTED_UID = FILE_ONE.stat().st_uid
+            EXPECTED_GID = FILE_ONE.stat().st_gid
+            MISMATCHES = collect_mismatches(
+                FILES,
+                EXPECTED_UID,
+                EXPECTED_GID,
+            )
 
-            FILES = [FILE_ONE, FILE_TWO, FILE_THREE]
-            COUNTS = count_modes(FILES)
-            EXPECTED_MODE = most_common_mode(COUNTS)
-            MISMATCHES = collect_mismatches(FILES, EXPECTED_MODE)
+            self.assertEqual(MISMATCHES, [])
 
-            self.assertEqual(EXPECTED_MODE, "0o644")
-            self.assertEqual(COUNTS.get("0o644"), 2)
-            self.assertTrue(any("three.txt" in LINE for LINE in MISMATCHES))
+# --------------------------------------------------------------------------
+# This test confirms mismatch formatting includes expected ownership details.
+# --------------------------------------------------------------------------
+    def test_ownership_mismatch_message_includes_expected_values(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            FILE_PATH = Path(TMPDIR) / "file.txt"
+            FILE_PATH.write_text("x", encoding="utf-8")
+
+            EXPECTED_UID = FILE_PATH.stat().st_uid + 1
+            EXPECTED_GID = FILE_PATH.stat().st_gid + 1
+            MISMATCHES = collect_mismatches([FILE_PATH], EXPECTED_UID, EXPECTED_GID)
+
+            self.assertEqual(len(MISMATCHES), 1)
+            self.assertIn("expected uid=", MISMATCHES[0])
 
 # --------------------------------------------------------------------------
 # This test confirms automatic worker sizing falls back to one when CPU

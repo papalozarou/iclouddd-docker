@@ -41,20 +41,23 @@ follows Apple account policy.
 
 ## Outbound Telegram messages
 
-These are the messages currently emitted by the worker:
+Messages use this compact structure:
 
-- `Authentication successful.`
-- `MFA required. Send '<username> auth 123456' or '<username> reauth 123456'.`
-- `Authentication failed: <details>`
-- `Backup requested.`
-- `Backup starting.`
-- `Backup complete. Transferred <transferred>/<total>, skipped <skipped>, errors <errors>.`
-- `Send '<username> auth 123456' with your current MFA code.`
-- `Send '<username> reauth 123456' to complete reauthentication.`
-- `Backup skipped because authentication is incomplete.`
-- `Backup skipped because reauthentication is pending.`
-- `One-shot backup skipped because authentication is incomplete.`
-- `One-shot backup skipped because reauthentication is pending.`
-- `Reauthentication will be required within five days.`
-- `Reauth required in two days. Send '<username> reauth'.`
-- `Safety net blocked backup. Expected permissions <mode>. Mismatches:\n<mismatch lines>`
+- Bold emoji header in sentence case.
+- One-line action summary including Apple ID.
+- Optional compact status lines.
+
+Current message templates include:
+
+- `*🟢 Container started*`
+- `*🛑 Container stopped*`
+- `*🔑 Authentication required*`
+- `*🔑 Reauthentication required*`
+- `*✅ Authentication complete*`
+- `*❌ Authentication failed*`
+- `*📥 Backup requested*`
+- `*⬇️ Backup started*`
+- `*📦 Backup complete*`
+- `*⏭️ Backup skipped*`
+- `*⚠️ Safety net blocked*`
+- `*📣 Reauth reminder*`

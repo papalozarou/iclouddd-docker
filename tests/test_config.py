@@ -47,6 +47,7 @@ class TestConfigLoad(unittest.TestCase):
         self.assertEqual(CONFIG.schedule_monthly_week, "first")
         self.assertEqual(CONFIG.schedule_interval_minutes, 1440)
         self.assertEqual(CONFIG.sync_workers, 0)
+        self.assertEqual(CONFIG.download_chunk_mib, 4)
         self.assertEqual(CONFIG.reauth_interval_days, 30)
         self.assertEqual(CONFIG.safety_net_sample_size, 200)
         self.assertFalse(CONFIG.run_once)
@@ -75,6 +76,7 @@ class TestConfigLoad(unittest.TestCase):
                 "SCHEDULE_MONTHLY_WEEK": "LAST",
                 "SCHEDULE_INTERVAL_MINUTES": "90",
                 "SYNC_WORKERS": "12",
+                "DOWNLOAD_CHUNK_MIB": "8",
                 "REAUTH_INTERVAL_DAYS": "45",
                 "SAFETY_NET_SAMPLE_SIZE": "300",
             }
@@ -94,6 +96,7 @@ class TestConfigLoad(unittest.TestCase):
         self.assertEqual(CONFIG.schedule_monthly_week, "last")
         self.assertEqual(CONFIG.schedule_interval_minutes, 90)
         self.assertEqual(CONFIG.sync_workers, 12)
+        self.assertEqual(CONFIG.download_chunk_mib, 8)
         self.assertEqual(CONFIG.reauth_interval_days, 45)
         self.assertEqual(CONFIG.safety_net_sample_size, 300)
 
@@ -106,6 +109,7 @@ class TestConfigLoad(unittest.TestCase):
             INVALIDS = {
                 "SCHEDULE_INTERVAL_MINUTES": "abc",
                 "SYNC_WORKERS": "many",
+                "DOWNLOAD_CHUNK_MIB": "huge",
                 "REAUTH_INTERVAL_DAYS": "-1",
                 "SAFETY_NET_SAMPLE_SIZE": "10.5",
             }
@@ -114,6 +118,7 @@ class TestConfigLoad(unittest.TestCase):
 
         self.assertEqual(CONFIG.schedule_interval_minutes, 1440)
         self.assertEqual(CONFIG.sync_workers, 0)
+        self.assertEqual(CONFIG.download_chunk_mib, 4)
         self.assertEqual(CONFIG.reauth_interval_days, 30)
         self.assertEqual(CONFIG.safety_net_sample_size, 200)
 

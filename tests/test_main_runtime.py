@@ -58,6 +58,7 @@ def build_config_for_runtime(TMPDIR: str) -> AppConfig:
         schedule_monthly_week="first",
         schedule_interval_minutes=60,
         sync_workers=0,
+        download_chunk_mib=4,
         reauth_interval_days=30,
         output_dir=OUTPUT_DIR,
         config_dir=CONFIG_DIR,

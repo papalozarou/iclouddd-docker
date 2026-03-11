@@ -54,6 +54,8 @@ These are usually left as-is unless you have a specific reason to change them.
   `1440`).
 - `<SVC>_SYNC_WORKERS`: transfer worker override, using `auto` or an integer
   from `1` to `16` (default `auto`).
+- `<SVC>_DOWNLOAD_CHUNK_MIB`: streamed download chunk size in MiB, as an
+  integer from `1` to `16` (default `4`).
 - `<SVC>_SCHEDULE_BACKUP_TIME`: local run time in `HH:MM` 24-hour format
   (default `02:00`).
 - `<SVC>_SCHEDULE_WEEKDAYS`: comma-separated weekday names.

@@ -356,6 +356,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             CLIENT = Mock()
             SUMMARY = SimpleNamespace(
                 transferred_files=2,
+                transferred_bytes=2097152,
                 total_files=3,
                 skipped_files=1,
                 error_files=0,
@@ -377,6 +378,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertIn("Loaded manifest entries:", LOG_LINE.call_args_list[0].args[2])
             self.assertEqual(LOG_LINE.call_args_list[1].args[1], "debug")
             self.assertIn("Sync summary detail:", LOG_LINE.call_args_list[1].args[2])
+            self.assertIn("Average speed:", NOTIFY.call_args_list[1].args[1])
 
 # --------------------------------------------------------------------------
 # This test confirms handle_command backup path requests a backup.

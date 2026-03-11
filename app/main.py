@@ -542,6 +542,21 @@ def format_duration_clock(TOTAL_SECONDS: int) -> str:
 
 
 # ------------------------------------------------------------------------------
+# This function formats average transfer speed using binary megabytes per second.
+#
+# 1. "TRANSFERRED_BYTES" is successful download byte total.
+# 2. "DURATION_SECONDS" is elapsed run duration in seconds.
+#
+# Returns: Human-readable transfer speed string.
+# ------------------------------------------------------------------------------
+def format_average_speed(TRANSFERRED_BYTES: int, DURATION_SECONDS: int) -> str:
+    SAFE_BYTES = max(TRANSFERRED_BYTES, 0)
+    SAFE_DURATION_SECONDS = max(DURATION_SECONDS, 1)
+    MEBIBYTES_PER_SECOND = SAFE_BYTES / SAFE_DURATION_SECONDS / (1024 * 1024)
+    return f"{MEBIBYTES_PER_SECOND:.2f} MiB/s"
+
+
+# ------------------------------------------------------------------------------
 # This function executes authentication and persists updated auth state.
 #
 # 1. "CLIENT" is iCloud client wrapper.
@@ -805,6 +820,7 @@ def run_backup(
         "Sync summary detail: "
         f"total={SUMMARY.total_files}, "
         f"transferred={SUMMARY.transferred_files}, "
+        f"bytes={SUMMARY.transferred_bytes}, "
         f"skipped={SUMMARY.skipped_files}, "
         f"errors={SUMMARY.error_files}, "
         f"manifest_entries={len(NEW_MANIFEST)}",
@@ -812,6 +828,7 @@ def run_backup(
     save_manifest(CONFIG.manifest_path, NEW_MANIFEST)
 
     DURATION_SECONDS = int(time.time()) - RUN_START_EPOCH
+    AVERAGE_SPEED = format_average_speed(SUMMARY.transferred_bytes, DURATION_SECONDS)
     COMPLETION_MESSAGE = format_telegram_event(
         "📦",
         "Backup complete",
@@ -821,6 +838,7 @@ def run_backup(
             f"Skipped: {SUMMARY.skipped_files}",
             f"Errors: {SUMMARY.error_files}",
             f"Duration: {format_duration_clock(DURATION_SECONDS)}",
+            f"Average speed: {AVERAGE_SPEED}",
         ],
     )
     notify(TELEGRAM, COMPLETION_MESSAGE)

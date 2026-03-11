@@ -62,6 +62,14 @@ Current message templates include:
 - `*⚠️ iCloudDD - Safety net blocked*`
 - `*📣 iCloudDD - Reauth reminder*`
 
+Backup completion messages include:
+
+- `Transferred: <done>/<total>`
+- `Skipped: <count>`
+- `Errors: <count>`
+- `Duration: <hh:mm:ss>`
+- `Average speed: <value> MiB/s`
+
 Safety-net blocked messages include an explicit expected ownership line:
 
 - `Expected: uid <uid>, gid <gid>`

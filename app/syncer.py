@@ -33,6 +33,7 @@ class SafetyNetResult:
 class SyncResult:
     total_files: int
     transferred_files: int
+    transferred_bytes: int
     skipped_files: int
     error_files: int
 
@@ -210,6 +211,7 @@ def perform_incremental_sync(
     TRANSFER_CANDIDATES: list[RemoteEntry] = []
 
     TRANSFERRED = 0
+    TRANSFERRED_BYTES = 0
     SKIPPED = 0
     ERRORS = 0
 
@@ -246,6 +248,7 @@ def perform_incremental_sync(
             }
 
             for FUTURE in as_completed(FUTURES):
+                ENTRY = FUTURES[FUTURE]
                 try:
                     SUCCESS = FUTURE.result()
                 except Exception as ERROR:
@@ -259,6 +262,7 @@ def perform_incremental_sync(
 
                 if SUCCESS:
                     TRANSFERRED += 1
+                    TRANSFERRED_BYTES += max(ENTRY.size, 0)
                     continue
 
                 ERRORS += 1
@@ -266,7 +270,13 @@ def perform_incremental_sync(
     for ENTRY in DIRECTORIES:
         NEW_MANIFEST[ENTRY.path] = entry_metadata(ENTRY)
 
-    return SyncResult(len(FILES), TRANSFERRED, SKIPPED, ERRORS), NEW_MANIFEST
+    return SyncResult(
+        len(FILES),
+        TRANSFERRED,
+        TRANSFERRED_BYTES,
+        SKIPPED,
+        ERRORS,
+    ), NEW_MANIFEST
 
 
 # ------------------------------------------------------------------------------

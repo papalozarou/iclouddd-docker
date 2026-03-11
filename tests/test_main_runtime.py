@@ -284,7 +284,12 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             LOG_FILE = CONFIG.logs_dir / "worker.log"
             BLOCKED = CONFIG.config_dir / "safety_net_blocked.flag"
             BLOCKED.write_text("blocked\n", encoding="utf-8")
-            RESULT = SimpleNamespace(should_block=False, mismatched_samples=[], expected_mode="775")
+            RESULT = SimpleNamespace(
+                should_block=False,
+                mismatched_samples=[],
+                expected_uid=1000,
+                expected_gid=1000,
+            )
 
             with patch("app.main.run_first_time_safety_net", return_value=RESULT):
                 with patch("app.main.log_line"):
@@ -305,7 +310,8 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             RESULT = SimpleNamespace(
                 should_block=True,
                 mismatched_samples=["/output/file1"],
-                expected_mode="775",
+                expected_uid=1000,
+                expected_gid=1000,
             )
 
             with patch("app.main.run_first_time_safety_net", return_value=RESULT):
@@ -316,6 +322,10 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertFalse(RETURNED)
             self.assertTrue((CONFIG.config_dir / "safety_net_blocked.flag").exists())
             self.assertIn("Safety net blocked", NOTIFY.call_args[0][1])
+            self.assertIn(
+                "Expected: uid 1000, gid 1000",
+                NOTIFY.call_args[0][1],
+            )
 
 # --------------------------------------------------------------------------
 # This test confirms process_commands returns events and next offset.

@@ -21,7 +21,8 @@ from app.logger import log_line
 @dataclass(frozen=True)
 class SafetyNetResult:
     should_block: bool
-    expected_mode: str
+    expected_uid: int
+    expected_gid: int
     mismatched_samples: list[str]
 
 
@@ -54,21 +55,26 @@ def get_auto_worker_count() -> int:
 #
 # Returns: "SafetyNetResult" describing whether sync should be blocked and why.
 #
-# Notes: Permission mode bits are read from "stat" values:
+# Notes: Ownership values are read from "stat" values:
 # https://docs.python.org/3/library/os.html#os.stat_result
 # ------------------------------------------------------------------------------
 def run_first_time_safety_net(OUTPUT_DIR: Path, SAMPLE_SIZE: int) -> SafetyNetResult:
     LOCAL_FILES = collect_local_files(OUTPUT_DIR, SAMPLE_SIZE)
+    EXPECTED_UID = os.getuid()
+    EXPECTED_GID = os.getgid()
 
     if not LOCAL_FILES:
-        return SafetyNetResult(False, "unknown", [])
+        return SafetyNetResult(False, EXPECTED_UID, EXPECTED_GID, [])
 
-    MODE_COUNTS = count_modes(LOCAL_FILES)
-    EXPECTED_MODE = most_common_mode(MODE_COUNTS)
-    MISMATCHES = collect_mismatches(LOCAL_FILES, EXPECTED_MODE)
+    MISMATCHES = collect_mismatches(LOCAL_FILES, EXPECTED_UID, EXPECTED_GID)
     SHOULD_BLOCK = len(MISMATCHES) > 0
 
-    return SafetyNetResult(SHOULD_BLOCK, EXPECTED_MODE, MISMATCHES)
+    return SafetyNetResult(
+        SHOULD_BLOCK,
+        EXPECTED_UID,
+        EXPECTED_GID,
+        MISMATCHES,
+    )
 
 
 # ------------------------------------------------------------------------------
@@ -77,7 +83,7 @@ def run_first_time_safety_net(OUTPUT_DIR: Path, SAMPLE_SIZE: int) -> SafetyNetRe
 # 1. "OUTPUT_DIR" is the backup destination root.
 # 2. "SAMPLE_SIZE" is the sample cap.
 #
-# Returns: Ordered file list up to "SAMPLE_SIZE" for mode analysis.
+# Returns: Ordered file list up to "SAMPLE_SIZE" for ownership analysis.
 # ------------------------------------------------------------------------------
 def collect_local_files(OUTPUT_DIR: Path, SAMPLE_SIZE: int) -> list[Path]:
     RESULT: list[Path] = []
@@ -95,56 +101,36 @@ def collect_local_files(OUTPUT_DIR: Path, SAMPLE_SIZE: int) -> list[Path]:
 
 
 # ------------------------------------------------------------------------------
-# This function counts Unix mode values across sampled files.
+# ------------------------------------------------------------------------------
+# This function returns sampled files with non-matching ownership.
 #
 # 1. "FILES" is the sampled file list.
-#
-# Returns: Frequency mapping keyed by octal mode string.
-# ------------------------------------------------------------------------------
-def count_modes(FILES: list[Path]) -> dict[str, int]:
-    COUNTS: dict[str, int] = {}
-
-    for PATH in FILES:
-        MODE = oct(PATH.stat().st_mode & 0o777)
-        COUNTS[MODE] = COUNTS.get(MODE, 0) + 1
-
-    return COUNTS
-
-
-# ------------------------------------------------------------------------------
-# This function returns the most common mode or a safe default.
-#
-# 1. "MODE_COUNTS" is a mapping of mode strings to frequency counts.
-#
-# Returns: Most frequent mode string, defaulting to "0o644".
-# ------------------------------------------------------------------------------
-def most_common_mode(MODE_COUNTS: dict[str, int]) -> str:
-    if not MODE_COUNTS:
-        return "0o644"
-
-    SORTED_MODES = sorted(MODE_COUNTS.items(), key=lambda ITEM: ITEM[1], reverse=True)
-    return SORTED_MODES[0][0]
-
-
-# ------------------------------------------------------------------------------
-# This function returns sampled files with non-matching permissions.
-#
-# 1. "FILES" is the sampled file list.
-# 2. "EXPECTED_MODE" is the baseline mode.
-# 3. "LIMIT" caps mismatch output.
+# 2. "EXPECTED_UID" is the runtime user ID expected to own files.
+# 3. "EXPECTED_GID" is the runtime group ID expected to own files.
+# 4. "LIMIT" caps mismatch output.
 #
 # Returns: Human-readable mismatch list for logs and Telegram alerts.
 # ------------------------------------------------------------------------------
-def collect_mismatches(FILES: list[Path], EXPECTED_MODE: str, LIMIT: int = 20) -> list[str]:
+def collect_mismatches(
+    FILES: list[Path],
+    EXPECTED_UID: int,
+    EXPECTED_GID: int,
+    LIMIT: int = 20,
+) -> list[str]:
     MISMATCHES: list[str] = []
 
     for PATH in FILES:
-        MODE = oct(PATH.stat().st_mode & 0o777)
+        FILE_STAT = PATH.stat()
+        UID = FILE_STAT.st_uid
+        GID = FILE_STAT.st_gid
 
-        if MODE == EXPECTED_MODE:
+        if UID == EXPECTED_UID and GID == EXPECTED_GID:
             continue
 
-        MISMATCHES.append(f"{PATH}: {MODE} (expected {EXPECTED_MODE})")
+        MISMATCHES.append(
+            f"{PATH}: uid={UID}, gid={GID} "
+            f"(expected uid={EXPECTED_UID}, gid={EXPECTED_GID})",
+        )
 
         if len(MISMATCHES) >= LIMIT:
             return MISMATCHES

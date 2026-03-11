@@ -185,6 +185,7 @@ class TestSyncerHelpers(unittest.TestCase):
 
         self.assertEqual(SUMMARY.total_files, 3)
         self.assertEqual(SUMMARY.transferred_files, 1)
+        self.assertEqual(SUMMARY.transferred_bytes, 11)
         self.assertEqual(SUMMARY.skipped_files, 1)
         self.assertEqual(SUMMARY.error_files, 1)
         self.assertIn("docs", NEW_MANIFEST)
@@ -207,6 +208,7 @@ class TestSyncerHelpers(unittest.TestCase):
 
         self.assertEqual(SUMMARY.total_files, 1)
         self.assertEqual(SUMMARY.transferred_files, 0)
+        self.assertEqual(SUMMARY.transferred_bytes, 0)
         self.assertEqual(SUMMARY.skipped_files, 0)
         self.assertEqual(SUMMARY.error_files, 1)
         self.assertIn("docs/explode.txt", NEW_MANIFEST)

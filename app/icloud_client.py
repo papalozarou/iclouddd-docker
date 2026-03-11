@@ -379,9 +379,10 @@ class ICloudDriveClient:
         if getattr(CHILD, "isFolder", None) is True:
             return True
 
-        OPEN_METHOD = getattr(CHILD, "open", None)
+        if getattr(CHILD, "is_folder", None) is False:
+            return False
 
-        if callable(OPEN_METHOD):
+        if getattr(CHILD, "isFolder", None) is False:
             return False
 
         try:

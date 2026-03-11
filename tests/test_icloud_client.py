@@ -276,6 +276,27 @@ class TestICloudClientTraversal(unittest.TestCase):
             FILE_CHILD.dir.side_effect = NotADirectoryError("file.bin")
             self.assertFalse(CLIENT._child_is_dir(FILE_CHILD))
 
+    def test_child_is_dir_prefers_directory_probe_for_open_capable_nodes(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+
+            FOLDER_LIKE = Mock()
+            FOLDER_LIKE.open = Mock()
+            FOLDER_LIKE.dir.return_value = ["nested.bin"]
+
+            self.assertTrue(CLIENT._child_is_dir(FOLDER_LIKE))
+
+    def test_child_is_dir_uses_explicit_false_folder_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+
+            FILE_LIKE = Mock(is_folder=False)
+            FILE_LIKE.dir.side_effect = RuntimeError("should not run")
+
+            self.assertFalse(CLIENT._child_is_dir(FILE_LIKE))
+
     def test_node_dir_returns_names_for_list_payload(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_icloud(TMPDIR)

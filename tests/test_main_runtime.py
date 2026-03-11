@@ -349,13 +349,14 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             )
 
             with patch("app.main.load_manifest", return_value={"/a": {"etag": "1"}}):
-                with patch("app.main.perform_incremental_sync", return_value=(SUMMARY, {"/b": {"etag": "2"}})):
+                with patch("app.main.perform_incremental_sync", return_value=(SUMMARY, {"/b": {"etag": "2"}})) as SYNC:
                     with patch("app.main.save_manifest") as SAVE_MANIFEST:
                         with patch("app.main.notify") as NOTIFY:
                             with patch("app.main.log_line") as LOG_LINE:
                                 run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE)
 
             SAVE_MANIFEST.assert_called_once()
+            SYNC.assert_called_once_with(CLIENT, CONFIG.output_dir, {"/a": {"etag": "1"}}, LOG_FILE)
             self.assertEqual(NOTIFY.call_count, 2)
             self.assertGreaterEqual(LOG_LINE.call_count, 1)
             self.assertEqual(LOG_LINE.call_args_list[-1].args[1], "info")

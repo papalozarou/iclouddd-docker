@@ -676,7 +676,12 @@ def run_backup(
     log_line(LOG_FILE, "debug", f"Loaded manifest entries: {len(MANIFEST)}")
     notify(TELEGRAM, "Backup starting.")
 
-    SUMMARY, NEW_MANIFEST = perform_incremental_sync(CLIENT, CONFIG.output_dir, MANIFEST)
+    SUMMARY, NEW_MANIFEST = perform_incremental_sync(
+        CLIENT,
+        CONFIG.output_dir,
+        MANIFEST,
+        LOG_FILE,
+    )
     log_line(
         LOG_FILE,
         "debug",

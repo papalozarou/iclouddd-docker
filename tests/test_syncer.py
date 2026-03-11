@@ -204,6 +204,27 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertIn("docs/explode.txt", NEW_MANIFEST)
         self.assertTrue(any("File transfer worker failed:" in CALL.args[0] for CALL in PRINT.call_args_list))
 
+# --------------------------------------------------------------------------
+# This test confirms incremental sync emits debug diagnostics when a log
+# file path is provided.
+# --------------------------------------------------------------------------
+    def test_perform_incremental_sync_emits_debug_diagnostics(self) -> None:
+        ENTRIES = [
+            RemoteEntry("docs", True, 0, "2026-03-09T00:00:00Z"),
+            RemoteEntry("docs/new.txt", False, 11, "2026-03-09T00:00:00Z"),
+        ]
+        CLIENT = FakeClient(ENTRIES, {"docs/new.txt": True})
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "worker.log"
+            with patch("app.syncer.log_line") as LOG_LINE:
+                perform_incremental_sync(CLIENT, Path(TMPDIR), {}, LOG_FILE)
+
+        DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
+        self.assertTrue(any("Remote listing detail:" in LINE for LINE in DEBUG_LINES))
+        self.assertTrue(any("Transfer planning detail:" in LINE for LINE in DEBUG_LINES))
+        self.assertTrue(any("Transfer execution detail:" in LINE for LINE in DEBUG_LINES))
+
 
 if __name__ == "__main__":
     unittest.main()

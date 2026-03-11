@@ -12,6 +12,7 @@ from typing import Any
 import os
 
 from app.icloud_client import ICloudDriveClient, RemoteEntry
+from app.logger import log_line
 
 
 # ------------------------------------------------------------------------------
@@ -205,10 +206,18 @@ def perform_incremental_sync(
     CLIENT: ICloudDriveClient,
     OUTPUT_DIR: Path,
     MANIFEST: dict[str, dict[str, Any]],
+    LOG_FILE: Path | None = None,
 ) -> tuple[SyncResult, dict[str, dict[str, Any]]]:
     ENTRIES = CLIENT.list_entries()
     FILES = [ENTRY for ENTRY in ENTRIES if not ENTRY.is_dir]
     DIRECTORIES = [ENTRY for ENTRY in ENTRIES if ENTRY.is_dir]
+    if LOG_FILE is not None:
+        log_line(
+            LOG_FILE,
+            "debug",
+            "Remote listing detail: "
+            f"entries={len(ENTRIES)}, files={len(FILES)}, directories={len(DIRECTORIES)}",
+        )
 
     ensure_directories(OUTPUT_DIR, DIRECTORIES)
     NEW_MANIFEST: dict[str, dict[str, Any]] = {}
@@ -227,8 +236,22 @@ def perform_incremental_sync(
 
         NEW_MANIFEST[ENTRY.path] = entry_metadata(ENTRY)
 
+    if LOG_FILE is not None:
+        log_line(
+            LOG_FILE,
+            "debug",
+            "Transfer planning detail: "
+            f"candidates={len(TRANSFER_CANDIDATES)}, skipped_unchanged={SKIPPED}",
+        )
+
     if TRANSFER_CANDIDATES:
         WORKER_COUNT = get_auto_worker_count()
+        if LOG_FILE is not None:
+            log_line(
+                LOG_FILE,
+                "debug",
+                f"Transfer execution detail: workers={WORKER_COUNT}",
+            )
 
         with ThreadPoolExecutor(max_workers=WORKER_COUNT) as EXECUTOR:
             FUTURES = {

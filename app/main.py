@@ -487,6 +487,61 @@ def notify(TELEGRAM: TelegramConfig, MESSAGE: str) -> None:
 
 
 # ------------------------------------------------------------------------------
+# This function formats a fallback-safe Apple ID label for Telegram messages.
+#
+# 1. "APPLE_ID" is the configured iCloud email value.
+#
+# Returns: Non-empty Apple ID label.
+# ------------------------------------------------------------------------------
+def format_apple_id_label(APPLE_ID: str) -> str:
+    CLEAN_VALUE = APPLE_ID.strip()
+
+    if CLEAN_VALUE:
+        return CLEAN_VALUE
+
+    return "<unknown>"
+
+
+# ------------------------------------------------------------------------------
+# This function builds a compact multi-line Telegram event message.
+#
+# 1. "ICON" is the leading emoji marker.
+# 2. "TITLE" is sentence-case message heading.
+# 3. "DESCRIPTION" is one-line activity summary.
+# 4. "STATUS_LINES" are optional detail lines.
+#
+# Returns: Formatted Telegram message text.
+# ------------------------------------------------------------------------------
+def format_telegram_event(
+    ICON: str,
+    TITLE: str,
+    DESCRIPTION: str,
+    STATUS_LINES: list[str] | None = None,
+) -> str:
+    LINES = [f"*{ICON} {TITLE}*", DESCRIPTION]
+
+    if STATUS_LINES:
+        LINES.extend([LINE for LINE in STATUS_LINES if LINE.strip()])
+
+    return "\n".join(LINES)
+
+
+# ------------------------------------------------------------------------------
+# This function formats elapsed seconds as "HH:MM:SS".
+#
+# 1. "TOTAL_SECONDS" is elapsed duration in seconds.
+#
+# Returns: Zero-padded duration string.
+# ------------------------------------------------------------------------------
+def format_duration_clock(TOTAL_SECONDS: int) -> str:
+    SAFE_SECONDS = max(TOTAL_SECONDS, 0)
+    HOURS = SAFE_SECONDS // 3600
+    MINUTES = (SAFE_SECONDS % 3600) // 60
+    SECONDS = SAFE_SECONDS % 60
+    return f"{HOURS:02d}:{MINUTES:02d}:{SECONDS:02d}"
+
+
+# ------------------------------------------------------------------------------
 # This function executes authentication and persists updated auth state.
 #
 # 1. "CLIENT" is iCloud client wrapper.
@@ -504,9 +559,11 @@ def attempt_auth(
     AUTH_STATE_PATH: Path,
     TELEGRAM: TelegramConfig,
     USERNAME: str,
+    APPLE_ID: str,
     PROVIDED_CODE: str,
 ) -> tuple[AuthState, bool, str]:
     CODE = PROVIDED_CODE.strip()
+    APPLE_ID_LABEL = format_apple_id_label(APPLE_ID)
 
     if CODE:
         IS_SUCCESS, DETAILS = CLIENT.complete_authentication(CODE)
@@ -521,7 +578,15 @@ def attempt_auth(
             reminder_stage="none",
         )
         save_auth_state(AUTH_STATE_PATH, NEW_STATE)
-        notify(TELEGRAM, "Authentication successful.")
+        notify(
+            TELEGRAM,
+            format_telegram_event(
+                "✅",
+                "Authentication complete",
+                f"Authenticated for Apple ID {APPLE_ID_LABEL}.",
+                [DETAILS],
+            ),
+        )
         return NEW_STATE, True, DETAILS
 
     if "Two-factor code is required" in DETAILS:
@@ -529,14 +594,29 @@ def attempt_auth(
         save_auth_state(AUTH_STATE_PATH, NEW_STATE)
         notify(
             TELEGRAM,
-            f"MFA required. Send '{USERNAME} auth 123456' or "
-            f"'{USERNAME} reauth 123456'.",
+            format_telegram_event(
+                "🔑",
+                "Authentication required",
+                f"Authentication required for Apple ID {APPLE_ID_LABEL}.",
+                [
+                    f"Send: {USERNAME} auth 123456",
+                    f"Or: {USERNAME} reauth 123456",
+                ],
+            ),
         )
         return NEW_STATE, False, DETAILS
 
     NEW_STATE = replace(AUTH_STATE, auth_pending=True)
     save_auth_state(AUTH_STATE_PATH, NEW_STATE)
-    notify(TELEGRAM, f"Authentication failed: {DETAILS}")
+    notify(
+        TELEGRAM,
+        format_telegram_event(
+            "❌",
+            "Authentication failed",
+            f"Authentication failed for Apple ID {APPLE_ID_LABEL}.",
+            [f"Reason: {DETAILS}"],
+        ),
+    )
     return NEW_STATE, False, DETAILS
 
 
@@ -572,10 +652,20 @@ def enforce_safety_net(CONFIG: AppConfig, TELEGRAM: TelegramConfig, LOG_FILE: Pa
     MISMATCH_TEXT = "\n".join(RESULT.mismatched_samples)
     log_line(LOG_FILE, "error", "Safety net blocked backup due to permissions.")
     log_line(LOG_FILE, "error", MISMATCH_TEXT)
+    APPLE_ID_LABEL = format_apple_id_label(CONFIG.icloud_email)
+    SAMPLE_TEXT = ", ".join(RESULT.mismatched_samples[:2]) or "<none>"
     notify(
         TELEGRAM,
-        "Safety net blocked backup. Expected permissions "
-        f"{RESULT.expected_mode}. Mismatches:\n{MISMATCH_TEXT}",
+        format_telegram_event(
+            "⚠️",
+            "Safety net blocked",
+            f"Backup blocked for Apple ID {APPLE_ID_LABEL}.",
+            [
+                "Permission mismatches detected in existing files.",
+                f"Expected: mode {RESULT.expected_mode}",
+                f"Sample mismatches: {SAMPLE_TEXT}",
+            ],
+        ),
     )
     BLOCKED_MARKER.write_text("blocked\n", encoding="utf-8")
     return False
@@ -607,13 +697,28 @@ def process_reauth_reminders(
         return NEW_STATE
 
     if DAYS_LEFT <= 2 and AUTH_STATE.reminder_stage != "prompt2":
-        notify(TELEGRAM, f"Reauth required in two days. Send '{USERNAME} reauth'.")
+        notify(
+            TELEGRAM,
+            format_telegram_event(
+                "🔑",
+                "Reauthentication required",
+                "Reauthentication is due within two days.",
+                [f"Send: {USERNAME} reauth"],
+            ),
+        )
         NEW_STATE = replace(AUTH_STATE, reminder_stage="prompt2", reauth_pending=True)
         save_auth_state(AUTH_STATE_PATH, NEW_STATE)
         return NEW_STATE
 
     if DAYS_LEFT <= 5 and AUTH_STATE.reminder_stage == "none":
-        notify(TELEGRAM, "Reauthentication will be required within five days.")
+        notify(
+            TELEGRAM,
+            format_telegram_event(
+                "📣",
+                "Reauth reminder",
+                "Reauthentication will be required within five days.",
+            ),
+        )
         NEW_STATE = replace(AUTH_STATE, reminder_stage="alert5")
         save_auth_state(AUTH_STATE_PATH, NEW_STATE)
         return NEW_STATE
@@ -674,7 +779,17 @@ def run_backup(
 ) -> None:
     MANIFEST = load_manifest(CONFIG.manifest_path)
     log_line(LOG_FILE, "debug", f"Loaded manifest entries: {len(MANIFEST)}")
-    notify(TELEGRAM, "Backup starting.")
+    APPLE_ID_LABEL = format_apple_id_label(CONFIG.icloud_email)
+    RUN_START_EPOCH = int(time.time())
+    notify(
+        TELEGRAM,
+        format_telegram_event(
+            "⬇️",
+            "Backup started",
+            f"Files downloading for Apple ID {APPLE_ID_LABEL}.",
+            [f"Mode: {CONFIG.schedule_mode}"],
+        ),
+    )
 
     SUMMARY, NEW_MANIFEST = perform_incremental_sync(
         CLIENT,
@@ -694,13 +809,26 @@ def run_backup(
     )
     save_manifest(CONFIG.manifest_path, NEW_MANIFEST)
 
-    MESSAGE = (
+    DURATION_SECONDS = int(time.time()) - RUN_START_EPOCH
+    COMPLETION_MESSAGE = format_telegram_event(
+        "📦",
+        "Backup complete",
+        f"Backup finished for Apple ID {APPLE_ID_LABEL}.",
+        [
+            f"Transferred: {SUMMARY.transferred_files}/{SUMMARY.total_files}",
+            f"Skipped: {SUMMARY.skipped_files}",
+            f"Errors: {SUMMARY.error_files}",
+            f"Duration: {format_duration_clock(DURATION_SECONDS)}",
+        ],
+    )
+    notify(TELEGRAM, COMPLETION_MESSAGE)
+    log_line(
+        LOG_FILE,
+        "info",
         "Backup complete. "
         f"Transferred {SUMMARY.transferred_files}/{SUMMARY.total_files}, "
-        f"skipped {SUMMARY.skipped_files}, errors {SUMMARY.error_files}."
+        f"skipped {SUMMARY.skipped_files}, errors {SUMMARY.error_files}.",
     )
-    notify(TELEGRAM, MESSAGE)
-    log_line(LOG_FILE, "info", MESSAGE)
 
 
 # ------------------------------------------------------------------------------
@@ -725,8 +853,18 @@ def handle_command(
     IS_AUTHENTICATED: bool,
     TELEGRAM: TelegramConfig,
 ) -> tuple[AuthState, bool, bool]:
+    APPLE_ID_LABEL = format_apple_id_label(CONFIG.icloud_email)
+
     if COMMAND == "backup":
-        notify(TELEGRAM, "Backup requested.")
+        notify(
+            TELEGRAM,
+            format_telegram_event(
+                "📥",
+                "Backup requested",
+                f"Manual backup requested for Apple ID {APPLE_ID_LABEL}.",
+                ["Worker queued backup to run now."],
+            ),
+        )
         return AUTH_STATE, IS_AUTHENTICATED, True
 
     if COMMAND == "auth" and not ARGS:
@@ -734,8 +872,12 @@ def handle_command(
         save_auth_state(CONFIG.auth_state_path, NEW_STATE)
         notify(
             TELEGRAM,
-            f"Send '{CONFIG.container_username} auth 123456' "
-            "with your current MFA code.",
+            format_telegram_event(
+                "🔑",
+                "Authentication required",
+                f"Authentication required for Apple ID {APPLE_ID_LABEL}.",
+                [f"Send: {CONFIG.container_username} auth 123456"],
+            ),
         )
         return NEW_STATE, IS_AUTHENTICATED, False
 
@@ -744,8 +886,12 @@ def handle_command(
         save_auth_state(CONFIG.auth_state_path, NEW_STATE)
         notify(
             TELEGRAM,
-            f"Send '{CONFIG.container_username} reauth 123456' "
-            "to complete reauthentication.",
+            format_telegram_event(
+                "🔑",
+                "Reauthentication required",
+                f"Reauthentication required for Apple ID {APPLE_ID_LABEL}.",
+                [f"Send: {CONFIG.container_username} reauth 123456"],
+            ),
         )
         return NEW_STATE, IS_AUTHENTICATED, False
 
@@ -755,6 +901,7 @@ def handle_command(
         CONFIG.auth_state_path,
         TELEGRAM,
         CONFIG.container_username,
+        CONFIG.icloud_email,
         ARGS,
     )
     log_line(CONFIG.logs_dir / "worker.log", "info", f"Auth command result: {DETAILS}")
@@ -822,6 +969,7 @@ def main() -> int:
     LOG_FILE = CONFIG.logs_dir / "worker.log"
     TELEGRAM = TelegramConfig(CONFIG.telegram_bot_token, CONFIG.telegram_chat_id)
     HEARTBEAT_STOP_EVENT: threading.Event | None = None
+    STOP_STATUS = "Last status: worker process exited."
 
     try:
         configure_keyring(CONFIG.config_dir)
@@ -851,6 +999,16 @@ def main() -> int:
             CONFIG.icloud_email,
             CONFIG.icloud_password,
         )
+        APPLE_ID_LABEL = format_apple_id_label(CONFIG.icloud_email)
+        notify(
+            TELEGRAM,
+            format_telegram_event(
+                "🟢",
+                "Container started",
+                f"Worker started for Apple ID {APPLE_ID_LABEL}.",
+                ["Initialising authentication and backup checks."],
+            ),
+        )
 
         CLIENT = ICloudDriveClient(CONFIG)
         AUTH_STATE = load_auth_state(CONFIG.auth_state_path)
@@ -860,6 +1018,7 @@ def main() -> int:
             CONFIG.auth_state_path,
             TELEGRAM,
             CONFIG.container_username,
+            CONFIG.icloud_email,
             "",
         )
         log_line(LOG_FILE, "info", DETAILS)
@@ -876,7 +1035,12 @@ def main() -> int:
             if not IS_AUTHENTICATED or AUTH_STATE.reauth_pending:
                 notify(
                     TELEGRAM,
-                    "One-shot mode waiting for authentication command before backup.",
+                    format_telegram_event(
+                        "🔑",
+                        "Authentication required",
+                        f"Authentication required for Apple ID {APPLE_ID_LABEL}.",
+                        ["One-shot mode is waiting for an auth command before backup."],
+                    ),
                 )
                 AUTH_STATE, IS_AUTHENTICATED = wait_for_one_shot_auth(
                     CONFIG,
@@ -887,17 +1051,37 @@ def main() -> int:
                 )
 
             if not IS_AUTHENTICATED:
-                notify(TELEGRAM, "One-shot backup skipped because authentication is incomplete.")
+                notify(
+                    TELEGRAM,
+                    format_telegram_event(
+                        "⏭️",
+                        "Backup skipped",
+                        f"Backup skipped for Apple ID {APPLE_ID_LABEL}.",
+                        ["Reason: authentication incomplete."],
+                    ),
+                )
+                STOP_STATUS = "Last status: one-shot backup skipped due to incomplete authentication."
                 return 2
 
             if AUTH_STATE.reauth_pending:
-                notify(TELEGRAM, "One-shot backup skipped because reauthentication is pending.")
+                notify(
+                    TELEGRAM,
+                    format_telegram_event(
+                        "⏭️",
+                        "Backup skipped",
+                        f"Backup skipped for Apple ID {APPLE_ID_LABEL}.",
+                        ["Reason: reauthentication pending."],
+                    ),
+                )
+                STOP_STATUS = "Last status: one-shot backup skipped due to pending reauthentication."
                 return 3
 
             if not enforce_safety_net(CONFIG, TELEGRAM, LOG_FILE):
+                STOP_STATUS = "Last status: one-shot backup blocked by safety net."
                 return 4
 
             run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE)
+            STOP_STATUS = "Last status: run completed and container exited."
             return 0
 
         BACKUP_REQUESTED = False
@@ -945,12 +1129,28 @@ def main() -> int:
             NEXT_RUN_EPOCH = get_next_run_epoch(CONFIG, NOW_EPOCH)
 
             if not IS_AUTHENTICATED:
-                notify(TELEGRAM, "Backup skipped because authentication is incomplete.")
+                notify(
+                    TELEGRAM,
+                    format_telegram_event(
+                        "⏭️",
+                        "Backup skipped",
+                        f"Backup skipped for Apple ID {APPLE_ID_LABEL}.",
+                        ["Reason: authentication incomplete."],
+                    ),
+                )
                 time.sleep(5)
                 continue
 
             if AUTH_STATE.reauth_pending:
-                notify(TELEGRAM, "Backup skipped because reauthentication is pending.")
+                notify(
+                    TELEGRAM,
+                    format_telegram_event(
+                        "⏭️",
+                        "Backup skipped",
+                        f"Backup skipped for Apple ID {APPLE_ID_LABEL}.",
+                        ["Reason: reauthentication pending."],
+                    ),
+                )
                 time.sleep(5)
                 continue
 
@@ -962,6 +1162,15 @@ def main() -> int:
             BACKUP_REQUESTED = False
             time.sleep(5)
     finally:
+        notify(
+            TELEGRAM,
+            format_telegram_event(
+                "🛑",
+                "Container stopped",
+                f"Worker stopped for Apple ID {format_apple_id_label(CONFIG.icloud_email)}.",
+                [STOP_STATUS],
+            ),
+        )
         if HEARTBEAT_STOP_EVENT is not None:
             HEARTBEAT_STOP_EVENT.set()
 

@@ -190,6 +190,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                         AUTH_STATE_PATH,
                         TELEGRAM,
                         "alice",
+                        "alice@example.com",
                         " 123456 ",
                     )
 
@@ -199,7 +200,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertFalse(NEW_STATE.auth_pending)
             self.assertFalse(NEW_STATE.reauth_pending)
             CLIENT.complete_authentication.assert_called_once_with("123456")
-            NOTIFY.assert_called_once_with(TELEGRAM, "Authentication successful.")
+            self.assertIn("Authentication complete", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms attempt_auth MFA-required branch sets auth pending.
@@ -219,6 +220,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                     AUTH_STATE_PATH,
                     TELEGRAM,
                     "alice",
+                    "alice@example.com",
                     "",
                 )
 
@@ -227,7 +229,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertTrue(NEW_STATE.auth_pending)
             self.assertFalse(NEW_STATE.reauth_pending)
             CLIENT.start_authentication.assert_called_once()
-            self.assertIn("MFA required", NOTIFY.call_args[0][1])
+            self.assertIn("Authentication required", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms attempt_auth generic failure sends failure message.
@@ -247,6 +249,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                     AUTH_STATE_PATH,
                     TELEGRAM,
                     "alice",
+                    "alice@example.com",
                     "",
                 )
 
@@ -312,7 +315,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
 
             self.assertFalse(RETURNED)
             self.assertTrue((CONFIG.config_dir / "safety_net_blocked.flag").exists())
-            self.assertIn("Safety net blocked backup.", NOTIFY.call_args[0][1])
+            self.assertIn("Safety net blocked", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms process_commands returns events and next offset.
@@ -388,7 +391,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertEqual(NEW_STATE, AUTH_STATE)
             self.assertTrue(IS_AUTHENTICATED)
             self.assertTrue(REQUESTED)
-            NOTIFY.assert_called_once_with(TELEGRAM, "Backup requested.")
+            self.assertIn("Backup requested", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms handle_command auth prompt path persists pending state.
@@ -514,10 +517,9 @@ class TestMainEntrypoint(unittest.TestCase):
                                                     RESULT = __import__("app.main", fromlist=["main"]).main()
 
             self.assertEqual(RESULT, 2)
-            NOTIFY.assert_called_with(
-                TelegramConfig(CONFIG.telegram_bot_token, CONFIG.telegram_chat_id),
-                "One-shot backup skipped because authentication is incomplete.",
-            )
+            MESSAGES = [CALL.args[1] for CALL in NOTIFY.call_args_list]
+            self.assertTrue(any("Backup skipped" in MESSAGE for MESSAGE in MESSAGES))
+            self.assertTrue(any("authentication incomplete" in MESSAGE for MESSAGE in MESSAGES))
 
 # --------------------------------------------------------------------------
 # This test confirms one-shot mode returns 3 when reauth is pending.

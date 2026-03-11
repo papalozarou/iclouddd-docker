@@ -124,7 +124,7 @@ class TestTelegramApiHelpers(unittest.TestCase):
         self.assertTrue(RESULT)
         POST.assert_called_once_with(
             "https://api.telegram.org/bottoken/sendMessage",
-            json={"chat_id": "12345", "text": "hello"},
+            json={"chat_id": "12345", "text": "hello", "parse_mode": "Markdown"},
             timeout=10,
         )
 

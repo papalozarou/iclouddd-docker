@@ -60,7 +60,11 @@ def send_message(CONFIG: TelegramConfig, TEXT: str, TIMEOUT: int = 20) -> bool:
     if not CONFIG.chat_id:
         return False
 
-    PAYLOAD = {"chat_id": CONFIG.chat_id, "text": TEXT}
+    PAYLOAD = {
+        "chat_id": CONFIG.chat_id,
+        "text": TEXT,
+        "parse_mode": "Markdown",
+    }
 
     try:
         RESPONSE = requests.post(

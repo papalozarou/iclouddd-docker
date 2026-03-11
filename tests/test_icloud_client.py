@@ -45,6 +45,8 @@ def build_config_for_icloud(TMPDIR: str) -> AppConfig:
         schedule_weekdays="monday",
         schedule_monthly_week="first",
         schedule_interval_minutes=60,
+        sync_workers=0,
+        download_chunk_mib=4,
         reauth_interval_days=30,
         output_dir=OUTPUT_DIR,
         config_dir=CONFIG_DIR,
@@ -274,6 +276,27 @@ class TestICloudClientTraversal(unittest.TestCase):
             FILE_CHILD.dir.side_effect = NotADirectoryError("file.bin")
             self.assertFalse(CLIENT._child_is_dir(FILE_CHILD))
 
+    def test_child_is_dir_prefers_directory_probe_for_open_capable_nodes(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+
+            FOLDER_LIKE = Mock()
+            FOLDER_LIKE.open = Mock()
+            FOLDER_LIKE.dir.return_value = ["nested.bin"]
+
+            self.assertTrue(CLIENT._child_is_dir(FOLDER_LIKE))
+
+    def test_child_is_dir_uses_explicit_false_folder_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+
+            FILE_LIKE = Mock(is_folder=False)
+            FILE_LIKE.dir.side_effect = RuntimeError("should not run")
+
+            self.assertFalse(CLIENT._child_is_dir(FILE_LIKE))
+
     def test_node_dir_returns_names_for_list_payload(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_icloud(TMPDIR)
@@ -359,6 +382,7 @@ class TestICloudClientDownloads(unittest.TestCase):
 
             self.assertTrue(RESULT)
             self.assertEqual(LOCAL_PATH.read_bytes(), b"abcdef")
+            RESPONSE.iter_content.assert_called_once_with(chunk_size=4 * 1024 * 1024)
 
     def test_download_file_success_with_raw_stream(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:

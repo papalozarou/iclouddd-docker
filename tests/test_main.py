@@ -57,6 +57,8 @@ def build_config(**OVERRIDES: object) -> AppConfig:
         schedule_weekdays="monday,thursday",
         schedule_monthly_week="first",
         schedule_interval_minutes=1440,
+        sync_workers=0,
+        download_chunk_mib=4,
         reauth_interval_days=30,
         output_dir=Path("/tmp/output"),
         config_dir=Path("/tmp/config"),
@@ -194,6 +196,33 @@ class TestMainValidation(unittest.TestCase):
         ERRORS = validate_config(CONFIG)
 
         self.assertEqual(ERRORS, [])
+
+# --------------------------------------------------------------------------
+# This test confirms worker override validation rejects out-of-range values.
+# --------------------------------------------------------------------------
+    def test_validate_config_rejects_out_of_range_sync_workers(self) -> None:
+        CONFIG = build_config(sync_workers=99)
+
+        ERRORS = validate_config(CONFIG)
+
+        self.assertIn(
+            "SYNC_WORKERS must be auto or an integer between 1 and 16.",
+            ERRORS,
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms download chunk size validation rejects out-of-range
+# values.
+# --------------------------------------------------------------------------
+    def test_validate_config_rejects_out_of_range_download_chunk(self) -> None:
+        CONFIG = build_config(download_chunk_mib=99)
+
+        ERRORS = validate_config(CONFIG)
+
+        self.assertIn(
+            "DOWNLOAD_CHUNK_MIB must be an integer between 1 and 16.",
+            ERRORS,
+        )
 
 # --------------------------------------------------------------------------
 # This test confirms weekly mode requires exactly one valid weekday.

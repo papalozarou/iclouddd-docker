@@ -379,9 +379,10 @@ class ICloudDriveClient:
         if getattr(CHILD, "isFolder", None) is True:
             return True
 
-        OPEN_METHOD = getattr(CHILD, "open", None)
+        if getattr(CHILD, "is_folder", None) is False:
+            return False
 
-        if callable(OPEN_METHOD):
+        if getattr(CHILD, "isFolder", None) is False:
             return False
 
         try:
@@ -696,7 +697,9 @@ class ICloudDriveClient:
             self._cleanup_temporary_file(TEMP_PATH)
 
             with TEMP_PATH.open("wb") as HANDLE:
-                for CHUNK in RESPONSE.iter_content(chunk_size=1024 * 1024):
+                CHUNK_SIZE_BYTES = self.config.download_chunk_mib * 1024 * 1024
+
+                for CHUNK in RESPONSE.iter_content(chunk_size=CHUNK_SIZE_BYTES):
                     if not CHUNK:
                         continue
 

@@ -1060,7 +1060,7 @@ def main() -> int:
     LOG_FILE = CONFIG.logs_dir / "worker.log"
     TELEGRAM = TelegramConfig(CONFIG.telegram_bot_token, CONFIG.telegram_chat_id)
     HEARTBEAT_STOP_EVENT: threading.Event | None = None
-    STOP_STATUS = "Last status: worker process exited."
+    STOP_STATUS = "Last status: Worker process exited."
 
     try:
         configure_keyring(CONFIG.config_dir)
@@ -1155,7 +1155,7 @@ def main() -> int:
                         ["Reason: Authentication incomplete."],
                     ),
                 )
-                STOP_STATUS = "Last status: one-shot backup skipped due to incomplete authentication."
+                STOP_STATUS = "Last status: One-shot backup skipped due to incomplete authentication."
                 return 2
 
             if AUTH_STATE.reauth_pending:
@@ -1168,15 +1168,15 @@ def main() -> int:
                         ["Reason: Reauthentication pending."],
                     ),
                 )
-                STOP_STATUS = "Last status: one-shot backup skipped due to pending reauthentication."
+                STOP_STATUS = "Last status: One-shot backup skipped due to pending reauthentication."
                 return 3
 
             if not enforce_safety_net(CONFIG, TELEGRAM, LOG_FILE):
-                STOP_STATUS = "Last status: one-shot backup blocked by safety net."
+                STOP_STATUS = "Last status: One-shot backup blocked by safety net."
                 return 4
 
             run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE, "one-shot")
-            STOP_STATUS = "Last status: run completed and container exited."
+            STOP_STATUS = "Last status: Run completed and container exited."
             return 0
 
         BACKUP_REQUESTED = False

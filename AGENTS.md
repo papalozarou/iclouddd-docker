@@ -35,6 +35,7 @@ This file defines various coding standards for agents to adhere to.
 - MUST: Ensure each document answers one clear job well
 - MUST: Use conversational but technical prose; mild personality is fine, but waffle is not
 - MUST NOT: Use AI-generic phrasing such as vague claims about being "robust", "scalable", or "streamlined"
+- MUST NOT: Enforce 80-character line wrapping for Markdown documentation files
 - MUST: Define behaviour with explicit rules covering what happens, when it happens, and what happens next
 - MUST: Include concrete examples for schedule or time-based behaviour
 - MUST: For command documentation, include exact accepted input formats and exact output text where relevant

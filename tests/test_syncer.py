@@ -21,6 +21,7 @@ from app.syncer import (
     collect_mismatches,
     get_auto_worker_count,
     get_transfer_worker_count,
+    is_retryable_transfer_error,
     needs_transfer,
     perform_incremental_sync,
 )
@@ -206,7 +207,7 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertIn("docs", NEW_MANIFEST)
         self.assertIn("docs/new.txt", NEW_MANIFEST)
         self.assertIn("docs/unchanged.txt", NEW_MANIFEST)
-        self.assertIn("docs/fail.txt", NEW_MANIFEST)
+        self.assertNotIn("docs/fail.txt", NEW_MANIFEST)
 
 # --------------------------------------------------------------------------
 # This test confirms worker exceptions are counted and logged.
@@ -226,7 +227,7 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertEqual(SUMMARY.transferred_bytes, 0)
         self.assertEqual(SUMMARY.skipped_files, 0)
         self.assertEqual(SUMMARY.error_files, 1)
-        self.assertIn("docs/explode.txt", NEW_MANIFEST)
+        self.assertNotIn("docs/explode.txt", NEW_MANIFEST)
         self.assertTrue(any("File transfer worker failed:" in CALL.args[0] for CALL in PRINT.call_args_list))
 
 # --------------------------------------------------------------------------
@@ -293,6 +294,72 @@ class TestSyncerHelpers(unittest.TestCase):
 
         DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
         self.assertTrue(any("Transfer progress detail:" in LINE for LINE in DEBUG_LINES))
+
+# --------------------------------------------------------------------------
+# This test confirms failed transfers preserve existing manifest metadata.
+# --------------------------------------------------------------------------
+    def test_perform_incremental_sync_preserves_existing_manifest_on_failure(self) -> None:
+        ENTRIES = [
+            RemoteEntry("docs/file.txt", False, 22, "2026-03-10T00:00:00Z"),
+        ]
+        CLIENT = FakeClient(ENTRIES, {"docs/file.txt": False})
+        MANIFEST = {
+            "docs/file.txt": {
+                "is_dir": False,
+                "size": 11,
+                "modified": "2026-03-09T00:00:00Z",
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            SUMMARY, NEW_MANIFEST = perform_incremental_sync(CLIENT, Path(TMPDIR), MANIFEST)
+
+        self.assertEqual(SUMMARY.error_files, 1)
+        self.assertEqual(NEW_MANIFEST["docs/file.txt"]["size"], 11)
+        self.assertEqual(NEW_MANIFEST["docs/file.txt"]["modified"], "2026-03-09T00:00:00Z")
+
+# --------------------------------------------------------------------------
+# This test confirms transient exceptions are retried before succeeding.
+# --------------------------------------------------------------------------
+    def test_perform_incremental_sync_retries_transient_transfer_errors(self) -> None:
+        ENTRIES = [
+            RemoteEntry("docs/retry.txt", False, 5, "2026-03-10T00:00:00Z"),
+        ]
+
+        class FlakyClient:
+            def __init__(self):
+                self.calls = 0
+
+            def list_entries(self):
+                return ENTRIES
+
+            def download_file(self, REMOTE_PATH, LOCAL_PATH):
+                _ = REMOTE_PATH
+                _ = LOCAL_PATH
+                self.calls += 1
+                if self.calls < 3:
+                    raise RuntimeError("Service Unavailable (503)")
+                return True
+
+        CLIENT = FlakyClient()
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            with patch("app.syncer.time.sleep") as SLEEP:
+                SUMMARY, NEW_MANIFEST = perform_incremental_sync(CLIENT, Path(TMPDIR), {})
+
+        self.assertEqual(CLIENT.calls, 3)
+        self.assertEqual(SUMMARY.transferred_files, 1)
+        self.assertEqual(SUMMARY.error_files, 0)
+        self.assertIn("docs/retry.txt", NEW_MANIFEST)
+        self.assertEqual(SLEEP.call_count, 2)
+
+# --------------------------------------------------------------------------
+# This test confirms retry filtering only includes transient transfer errors.
+# --------------------------------------------------------------------------
+    def test_is_retryable_transfer_error_classification(self) -> None:
+        self.assertTrue(is_retryable_transfer_error(RuntimeError("Service Unavailable (503)")))
+        self.assertTrue(is_retryable_transfer_error(RuntimeError("Bad Gateway (502)")))
+        self.assertFalse(is_retryable_transfer_error(RuntimeError("Permission denied")))
 
 
 if __name__ == "__main__":

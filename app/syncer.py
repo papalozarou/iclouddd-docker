@@ -16,6 +16,23 @@ from app.icloud_client import ICloudDriveClient, RemoteEntry
 from app.logger import log_line
 
 TRANSFER_PROGRESS_LOG_INTERVAL_SECONDS = 30.0
+TRANSFER_RETRY_ATTEMPTS = 3
+TRANSFER_RETRY_BASE_DELAY_SECONDS = 1.0
+TRANSFER_RETRY_MAX_DELAY_SECONDS = 8.0
+TRANSFER_RETRY_ERROR_MARKERS = (
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+    "bad gateway",
+    "gateway timeout",
+    "service unavailable",
+    "throttled",
+    "timed out",
+    "timeout",
+    "connection reset",
+)
 
 
 # ------------------------------------------------------------------------------
@@ -235,6 +252,7 @@ def perform_incremental_sync(
     ensure_directories(OUTPUT_DIR, DIRECTORIES, LOG_FILE)
     NEW_MANIFEST: dict[str, dict[str, Any]] = {}
     TRANSFER_CANDIDATES: list[RemoteEntry] = []
+    TRANSFER_CANDIDATE_METADATA: dict[str, dict[str, Any]] = {}
 
     TRANSFERRED = 0
     TRANSFERRED_BYTES = 0
@@ -243,8 +261,11 @@ def perform_incremental_sync(
 
     for ENTRY in FILES:
         SHOULD_TRANSFER = needs_transfer(ENTRY, MANIFEST)
+        ENTRY_METADATA = entry_metadata(ENTRY)
+
         if SHOULD_TRANSFER:
             TRANSFER_CANDIDATES.append(ENTRY)
+            TRANSFER_CANDIDATE_METADATA[ENTRY.path] = ENTRY_METADATA
             if LOG_FILE is not None:
                 log_line(
                     LOG_FILE,
@@ -253,14 +274,13 @@ def perform_incremental_sync(
                 )
         else:
             SKIPPED += 1
+            NEW_MANIFEST[ENTRY.path] = ENTRY_METADATA
             if LOG_FILE is not None:
                 log_line(
                     LOG_FILE,
                     "debug",
                     f"File skipped unchanged: {ENTRY.path}",
                 )
-
-        NEW_MANIFEST[ENTRY.path] = entry_metadata(ENTRY)
 
     if LOG_FILE is not None:
         log_line(
@@ -299,7 +319,7 @@ def perform_incremental_sync(
                     ENTRY = FUTURES[FUTURE]
                     COMPLETED += 1
                     try:
-                        SUCCESS = FUTURE.result()
+                        SUCCESS, ATTEMPT_COUNT = FUTURE.result()
                     except Exception as ERROR:
                         if LOG_FILE is not None:
                             log_line(
@@ -314,12 +334,27 @@ def perform_incremental_sync(
                             flush=True,
                         )
                         ERRORS += 1
+                        EXISTING_METADATA = MANIFEST.get(ENTRY.path)
+
+                        if EXISTING_METADATA is not None:
+                            NEW_MANIFEST[ENTRY.path] = EXISTING_METADATA
                         continue
 
                     if SUCCESS:
                         TRANSFERRED += 1
                         TRANSFERRED_BYTES += max(ENTRY.size, 0)
+                        NEW_MANIFEST[ENTRY.path] = TRANSFER_CANDIDATE_METADATA[ENTRY.path]
                         if LOG_FILE is not None:
+                            if ATTEMPT_COUNT > 1:
+                                log_line(
+                                    LOG_FILE,
+                                    "debug",
+                                    f"File transferred after retries: {ENTRY.path} "
+                                    f"(attempts={ATTEMPT_COUNT}, "
+                                    f"{max(ENTRY.size, 0)} bytes)",
+                                )
+                                continue
+
                             log_line(
                                 LOG_FILE,
                                 "debug",
@@ -329,6 +364,10 @@ def perform_incremental_sync(
                         continue
 
                     ERRORS += 1
+                    EXISTING_METADATA = MANIFEST.get(ENTRY.path)
+
+                    if EXISTING_METADATA is not None:
+                        NEW_MANIFEST[ENTRY.path] = EXISTING_METADATA
                     if LOG_FILE is not None:
                         log_line(
                             LOG_FILE,
@@ -409,9 +448,41 @@ def transfer_if_required(
     OUTPUT_DIR: Path,
     ENTRY: RemoteEntry,
     SHOULD_TRANSFER: bool,
-) -> bool:
+) -> tuple[bool, int]:
     if not SHOULD_TRANSFER:
-        return True
+        return True, 1
 
     LOCAL_PATH = OUTPUT_DIR / ENTRY.path
-    return CLIENT.download_file(ENTRY.path, LOCAL_PATH)
+    ATTEMPT = 1
+
+    while ATTEMPT <= TRANSFER_RETRY_ATTEMPTS:
+        try:
+            IS_SUCCESS = CLIENT.download_file(ENTRY.path, LOCAL_PATH)
+            return IS_SUCCESS, ATTEMPT
+        except Exception as ERROR:
+            if ATTEMPT >= TRANSFER_RETRY_ATTEMPTS:
+                raise
+
+            if not is_retryable_transfer_error(ERROR):
+                raise
+
+            DELAY_SECONDS = min(
+                TRANSFER_RETRY_BASE_DELAY_SECONDS * (2 ** (ATTEMPT - 1)),
+                TRANSFER_RETRY_MAX_DELAY_SECONDS,
+            )
+            time.sleep(DELAY_SECONDS)
+            ATTEMPT += 1
+
+    return False, ATTEMPT
+
+
+# ------------------------------------------------------------------------------
+# This function identifies transient transfer errors that should be retried.
+#
+# 1. "ERROR" is a transfer exception from pyicloud or network layers.
+#
+# Returns: True for retryable errors; otherwise False.
+# ------------------------------------------------------------------------------
+def is_retryable_transfer_error(ERROR: Exception) -> bool:
+    ERROR_TEXT = f"{type(ERROR).__name__}: {ERROR}".lower()
+    return any(MARKER in ERROR_TEXT for MARKER in TRANSFER_RETRY_ERROR_MARKERS)

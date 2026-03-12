@@ -52,6 +52,8 @@ validation rules, see [SCHEDULING.md](SCHEDULING.md).
 - Worker count is internally bounded and can be overridden with
   `SYNC_DOWNLOAD_WORKERS`.
 - Download stream chunk size can be tuned with `SYNC_DOWNLOAD_CHUNK_MIB`.
+- Transient transfer exceptions (for example iCloud throttling and 5xx errors)
+  are retried with bounded backoff before being marked as failed.
 - Directory traversal applies bounded retry/backoff for transient iCloud API
   failures before treating a node as unavailable.
 

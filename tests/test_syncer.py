@@ -263,6 +263,37 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertTrue(any("Transfer planning detail:" in LINE for LINE in DEBUG_LINES))
         self.assertTrue(any("Transfer execution detail:" in LINE for LINE in DEBUG_LINES))
 
+# --------------------------------------------------------------------------
+# This test confirms long-running transfer loops emit in-run progress logs.
+# --------------------------------------------------------------------------
+    def test_perform_incremental_sync_emits_periodic_progress_logs(self) -> None:
+        ENTRIES = [
+            RemoteEntry("docs/file.txt", False, 11, "2026-03-09T00:00:00Z"),
+        ]
+        CLIENT = FakeClient(ENTRIES, {"docs/file.txt": True})
+
+        WAIT_CALLS = {"count": 0}
+
+        def fake_wait(PENDING, timeout, return_when):
+            _ = timeout
+            _ = return_when
+            WAIT_CALLS["count"] += 1
+            if WAIT_CALLS["count"] == 1:
+                return set(), set(PENDING)
+
+            FUTURE = next(iter(PENDING))
+            return {FUTURE}, set()
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "worker.log"
+            with patch("app.syncer.wait", side_effect=fake_wait):
+                with patch("app.syncer.TRANSFER_PROGRESS_LOG_INTERVAL_SECONDS", 0.0):
+                    with patch("app.syncer.log_line") as LOG_LINE:
+                        perform_incremental_sync(CLIENT, Path(TMPDIR), {}, 1, LOG_FILE)
+
+        DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
+        self.assertTrue(any("Transfer progress detail:" in LINE for LINE in DEBUG_LINES))
+
 
 if __name__ == "__main__":
     unittest.main()

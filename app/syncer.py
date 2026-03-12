@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +14,8 @@ import time
 
 from app.icloud_client import ICloudDriveClient, RemoteEntry
 from app.logger import log_line
+
+TRANSFER_PROGRESS_LOG_INTERVAL_SECONDS = 30.0
 
 
 # ------------------------------------------------------------------------------
@@ -282,45 +284,79 @@ def perform_incremental_sync(
                 EXECUTOR.submit(transfer_if_required, CLIENT, OUTPUT_DIR, ENTRY, True): ENTRY
                 for ENTRY in TRANSFER_CANDIDATES
             }
+            PENDING = set(FUTURES.keys())
+            COMPLETED = 0
+            TRANSFER_STARTED_EPOCH = time.monotonic()
+            LAST_PROGRESS_LOG_EPOCH = TRANSFER_STARTED_EPOCH
 
-            for FUTURE in as_completed(FUTURES):
-                ENTRY = FUTURES[FUTURE]
-                try:
-                    SUCCESS = FUTURE.result()
-                except Exception as ERROR:
-                    if LOG_FILE is not None:
-                        log_line(
-                            LOG_FILE,
-                            "debug",
-                            f"File transfer exception: {ENTRY.path} "
-                            f"({type(ERROR).__name__}: {ERROR})",
+            while PENDING:
+                DONE, PENDING = wait(
+                    PENDING,
+                    timeout=TRANSFER_PROGRESS_LOG_INTERVAL_SECONDS,
+                    return_when=FIRST_COMPLETED,
+                )
+                for FUTURE in DONE:
+                    ENTRY = FUTURES[FUTURE]
+                    COMPLETED += 1
+                    try:
+                        SUCCESS = FUTURE.result()
+                    except Exception as ERROR:
+                        if LOG_FILE is not None:
+                            log_line(
+                                LOG_FILE,
+                                "debug",
+                                f"File transfer exception: {ENTRY.path} "
+                                f"({type(ERROR).__name__}: {ERROR})",
+                            )
+                        print(
+                            "File transfer worker failed: "
+                            f"{type(ERROR).__name__}: {ERROR}",
+                            flush=True,
                         )
-                    print(
-                        "File transfer worker failed: "
-                        f"{type(ERROR).__name__}: {ERROR}",
-                        flush=True,
-                    )
+                        ERRORS += 1
+                        continue
+
+                    if SUCCESS:
+                        TRANSFERRED += 1
+                        TRANSFERRED_BYTES += max(ENTRY.size, 0)
+                        if LOG_FILE is not None:
+                            log_line(
+                                LOG_FILE,
+                                "debug",
+                                f"File transferred: {ENTRY.path} "
+                                f"({max(ENTRY.size, 0)} bytes)",
+                            )
+                        continue
+
                     ERRORS += 1
-                    continue
-
-                if SUCCESS:
-                    TRANSFERRED += 1
-                    TRANSFERRED_BYTES += max(ENTRY.size, 0)
                     if LOG_FILE is not None:
                         log_line(
                             LOG_FILE,
                             "debug",
-                            f"File transferred: {ENTRY.path} ({max(ENTRY.size, 0)} bytes)",
+                            f"File transfer failed: {ENTRY.path}",
                         )
-                    continue
 
-                ERRORS += 1
-                if LOG_FILE is not None:
+                NOW_EPOCH = time.monotonic()
+                SHOULD_LOG_PROGRESS = (
+                    LOG_FILE is not None
+                    and NOW_EPOCH - LAST_PROGRESS_LOG_EPOCH
+                    >= TRANSFER_PROGRESS_LOG_INTERVAL_SECONDS
+                )
+                if SHOULD_LOG_PROGRESS:
+                    ELAPSED_SECONDS = NOW_EPOCH - TRANSFER_STARTED_EPOCH
                     log_line(
                         LOG_FILE,
                         "debug",
-                        f"File transfer failed: {ENTRY.path}",
+                        "Transfer progress detail: "
+                        f"completed={COMPLETED}/{len(TRANSFER_CANDIDATES)}, "
+                        f"active={len(PENDING)}, "
+                        f"transferred={TRANSFERRED}, "
+                        f"bytes={TRANSFERRED_BYTES}, "
+                        f"skipped={SKIPPED}, "
+                        f"errors={ERRORS}, "
+                        f"elapsed_seconds={ELAPSED_SECONDS:.1f}",
                     )
+                    LAST_PROGRESS_LOG_EPOCH = NOW_EPOCH
 
     for ENTRY in DIRECTORIES:
         NEW_MANIFEST[ENTRY.path] = entry_metadata(ENTRY)

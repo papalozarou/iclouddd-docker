@@ -13,6 +13,8 @@
   privilege drop works.
 - Set `LOG_LEVEL=debug` in Compose `default-env` for verbose runtime
   diagnostics.
+- During transfer execution, debug logs include periodic in-run progress
+  lines every 30 seconds so long backups remain observable.
 
 ## Privilege model
 

@@ -880,6 +880,7 @@ def run_backup(
         MANIFEST,
         CONFIG.sync_workers,
         LOG_FILE,
+        BACKUP_DELETE_REMOVED=CONFIG.backup_delete_removed,
     )
     log_line(
         LOG_FILE,

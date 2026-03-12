@@ -45,6 +45,7 @@ def build_config_for_icloud(TMPDIR: str) -> AppConfig:
         schedule_weekdays="monday",
         schedule_monthly_week="first",
         schedule_interval_minutes=60,
+        backup_delete_removed=False,
         traversal_workers=1,
         sync_workers=0,
         download_chunk_mib=4,

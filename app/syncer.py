@@ -231,6 +231,7 @@ def perform_incremental_sync(
     MANIFEST: dict[str, dict[str, Any]],
     SYNC_DOWNLOAD_WORKERS: int = 0,
     LOG_FILE: Path | None = None,
+    BACKUP_DELETE_REMOVED: bool = False,
 ) -> tuple[SyncResult, dict[str, dict[str, Any]]]:
     TRAVERSAL_STARTED_EPOCH = time.monotonic()
     if LOG_FILE is not None:
@@ -446,6 +447,27 @@ def perform_incremental_sync(
     for ENTRY in DIRECTORIES:
         NEW_MANIFEST[ENTRY.path] = entry_metadata(ENTRY)
 
+    if BACKUP_DELETE_REMOVED:
+        if LOG_FILE is not None:
+            log_line(LOG_FILE, "info", "Delete phase started.")
+
+        DELETED_FILES, DELETED_DIRS, DELETE_ERRORS = delete_removed_local_paths(
+            OUTPUT_DIR,
+            FILES,
+            DIRECTORIES,
+            LOG_FILE,
+        )
+
+        if LOG_FILE is not None:
+            log_line(
+                LOG_FILE,
+                "info",
+                "Delete phase finished. "
+                f"deleted_files={DELETED_FILES}, "
+                f"deleted_directories={DELETED_DIRS}, "
+                f"errors={DELETE_ERRORS}.",
+            )
+
     return SyncResult(
         len(FILES),
         TRANSFERRED,
@@ -522,6 +544,102 @@ def ensure_directories(
                 "debug",
                 f"Directory ensured: {ENTRY.path}",
             )
+
+
+# ------------------------------------------------------------------------------
+# This function removes local items that are no longer present in iCloud.
+#
+# 1. "OUTPUT_DIR" is local backup root.
+# 2. "FILES" are current remote file entries.
+# 3. "DIRECTORIES" are current remote directory entries.
+# 4. "LOG_FILE" is optional log file path.
+#
+# Returns: Tuple of "(deleted_files, deleted_directories, errors)".
+# ------------------------------------------------------------------------------
+def delete_removed_local_paths(
+    OUTPUT_DIR: Path,
+    FILES: list[RemoteEntry],
+    DIRECTORIES: list[RemoteEntry],
+    LOG_FILE: Path | None = None,
+) -> tuple[int, int, int]:
+    REMOTE_FILE_PATHS = {ENTRY.path for ENTRY in FILES}
+    REMOTE_DIR_PATHS = {ENTRY.path for ENTRY in DIRECTORIES}
+    DELETED_FILES = 0
+    DELETED_DIRS = 0
+    ERRORS = 0
+
+    LOCAL_FILES = list(iter_local_files(OUTPUT_DIR))
+    for FILE_PATH in LOCAL_FILES:
+        RELATIVE_PATH = FILE_PATH.relative_to(OUTPUT_DIR).as_posix()
+
+        if RELATIVE_PATH in REMOTE_FILE_PATHS:
+            continue
+
+        try:
+            FILE_PATH.unlink()
+            DELETED_FILES += 1
+            if LOG_FILE is not None:
+                log_line(LOG_FILE, "debug", f"File deleted removed: {RELATIVE_PATH}")
+        except Exception as ERROR:
+            ERRORS += 1
+            if LOG_FILE is not None:
+                log_line(
+                    LOG_FILE,
+                    "debug",
+                    f"File delete error: {RELATIVE_PATH} ({type(ERROR).__name__}: {ERROR})",
+                )
+
+    LOCAL_DIRS = list(iter_local_directories(OUTPUT_DIR))
+    for DIR_PATH in LOCAL_DIRS:
+        RELATIVE_PATH = DIR_PATH.relative_to(OUTPUT_DIR).as_posix()
+
+        if RELATIVE_PATH in REMOTE_DIR_PATHS:
+            continue
+
+        try:
+            DIR_PATH.rmdir()
+            DELETED_DIRS += 1
+            if LOG_FILE is not None:
+                log_line(LOG_FILE, "debug", f"Directory deleted removed: {RELATIVE_PATH}")
+        except OSError:
+            continue
+        except Exception as ERROR:
+            ERRORS += 1
+            if LOG_FILE is not None:
+                log_line(
+                    LOG_FILE,
+                    "debug",
+                    f"Directory delete error: {RELATIVE_PATH} "
+                    f"({type(ERROR).__name__}: {ERROR})",
+                )
+
+    return DELETED_FILES, DELETED_DIRS, ERRORS
+
+
+# ------------------------------------------------------------------------------
+# This function yields all local files under output root.
+#
+# 1. "OUTPUT_DIR" is local backup root.
+#
+# Returns: Iterable of local file paths.
+# ------------------------------------------------------------------------------
+def iter_local_files(OUTPUT_DIR: Path):
+    for PATH in OUTPUT_DIR.rglob("*"):
+        if PATH.is_file():
+            yield PATH
+
+
+# ------------------------------------------------------------------------------
+# This function yields local directories in depth-first reverse order.
+#
+# 1. "OUTPUT_DIR" is local backup root.
+#
+# Returns: Iterable of local directory paths suitable for safe pruning.
+# ------------------------------------------------------------------------------
+def iter_local_directories(OUTPUT_DIR: Path):
+    DIRECTORIES = [PATH for PATH in OUTPUT_DIR.rglob("*") if PATH.is_dir()]
+    DIRECTORIES.sort(key=lambda ITEM: len(ITEM.parts), reverse=True)
+    return DIRECTORIES
 
 
 # ------------------------------------------------------------------------------

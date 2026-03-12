@@ -370,7 +370,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                     with patch("app.main.save_manifest") as SAVE_MANIFEST:
                         with patch("app.main.notify") as NOTIFY:
                             with patch("app.main.log_line") as LOG_LINE:
-                                run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE)
+                                run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE, "scheduled")
 
             SAVE_MANIFEST.assert_called_once()
             SYNC.assert_called_once_with(
@@ -387,6 +387,9 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertIn("Loaded manifest entries:", LOG_LINE.call_args_list[0].args[2])
             self.assertEqual(LOG_LINE.call_args_list[1].args[1], "debug")
             self.assertIn("Sync summary detail:", LOG_LINE.call_args_list[1].args[2])
+            self.assertIn("Schedule: Every 60 minutes.", NOTIFY.call_args_list[0].args[1])
+            self.assertNotIn("Mode:", NOTIFY.call_args_list[0].args[1])
+            self.assertNotIn("Trigger:", NOTIFY.call_args_list[0].args[1])
             self.assertIn("Average speed:", NOTIFY.call_args_list[1].args[1])
 
 # --------------------------------------------------------------------------
@@ -540,7 +543,7 @@ class TestMainEntrypoint(unittest.TestCase):
             self.assertEqual(RESULT, 2)
             MESSAGES = [CALL.args[1] for CALL in NOTIFY.call_args_list]
             self.assertTrue(any("Backup skipped" in MESSAGE for MESSAGE in MESSAGES))
-            self.assertTrue(any("authentication incomplete" in MESSAGE for MESSAGE in MESSAGES))
+            self.assertTrue(any("Authentication incomplete" in MESSAGE for MESSAGE in MESSAGES))
 
 # --------------------------------------------------------------------------
 # This test confirms one-shot mode returns 3 when reauth is pending.

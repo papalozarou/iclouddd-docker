@@ -70,6 +70,11 @@ Backup completion messages include:
 - `Duration: <hh:mm:ss>`
 - `Average speed: <value> MiB/s`
 
+Backup start messages include:
+
+- `Schedule: <plain English schedule>`
+- `Schedule: Manual, then <plain English schedule>`
+
 Safety-net blocked messages include an explicit expected ownership line:
 
 - `Expected: uid <uid>, gid <gid>`

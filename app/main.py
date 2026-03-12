@@ -566,6 +566,59 @@ def format_average_speed(TRANSFERRED_BYTES: int, DURATION_SECONDS: int) -> str:
 
 
 # ------------------------------------------------------------------------------
+# This function formats schedule settings as plain-English backup wording.
+#
+# 1. "CONFIG" is runtime configuration.
+# 2. "TRIGGER" is backup trigger context.
+#
+# Returns: Human-readable schedule description.
+# ------------------------------------------------------------------------------
+def format_schedule_description(CONFIG: AppConfig, TRIGGER: str) -> str:
+    if TRIGGER == "one-shot":
+        return "One-shot run – configured schedule is ignored."
+
+    if CONFIG.schedule_mode == "interval":
+        return f"Every {CONFIG.schedule_interval_minutes} minutes"
+
+    if CONFIG.schedule_mode == "daily":
+        return f"Daily at {CONFIG.schedule_backup_time}"
+
+    if CONFIG.schedule_mode == "weekly":
+        DAY_TEXT = CONFIG.schedule_weekdays.strip().title()
+        return f"Weekly on {DAY_TEXT} at {CONFIG.schedule_backup_time}"
+
+    if CONFIG.schedule_mode == "twice_weekly":
+        RAW_DAYS = [PART.strip().title() for PART in CONFIG.schedule_weekdays.split(",") if PART.strip()]
+        DAYS_TEXT = " and ".join(RAW_DAYS)
+        return f"Twice weekly on {DAYS_TEXT} at {CONFIG.schedule_backup_time}"
+
+    if CONFIG.schedule_mode == "monthly":
+        DAY_TEXT = CONFIG.schedule_weekdays.strip().title()
+        WEEK_TEXT = CONFIG.schedule_monthly_week.strip().lower()
+        WEEK_LABEL = WEEK_TEXT.capitalize()
+        return f"Monthly on the {WEEK_LABEL} {DAY_TEXT} at {CONFIG.schedule_backup_time}"
+
+    return f"Configured mode {CONFIG.schedule_mode}"
+
+
+# ------------------------------------------------------------------------------
+# This function formats schedule status text for backup-start notifications.
+#
+# 1. "CONFIG" is runtime configuration.
+# 2. "TRIGGER" is backup trigger context.
+#
+# Returns: One-line schedule status text.
+# ------------------------------------------------------------------------------
+def format_schedule_line(CONFIG: AppConfig, TRIGGER: str) -> str:
+    SCHEDULE_DESCRIPTION = format_schedule_description(CONFIG, TRIGGER)
+
+    if TRIGGER == "manual":
+        return f"Schedule: Manual, then {SCHEDULE_DESCRIPTION}."
+
+    return f"Schedule: {SCHEDULE_DESCRIPTION}."
+
+
+# ------------------------------------------------------------------------------
 # This function executes authentication and persists updated auth state.
 #
 # 1. "CLIENT" is iCloud client wrapper.
@@ -802,18 +855,22 @@ def run_backup(
     CONFIG: AppConfig,
     TELEGRAM: TelegramConfig,
     LOG_FILE: Path,
+    TRIGGER: str,
 ) -> None:
     MANIFEST = load_manifest(CONFIG.manifest_path)
     log_line(LOG_FILE, "debug", f"Loaded manifest entries: {len(MANIFEST)}")
     APPLE_ID_LABEL = format_apple_id_label(CONFIG.icloud_email)
     RUN_START_EPOCH = int(time.time())
+    SCHEDULE_LINE = format_schedule_line(CONFIG, TRIGGER)
     notify(
         TELEGRAM,
         format_telegram_event(
             "⬇️",
             "Backup started",
             f"Files downloading for Apple ID {APPLE_ID_LABEL}.",
-            [f"Mode: {CONFIG.schedule_mode}"],
+            [
+                SCHEDULE_LINE,
+            ],
         ),
     )
 
@@ -1091,7 +1148,7 @@ def main() -> int:
                         "⏭️",
                         "Backup skipped",
                         f"Backup skipped for Apple ID {APPLE_ID_LABEL}.",
-                        ["Reason: authentication incomplete."],
+                        ["Reason: Authentication incomplete."],
                     ),
                 )
                 STOP_STATUS = "Last status: one-shot backup skipped due to incomplete authentication."
@@ -1104,7 +1161,7 @@ def main() -> int:
                         "⏭️",
                         "Backup skipped",
                         f"Backup skipped for Apple ID {APPLE_ID_LABEL}.",
-                        ["Reason: reauthentication pending."],
+                        ["Reason: Reauthentication pending."],
                     ),
                 )
                 STOP_STATUS = "Last status: one-shot backup skipped due to pending reauthentication."
@@ -1114,7 +1171,7 @@ def main() -> int:
                 STOP_STATUS = "Last status: one-shot backup blocked by safety net."
                 return 4
 
-            run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE)
+            run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE, "one-shot")
             STOP_STATUS = "Last status: run completed and container exited."
             return 0
 
@@ -1169,7 +1226,7 @@ def main() -> int:
                         "⏭️",
                         "Backup skipped",
                         f"Backup skipped for Apple ID {APPLE_ID_LABEL}.",
-                        ["Reason: authentication incomplete."],
+                        ["Reason: Authentication incomplete."],
                     ),
                 )
                 time.sleep(5)
@@ -1182,7 +1239,7 @@ def main() -> int:
                         "⏭️",
                         "Backup skipped",
                         f"Backup skipped for Apple ID {APPLE_ID_LABEL}.",
-                        ["Reason: reauthentication pending."],
+                        ["Reason: Reauthentication pending."],
                     ),
                 )
                 time.sleep(5)
@@ -1192,7 +1249,8 @@ def main() -> int:
                 time.sleep(30)
                 continue
 
-            run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE)
+            BACKUP_TRIGGER = "manual" if BACKUP_REQUESTED else "scheduled"
+            run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE, BACKUP_TRIGGER)
             BACKUP_REQUESTED = False
             time.sleep(5)
     finally:

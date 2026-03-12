@@ -13,6 +13,8 @@
   privilege drop works.
 - Set `LOG_LEVEL=debug` in Compose `default-env` for verbose runtime
   diagnostics.
+- At `LOG_LEVEL=info`, worker logs include stage boundary markers for
+  traversal and transfer start/finish so run progress is still visible.
 - During transfer execution, debug logs include periodic in-run progress
   lines every 30 seconds so long backups remain observable.
 - During traversal/listing, debug logs include periodic in-run progress

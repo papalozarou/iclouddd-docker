@@ -232,6 +232,9 @@ def perform_incremental_sync(
     LOG_FILE: Path | None = None,
 ) -> tuple[SyncResult, dict[str, dict[str, Any]]]:
     TRAVERSAL_STARTED_EPOCH = time.monotonic()
+    if LOG_FILE is not None:
+        log_line(LOG_FILE, "info", "Traversal started.")
+
     ENTRIES = list_entries_with_progress(
         CLIENT,
         LOG_FILE,
@@ -240,6 +243,16 @@ def perform_incremental_sync(
     TRAVERSAL_DURATION_SECONDS = time.monotonic() - TRAVERSAL_STARTED_EPOCH
     FILES = [ENTRY for ENTRY in ENTRIES if not ENTRY.is_dir]
     DIRECTORIES = [ENTRY for ENTRY in ENTRIES if ENTRY.is_dir]
+    if LOG_FILE is not None:
+        log_line(
+            LOG_FILE,
+            "info",
+            "Traversal finished. "
+            f"entries={len(ENTRIES)}, files={len(FILES)}, "
+            f"directories={len(DIRECTORIES)}, "
+            f"duration_seconds={TRAVERSAL_DURATION_SECONDS:.3f}.",
+        )
+
     if LOG_FILE is not None:
         log_line(
             LOG_FILE,
@@ -296,6 +309,13 @@ def perform_incremental_sync(
         )
 
     if TRANSFER_CANDIDATES:
+        if LOG_FILE is not None:
+            log_line(
+                LOG_FILE,
+                "info",
+                f"Transfer started. candidates={len(TRANSFER_CANDIDATES)}.",
+            )
+
         WORKER_COUNT = get_transfer_worker_count(SYNC_DOWNLOAD_WORKERS)
         if LOG_FILE is not None:
             log_line(
@@ -401,6 +421,16 @@ def perform_incremental_sync(
                         f"elapsed_seconds={ELAPSED_SECONDS:.1f}",
                     )
                     LAST_PROGRESS_LOG_EPOCH = NOW_EPOCH
+    elif LOG_FILE is not None:
+        log_line(LOG_FILE, "info", "Transfer skipped. candidates=0.")
+
+    if LOG_FILE is not None:
+        log_line(
+            LOG_FILE,
+            "info",
+            "Transfer finished. "
+            f"transferred={TRANSFERRED}, skipped={SKIPPED}, errors={ERRORS}.",
+        )
 
     for ENTRY in DIRECTORIES:
         NEW_MANIFEST[ENTRY.path] = entry_metadata(ENTRY)

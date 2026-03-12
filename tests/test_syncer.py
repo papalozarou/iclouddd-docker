@@ -266,6 +266,27 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertTrue(any("Transfer execution detail:" in LINE for LINE in DEBUG_LINES))
 
 # --------------------------------------------------------------------------
+# This test confirms info-level stage markers are emitted for traversal
+# and transfer lifecycle visibility.
+# --------------------------------------------------------------------------
+    def test_perform_incremental_sync_emits_info_stage_markers(self) -> None:
+        ENTRIES = [
+            RemoteEntry("docs/new.txt", False, 11, "2026-03-09T00:00:00Z"),
+        ]
+        CLIENT = FakeClient(ENTRIES, {"docs/new.txt": True})
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "worker.log"
+            with patch("app.syncer.log_line") as LOG_LINE:
+                perform_incremental_sync(CLIENT, Path(TMPDIR), {}, 0, LOG_FILE)
+
+        INFO_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "info"]
+        self.assertTrue(any("Traversal started." in LINE for LINE in INFO_LINES))
+        self.assertTrue(any("Traversal finished." in LINE for LINE in INFO_LINES))
+        self.assertTrue(any("Transfer started." in LINE for LINE in INFO_LINES))
+        self.assertTrue(any("Transfer finished." in LINE for LINE in INFO_LINES))
+
+# --------------------------------------------------------------------------
 # This test confirms long-running transfer loops emit in-run progress logs.
 # --------------------------------------------------------------------------
     def test_perform_incremental_sync_emits_periodic_progress_logs(self) -> None:

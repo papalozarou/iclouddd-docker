@@ -64,6 +64,7 @@ validation rules, see [SCHEDULING.md](SCHEDULING.md).
 - Worker count is internally bounded and can be overridden with
   `SYNC_DOWNLOAD_WORKERS`.
 - Download stream chunk size can be tuned with `SYNC_DOWNLOAD_CHUNK_MIB`.
+- Successful downloads preserve remote modified timestamps on local files.
 - Optional mirror-delete behaviour can be enabled with
   `BACKUP_DELETE_REMOVED=true`, which prunes local files and empty directories
   under `/output` when they no longer exist in iCloud.

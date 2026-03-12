@@ -396,6 +396,8 @@ def perform_incremental_sync(
                         continue
 
                     if SUCCESS:
+                        LOCAL_PATH = OUTPUT_DIR / ENTRY.path
+                        apply_remote_modified_time(LOCAL_PATH, ENTRY.modified, LOG_FILE)
                         TRANSFERRED += 1
                         TRANSFERRED_BYTES += max(ENTRY.size, 0)
                         NEW_MANIFEST[ENTRY.path] = TRANSFER_CANDIDATE_METADATA[ENTRY.path]
@@ -745,6 +747,48 @@ def parse_remote_modified_epoch(RAW_VALUE: str) -> float | None:
         PARSED = PARSED.replace(tzinfo=timezone.utc)
 
     return PARSED.timestamp()
+
+
+# ------------------------------------------------------------------------------
+# This function applies remote modified time to a local file after transfer.
+#
+# 1. "LOCAL_PATH" is transferred local file path.
+# 2. "REMOTE_MODIFIED" is remote timestamp string from iCloud metadata.
+# 3. "LOG_FILE" is optional log file path.
+#
+# Returns: True when timestamp is applied; otherwise False.
+# ------------------------------------------------------------------------------
+def apply_remote_modified_time(
+    LOCAL_PATH: Path,
+    REMOTE_MODIFIED: str,
+    LOG_FILE: Path | None = None,
+) -> bool:
+    REMOTE_MTIME = parse_remote_modified_epoch(REMOTE_MODIFIED)
+    if REMOTE_MTIME is None:
+        if LOG_FILE is not None:
+            log_line(LOG_FILE, "debug", f"Timestamp skipped parse: {LOCAL_PATH.as_posix()}")
+        return False
+
+    try:
+        FILE_STAT = LOCAL_PATH.stat()
+        os.utime(LOCAL_PATH, (FILE_STAT.st_atime, REMOTE_MTIME))
+    except OSError as ERROR:
+        if LOG_FILE is not None:
+            log_line(
+                LOG_FILE,
+                "debug",
+                "Timestamp apply error: "
+                f"{LOCAL_PATH.as_posix()} ({type(ERROR).__name__}: {ERROR})",
+            )
+        return False
+
+    if LOG_FILE is not None:
+        log_line(
+            LOG_FILE,
+            "debug",
+            f"Timestamp applied: {LOCAL_PATH.as_posix()} <- {REMOTE_MODIFIED}",
+        )
+    return True
 
 
 # ------------------------------------------------------------------------------

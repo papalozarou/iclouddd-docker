@@ -54,12 +54,14 @@ class FakeClient:
         return self.entries
 
     def download_file(self, REMOTE_PATH: str, LOCAL_PATH: Path) -> bool:
-        _ = LOCAL_PATH
         self.download_calls += 1
         if REMOTE_PATH == "docs/explode.txt":
             raise RuntimeError("boom")
-
-        return self.download_results.get(REMOTE_PATH, True)
+        RESULT = self.download_results.get(REMOTE_PATH, True)
+        if RESULT:
+            LOCAL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            LOCAL_PATH.write_bytes(b"data")
+        return RESULT
 
 
 # ------------------------------------------------------------------------------
@@ -426,6 +428,26 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertEqual(SUMMARY.skipped_files, 0)
         self.assertEqual(SUMMARY.error_files, 0)
         self.assertIn("docs/keep.txt", NEW_MANIFEST)
+
+# --------------------------------------------------------------------------
+# This test confirms successful transfers apply remote modified timestamps
+# to downloaded local files.
+# --------------------------------------------------------------------------
+    def test_perform_incremental_sync_applies_remote_modified_timestamp(self) -> None:
+        ENTRIES = [
+            RemoteEntry("docs/new.txt", False, 4, "2026-03-12T10:15:30Z"),
+        ]
+        CLIENT = FakeClient(ENTRIES, {"docs/new.txt": True})
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            SUMMARY, NEW_MANIFEST = perform_incremental_sync(CLIENT, ROOT_DIR, {})
+            LOCAL_FILE = ROOT_DIR / "docs" / "new.txt"
+            self.assertEqual(SUMMARY.transferred_files, 1)
+            self.assertIn("docs/new.txt", NEW_MANIFEST)
+            self.assertTrue(LOCAL_FILE.exists())
+            EXPECTED_MTIME = time.mktime(time.strptime("2026-03-12T10:15:30Z", "%Y-%m-%dT%H:%M:%SZ"))
+            self.assertAlmostEqual(LOCAL_FILE.stat().st_mtime, EXPECTED_MTIME, delta=2.0)
 
 # --------------------------------------------------------------------------
 # This test confirms delete-removed mode prunes stale local files and

@@ -46,6 +46,7 @@ class TestConfigLoad(unittest.TestCase):
         self.assertEqual(CONFIG.schedule_weekdays, "monday")
         self.assertEqual(CONFIG.schedule_monthly_week, "first")
         self.assertEqual(CONFIG.schedule_interval_minutes, 1440)
+        self.assertFalse(CONFIG.backup_delete_removed)
         self.assertEqual(CONFIG.traversal_workers, 1)
         self.assertEqual(CONFIG.sync_workers, 0)
         self.assertEqual(CONFIG.download_chunk_mib, 4)
@@ -76,6 +77,7 @@ class TestConfigLoad(unittest.TestCase):
                 "SCHEDULE_WEEKDAYS": "Thursday",
                 "SCHEDULE_MONTHLY_WEEK": "LAST",
                 "SCHEDULE_INTERVAL_MINUTES": "90",
+                "BACKUP_DELETE_REMOVED": "true",
                 "SYNC_TRAVERSAL_WORKERS": "4",
                 "SYNC_DOWNLOAD_WORKERS": "12",
                 "SYNC_DOWNLOAD_CHUNK_MIB": "8",
@@ -97,6 +99,7 @@ class TestConfigLoad(unittest.TestCase):
         self.assertEqual(CONFIG.schedule_weekdays, "thursday")
         self.assertEqual(CONFIG.schedule_monthly_week, "last")
         self.assertEqual(CONFIG.schedule_interval_minutes, 90)
+        self.assertTrue(CONFIG.backup_delete_removed)
         self.assertEqual(CONFIG.traversal_workers, 4)
         self.assertEqual(CONFIG.sync_workers, 12)
         self.assertEqual(CONFIG.download_chunk_mib, 8)
@@ -144,10 +147,15 @@ class TestConfigLoad(unittest.TestCase):
     def test_load_config_falls_back_for_invalid_bool_values(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             BASE_ENV = build_base_env(TMPDIR)
-            with patch.dict(os.environ, BASE_ENV | {"RUN_ONCE": "maybe"}, clear=True):
+            with patch.dict(
+                os.environ,
+                BASE_ENV | {"RUN_ONCE": "maybe", "BACKUP_DELETE_REMOVED": "sometimes"},
+                clear=True,
+            ):
                 CONFIG = load_config()
 
         self.assertFalse(CONFIG.run_once)
+        self.assertFalse(CONFIG.backup_delete_removed)
 
 # --------------------------------------------------------------------------
 # This test confirms config-derived paths are created and wired correctly.

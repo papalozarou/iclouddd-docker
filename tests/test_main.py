@@ -57,6 +57,7 @@ def build_config(**OVERRIDES: object) -> AppConfig:
         schedule_weekdays="monday,thursday",
         schedule_monthly_week="first",
         schedule_interval_minutes=1440,
+        backup_delete_removed=False,
         traversal_workers=1,
         sync_workers=0,
         download_chunk_mib=4,

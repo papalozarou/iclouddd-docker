@@ -57,6 +57,7 @@ def build_config_for_runtime(TMPDIR: str) -> AppConfig:
         schedule_weekdays="monday",
         schedule_monthly_week="first",
         schedule_interval_minutes=60,
+        backup_delete_removed=False,
         traversal_workers=1,
         sync_workers=0,
         download_chunk_mib=4,
@@ -380,6 +381,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 {"/a": {"etag": "1"}},
                 CONFIG.sync_workers,
                 LOG_FILE,
+                BACKUP_DELETE_REMOVED=CONFIG.backup_delete_removed,
             )
             self.assertEqual(NOTIFY.call_count, 2)
             self.assertGreaterEqual(LOG_LINE.call_count, 1)

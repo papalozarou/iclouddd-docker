@@ -26,6 +26,7 @@ class AppConfig:
     schedule_weekdays: str
     schedule_monthly_week: str
     schedule_interval_minutes: int
+    backup_delete_removed: bool
     traversal_workers: int
     sync_workers: int
     download_chunk_mib: int
@@ -153,6 +154,7 @@ def load_config() -> AppConfig:
         schedule_weekdays=env_value("SCHEDULE_WEEKDAYS", "monday").lower(),
         schedule_monthly_week=env_value("SCHEDULE_MONTHLY_WEEK", "first").lower(),
         schedule_interval_minutes=env_int("SCHEDULE_INTERVAL_MINUTES", 1440),
+        backup_delete_removed=env_bool("BACKUP_DELETE_REMOVED", False),
         traversal_workers=env_int("SYNC_TRAVERSAL_WORKERS", 1),
         sync_workers=env_workers("SYNC_DOWNLOAD_WORKERS", 0),
         download_chunk_mib=env_int("SYNC_DOWNLOAD_CHUNK_MIB", 4),

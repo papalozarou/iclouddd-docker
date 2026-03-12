@@ -66,6 +66,9 @@ These are usually left as-is unless you have a specific reason to change them.
   from `1` to `16` (default `auto`).
 - `<SVC>_SYNC_DOWNLOAD_CHUNK_MIB`: streamed download chunk size in MiB, as an
   integer from `1` to `16` (default `4`).
+- `<SVC>_BACKUP_DELETE_REMOVED`: remove local files and empty directories from
+  `/output` when they no longer exist in iCloud (`true`/`false`, default
+  `false`).
 - `<SVC>_RUN_ONCE`: run one backup pass and exit (`true`/`false`, default
   `false`).
   - When `<SVC>_RUN_ONCE=true`, set `<SVC>_RESTART_POLICY=no`.

@@ -369,6 +369,79 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertEqual(NEW_MANIFEST["docs/file.txt"]["modified"], "2026-03-09T00:00:00Z")
 
 # --------------------------------------------------------------------------
+# This test confirms delete-removed mode prunes stale local files and
+# empty directories that no longer exist remotely.
+# --------------------------------------------------------------------------
+    def test_perform_incremental_sync_deletes_removed_local_paths_when_enabled(self) -> None:
+        ENTRIES = [
+            RemoteEntry("docs", True, 0, "2026-03-11T00:00:00Z"),
+            RemoteEntry("docs/keep.txt", False, 4, "2026-03-11T00:00:00Z"),
+        ]
+        MANIFEST = {
+            "docs/keep.txt": {
+                "is_dir": False,
+                "size": 4,
+                "modified": "2026-03-11T00:00:00Z",
+            }
+        }
+        CLIENT = FakeClient(ENTRIES, {})
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            (ROOT_DIR / "docs").mkdir(parents=True, exist_ok=True)
+            (ROOT_DIR / "docs" / "archive").mkdir(parents=True, exist_ok=True)
+            (ROOT_DIR / "docs" / "keep.txt").write_text("keep", encoding="utf-8")
+            (ROOT_DIR / "docs" / "stale.txt").write_text("stale", encoding="utf-8")
+            (ROOT_DIR / "docs" / "archive" / "old.txt").write_text("old", encoding="utf-8")
+
+            SUMMARY, NEW_MANIFEST = perform_incremental_sync(
+                CLIENT,
+                ROOT_DIR,
+                MANIFEST,
+                BACKUP_DELETE_REMOVED=True,
+            )
+
+            self.assertEqual(SUMMARY.error_files, 0)
+            self.assertTrue((ROOT_DIR / "docs" / "keep.txt").exists())
+            self.assertFalse((ROOT_DIR / "docs" / "stale.txt").exists())
+            self.assertFalse((ROOT_DIR / "docs" / "archive" / "old.txt").exists())
+            self.assertFalse((ROOT_DIR / "docs" / "archive").exists())
+            self.assertIn("docs/keep.txt", NEW_MANIFEST)
+
+# --------------------------------------------------------------------------
+# This test confirms stale local files remain untouched when delete-removed
+# mode is disabled.
+# --------------------------------------------------------------------------
+    def test_perform_incremental_sync_keeps_removed_local_paths_when_disabled(self) -> None:
+        ENTRIES = [
+            RemoteEntry("docs", True, 0, "2026-03-11T00:00:00Z"),
+            RemoteEntry("docs/keep.txt", False, 4, "2026-03-11T00:00:00Z"),
+        ]
+        MANIFEST = {
+            "docs/keep.txt": {
+                "is_dir": False,
+                "size": 4,
+                "modified": "2026-03-11T00:00:00Z",
+            }
+        }
+        CLIENT = FakeClient(ENTRIES, {})
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            (ROOT_DIR / "docs").mkdir(parents=True, exist_ok=True)
+            (ROOT_DIR / "docs" / "keep.txt").write_text("keep", encoding="utf-8")
+            (ROOT_DIR / "docs" / "stale.txt").write_text("stale", encoding="utf-8")
+
+            perform_incremental_sync(
+                CLIENT,
+                ROOT_DIR,
+                MANIFEST,
+                BACKUP_DELETE_REMOVED=False,
+            )
+
+            self.assertTrue((ROOT_DIR / "docs" / "stale.txt").exists())
+
+# --------------------------------------------------------------------------
 # This test confirms transient exceptions are retried before succeeding.
 # --------------------------------------------------------------------------
     def test_perform_incremental_sync_retries_transient_transfer_errors(self) -> None:

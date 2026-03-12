@@ -30,6 +30,8 @@ validation rules, see [SCHEDULING.md](SCHEDULING.md).
 
 - Enable with `<SVC>_RUN_ONCE=true`.
 - Set `<SVC>_RESTART_POLICY=no` to avoid automatic restarts.
+- This pairing is required: one-shot with `unless-stopped` (or similar) will
+  restart the container after exit and loop.
 - Worker waits for Telegram `auth` or `reauth` commands when MFA or reauth is
   pending, then runs one backup attempt and exits.
 - While one-shot is running, heartbeat updates continue so container health
@@ -43,11 +45,11 @@ validation rules, see [SCHEDULING.md](SCHEDULING.md).
 
 - Incremental sync uses `manifest.json` and skips unchanged files.
 - Directory traversal can run in bounded parallel mode with
-  `TRAVERSAL_WORKERS`.
+  `SYNC_TRAVERSAL_WORKERS`.
 - Changed-file downloads run in parallel automatically based on host CPU.
 - Worker count is internally bounded and can be overridden with
-  `SYNC_WORKERS`.
-- Download stream chunk size can be tuned with `DOWNLOAD_CHUNK_MIB`.
+  `SYNC_DOWNLOAD_WORKERS`.
+- Download stream chunk size can be tuned with `SYNC_DOWNLOAD_CHUNK_MIB`.
 - Directory traversal applies bounded retry/backoff for transient iCloud API
   failures before treating a node as unavailable.
 

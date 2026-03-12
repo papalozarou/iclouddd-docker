@@ -789,14 +789,32 @@ class ICloudDriveClient:
         LOCAL_PATH.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            if not hasattr(FILE_OBJ, "open"):
-                return False
+            OPEN_RESULT = self._open_file_object(FILE_OBJ)
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+            return False
 
-            OPEN_RESULT = FILE_OBJ.open(stream=True)
-        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        if OPEN_RESULT is None:
             return False
 
         return self._write_open_result(OPEN_RESULT, LOCAL_PATH)
+
+# --------------------------------------------------------------------------
+# This function opens a remote file object using stream mode when supported.
+#
+# 1. "FILE_OBJ" is a resolved pyicloud drive node object.
+#
+# Returns: Open-result object from pyicloud node API, or None.
+# --------------------------------------------------------------------------
+    def _open_file_object(self, FILE_OBJ: Any) -> Any | None:
+        OPEN_METHOD = getattr(FILE_OBJ, "open", None)
+
+        if not callable(OPEN_METHOD):
+            return None
+
+        try:
+            return OPEN_METHOD(stream=True)
+        except TypeError:
+            return OPEN_METHOD()
 
 # --------------------------------------------------------------------------
 # This function writes content from a file-open result and closes it when
@@ -858,15 +876,95 @@ class ICloudDriveClient:
 # --------------------------------------------------------------------------
     def _write_downloaded_content(self, RESPONSE: Any, LOCAL_PATH: Path) -> bool:
         TEMP_PATH = self._temporary_download_path(LOCAL_PATH)
+        STATUS_CODE = getattr(RESPONSE, "status_code", None)
+
+        if isinstance(STATUS_CODE, int) and STATUS_CODE >= 400:
+            return False
 
         if hasattr(RESPONSE, "iter_content"):
             return self._write_iter_content(RESPONSE, LOCAL_PATH, TEMP_PATH)
 
         RAW = getattr(RESPONSE, "raw", None)
 
-        if RAW is None:
+        if RAW is not None:
+            return self._write_raw_content(RAW, LOCAL_PATH, TEMP_PATH)
+
+        CONTENT = getattr(RESPONSE, "content", None)
+
+        if CONTENT is not None:
+            return self._write_byte_content(CONTENT, LOCAL_PATH, TEMP_PATH)
+
+        if hasattr(RESPONSE, "read"):
+            return self._write_readable_content(RESPONSE, LOCAL_PATH, TEMP_PATH)
+
+        if isinstance(RESPONSE, (bytes, bytearray, memoryview, str)):
+            return self._write_byte_content(RESPONSE, LOCAL_PATH, TEMP_PATH)
+
+        return False
+
+# --------------------------------------------------------------------------
+# This function writes byte-oriented response content atomically.
+#
+# 1. "CONTENT" is bytes-like or string payload.
+# 2. "LOCAL_PATH" is file destination.
+# 3. "TEMP_PATH" is temporary path used for atomic replacement.
+#
+# Returns: True on successful write, otherwise False.
+# --------------------------------------------------------------------------
+    def _write_byte_content(self, CONTENT: Any, LOCAL_PATH: Path, TEMP_PATH: Path) -> bool:
+        try:
+            self._cleanup_temporary_file(TEMP_PATH)
+            BYTE_PAYLOAD = self._normalise_byte_payload(CONTENT)
+
+            with TEMP_PATH.open("wb") as HANDLE:
+                HANDLE.write(BYTE_PAYLOAD)
+
+            TEMP_PATH.replace(LOCAL_PATH)
+        except (AttributeError, OSError, TypeError, ValueError):
+            self._cleanup_temporary_file(TEMP_PATH)
             return False
 
+        return True
+
+# --------------------------------------------------------------------------
+# This function writes content from a file-like object with "read" support.
+#
+# 1. "RESPONSE" is an object exposing a "read" method.
+# 2. "LOCAL_PATH" is file destination.
+# 3. "TEMP_PATH" is temporary path used for atomic replacement.
+#
+# Returns: True on successful write, otherwise False.
+# --------------------------------------------------------------------------
+    def _write_readable_content(self, RESPONSE: Any, LOCAL_PATH: Path, TEMP_PATH: Path) -> bool:
+        try:
+            self._cleanup_temporary_file(TEMP_PATH)
+
+            with TEMP_PATH.open("wb") as HANDLE:
+                while True:
+                    CHUNK = RESPONSE.read(self.config.download_chunk_mib * 1024 * 1024)
+
+                    if not CHUNK:
+                        break
+
+                    HANDLE.write(self._normalise_byte_payload(CHUNK))
+
+            TEMP_PATH.replace(LOCAL_PATH)
+        except (AttributeError, OSError, TypeError, ValueError):
+            self._cleanup_temporary_file(TEMP_PATH)
+            return False
+
+        return True
+
+# --------------------------------------------------------------------------
+# This function writes content from a response "raw" stream object.
+#
+# 1. "RAW" is response raw stream object.
+# 2. "LOCAL_PATH" is file destination.
+# 3. "TEMP_PATH" is temporary path used for atomic replacement.
+#
+# Returns: True on successful write, otherwise False.
+# --------------------------------------------------------------------------
+    def _write_raw_content(self, RAW: Any, LOCAL_PATH: Path, TEMP_PATH: Path) -> bool:
         try:
             self._cleanup_temporary_file(TEMP_PATH)
 
@@ -879,6 +977,28 @@ class ICloudDriveClient:
             return False
 
         return True
+
+# --------------------------------------------------------------------------
+# This function normalises response payloads to byte content.
+#
+# 1. "PAYLOAD" is any bytes-like, string, or scalar payload.
+#
+# Returns: Byte payload ready for file writes.
+# --------------------------------------------------------------------------
+    def _normalise_byte_payload(self, PAYLOAD: Any) -> bytes:
+        if isinstance(PAYLOAD, bytes):
+            return PAYLOAD
+
+        if isinstance(PAYLOAD, bytearray):
+            return bytes(PAYLOAD)
+
+        if isinstance(PAYLOAD, memoryview):
+            return PAYLOAD.tobytes()
+
+        if isinstance(PAYLOAD, str):
+            return PAYLOAD.encode("utf-8")
+
+        return bytes(PAYLOAD)
 
 # --------------------------------------------------------------------------
 # This function streams iterable content chunks to disk.

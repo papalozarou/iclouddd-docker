@@ -469,6 +469,29 @@ class TestICloudClientDownloads(unittest.TestCase):
 
             self.assertFalse(RESULT)
 
+    def test_download_file_falls_back_when_stream_keyword_is_unsupported(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            RESPONSE = Mock()
+            RESPONSE.iter_content.return_value = [b"x", b"y"]
+
+            def open_without_stream(*args, **kwargs):
+                _ = args
+                if "stream" in kwargs:
+                    raise TypeError("unexpected keyword argument")
+                return RESPONSE
+
+            FILE_NODE = SimpleNamespace(open=open_without_stream)
+            CLIENT.api = Mock()
+
+            with patch.object(CLIENT, "_resolve_file_object", return_value=FILE_NODE):
+                LOCAL_PATH = Path(TMPDIR) / "downloads" / "nostream.bin"
+                RESULT = CLIENT.download_file("docs/nostream.bin", LOCAL_PATH)
+
+            self.assertTrue(RESULT)
+            self.assertEqual(LOCAL_PATH.read_bytes(), b"xy")
+
     def test_download_file_success_with_open_stream_context_manager(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_icloud(TMPDIR)
@@ -526,6 +549,42 @@ class TestICloudClientDownloads(unittest.TestCase):
             CLIENT = ICloudDriveClient(CONFIG)
             RESULT = CLIENT._write_downloaded_content(object(), Path(TMPDIR) / "x.bin")
             self.assertFalse(RESULT)
+
+    def test_write_downloaded_content_supports_response_content_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            RESPONSE = SimpleNamespace(content=b"payload")
+            LOCAL_PATH = Path(TMPDIR) / "content.bin"
+
+            RESULT = CLIENT._write_downloaded_content(RESPONSE, LOCAL_PATH)
+
+            self.assertTrue(RESULT)
+            self.assertEqual(LOCAL_PATH.read_bytes(), b"payload")
+
+    def test_write_downloaded_content_supports_readable_stream_objects(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            RESPONSE = BytesIO(b"streamed")
+            LOCAL_PATH = Path(TMPDIR) / "streamed.bin"
+
+            RESULT = CLIENT._write_downloaded_content(RESPONSE, LOCAL_PATH)
+
+            self.assertTrue(RESULT)
+            self.assertEqual(LOCAL_PATH.read_bytes(), b"streamed")
+
+    def test_write_downloaded_content_rejects_http_error_responses(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            RESPONSE = SimpleNamespace(status_code=503, iter_content=Mock(return_value=[b"x"]))
+            LOCAL_PATH = Path(TMPDIR) / "error.bin"
+
+            RESULT = CLIENT._write_downloaded_content(RESPONSE, LOCAL_PATH)
+
+            self.assertFalse(RESULT)
+            self.assertFalse(LOCAL_PATH.exists())
 
     def test_cleanup_temporary_file_ignores_unlink_errors(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:

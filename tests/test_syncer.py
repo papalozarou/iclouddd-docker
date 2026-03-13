@@ -173,6 +173,40 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertEqual(REASON, "download_failed")
 
 # --------------------------------------------------------------------------
+# This test confirms existing local package directories are reconciled when
+# package fallback cannot resolve parent metadata for non-directory nodes.
+# --------------------------------------------------------------------------
+    def test_transfer_if_required_reconciles_existing_local_package_directory(self) -> None:
+        ENTRY = RemoteEntry(
+            path="docs/archive.bundle",
+            is_dir=False,
+            size=4,
+            modified="2026-03-07T12:00:00Z",
+        )
+        CLIENT = FakeClient([ENTRY], {"docs/archive.bundle": False})
+        CLIENT.package_results["docs/archive.bundle"] = False
+        CLIENT.package_failure_reasons["docs/archive.bundle"] = "package_item_missing"
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            PACKAGE_DIR = ROOT_DIR / "docs" / "archive.bundle"
+            PACKAGE_DIR.mkdir(parents=True, exist_ok=True)
+            (PACKAGE_DIR / "child.dat").write_bytes(b"x")
+
+            IS_SUCCESS, ATTEMPT, REASON = transfer_if_required(
+                CLIENT,
+                ROOT_DIR,
+                ENTRY,
+                True,
+            )
+
+        self.assertTrue(IS_SUCCESS)
+        self.assertEqual(ATTEMPT, 1)
+        self.assertEqual(REASON, "package_reconciled")
+        self.assertEqual(CLIENT.download_calls, 0)
+        self.assertEqual(CLIENT.package_calls, 1)
+
+# --------------------------------------------------------------------------
 # This test confirms ownership mismatch detection identifies outlier files.
 # --------------------------------------------------------------------------
     def test_ownership_mismatch_detection(self) -> None:

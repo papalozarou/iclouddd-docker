@@ -420,6 +420,14 @@ def perform_incremental_sync(
                                     f"({max(ENTRY.size, 0)} bytes)",
                                 )
                                 continue
+                            if TRANSFER_MODE == "package_reconciled":
+                                log_line(
+                                    LOG_FILE,
+                                    "debug",
+                                    "Package reconciled from existing local "
+                                    f"directory: {ENTRY.path}",
+                                )
+                                continue
 
                             log_line(
                                 LOG_FILE,
@@ -928,10 +936,22 @@ def transfer_if_required(
         return True, 1, "skipped"
 
     LOCAL_PATH = OUTPUT_DIR / ENTRY.path
+    HAS_LOCAL_DIRECTORY = LOCAL_PATH.exists() and LOCAL_PATH.is_dir()
     ATTEMPT = 1
 
     while ATTEMPT <= TRANSFER_RETRY_ATTEMPTS:
         try:
+            if HAS_LOCAL_DIRECTORY:
+                IS_PACKAGE_SUCCESS = CLIENT.download_package_tree(ENTRY.path, LOCAL_PATH)
+                if IS_PACKAGE_SUCCESS:
+                    return True, ATTEMPT, "package"
+
+                PACKAGE_REASON = CLIENT.get_last_download_failure_reason().strip().lower()
+                if PACKAGE_REASON in {"package_item_missing", "package_children_unavailable"}:
+                    return True, ATTEMPT, "package_reconciled"
+
+                return False, ATTEMPT, PACKAGE_REASON or "package_download_failed"
+
             IS_SUCCESS = CLIENT.download_file(ENTRY.path, LOCAL_PATH)
             if IS_SUCCESS:
                 return True, ATTEMPT, "file"

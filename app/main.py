@@ -18,7 +18,7 @@ from app.credential_store import configure_keyring, load_credentials, save_crede
 from app.icloud_client import ICloudDriveClient
 from app.logger import log_line
 from app.state import AuthState, load_auth_state, load_manifest, now_iso, save_auth_state, save_manifest
-from app.syncer import perform_incremental_sync, run_first_time_safety_net
+from app.syncer import get_transfer_worker_count, perform_incremental_sync, run_first_time_safety_net
 from app.telegram_bot import TelegramConfig, fetch_updates, parse_command, send_message
 from app.time_utils import now_local
 
@@ -857,6 +857,7 @@ def run_backup(
     LOG_FILE: Path,
     TRIGGER: str,
 ) -> None:
+    log_effective_backup_settings(CONFIG, LOG_FILE)
     MANIFEST = load_manifest(CONFIG.manifest_path)
     log_line(LOG_FILE, "debug", f"Loaded manifest entries: {len(MANIFEST)}")
     APPLE_ID_LABEL = format_apple_id_label(CONFIG.icloud_email)
@@ -920,6 +921,35 @@ def run_backup(
         "Backup complete. "
         f"Transferred {SUMMARY.transferred_files}/{SUMMARY.total_files}, "
         f"skipped {SUMMARY.skipped_files}, errors {SUMMARY.error_files}.",
+    )
+
+
+# ------------------------------------------------------------------------------
+# This function logs effective non-secret backup settings for debug runs.
+#
+# 1. "CONFIG" is runtime configuration.
+# 2. "LOG_FILE" is worker log destination.
+#
+# Returns: None.
+# ------------------------------------------------------------------------------
+def log_effective_backup_settings(CONFIG: AppConfig, LOG_FILE: Path) -> None:
+    SYNC_WORKERS_LABEL = "auto" if CONFIG.sync_workers == 0 else str(CONFIG.sync_workers)
+    EFFECTIVE_WORKERS = get_transfer_worker_count(CONFIG.sync_workers)
+    log_line(
+        LOG_FILE,
+        "debug",
+        "Effective backup settings detail: "
+        f"run_once={CONFIG.run_once}, "
+        f"schedule_mode={CONFIG.schedule_mode}, "
+        f"schedule_interval_minutes={CONFIG.schedule_interval_minutes}, "
+        f"schedule_backup_time={CONFIG.schedule_backup_time}, "
+        f"schedule_weekdays={CONFIG.schedule_weekdays}, "
+        f"schedule_monthly_week={CONFIG.schedule_monthly_week}, "
+        f"sync_traversal_workers={CONFIG.traversal_workers}, "
+        f"sync_download_workers={SYNC_WORKERS_LABEL}, "
+        f"effective_download_workers={EFFECTIVE_WORKERS}, "
+        f"sync_download_chunk_mib={CONFIG.download_chunk_mib}, "
+        f"backup_delete_removed={CONFIG.backup_delete_removed}",
     )
 
 

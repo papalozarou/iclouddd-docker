@@ -7,6 +7,8 @@ from __future__ import annotations
 import calendar
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from importlib import metadata as importlib_metadata
+import os
 from pathlib import Path
 import threading
 import time
@@ -566,6 +568,25 @@ def format_average_speed(TRANSFERRED_BYTES: int, DURATION_SECONDS: int) -> str:
 
 
 # ------------------------------------------------------------------------------
+# This function returns runtime build metadata for startup diagnostics.
+#
+# Returns: Mapping with app build ref and pyicloud package version.
+# ------------------------------------------------------------------------------
+def get_build_detail() -> dict[str, str]:
+    APP_BUILD_REF = os.getenv("C_APP_BUILD_REF", "unknown").strip() or "unknown"
+
+    try:
+        PYICLOUD_VERSION = importlib_metadata.version("pyicloud")
+    except importlib_metadata.PackageNotFoundError:
+        PYICLOUD_VERSION = "unknown"
+
+    return {
+        "app_build_ref": APP_BUILD_REF,
+        "pyicloud_version": PYICLOUD_VERSION,
+    }
+
+
+# ------------------------------------------------------------------------------
 # This function formats schedule settings as plain-English backup wording.
 #
 # 1. "CONFIG" is runtime configuration.
@@ -938,6 +959,14 @@ def run_backup(
 def log_effective_backup_settings(CONFIG: AppConfig, LOG_FILE: Path) -> None:
     SYNC_WORKERS_LABEL = "auto" if CONFIG.sync_workers == 0 else str(CONFIG.sync_workers)
     EFFECTIVE_WORKERS = get_transfer_worker_count(CONFIG.sync_workers)
+    BUILD_DETAIL = get_build_detail()
+    log_line(
+        LOG_FILE,
+        "debug",
+        "Build detail: "
+        f"app_build_ref={BUILD_DETAIL['app_build_ref']}, "
+        f"pyicloud_version={BUILD_DETAIL['pyicloud_version']}",
+    )
     log_line(
         LOG_FILE,
         "debug",

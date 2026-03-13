@@ -387,6 +387,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertGreaterEqual(LOG_LINE.call_count, 1)
             self.assertEqual(LOG_LINE.call_args_list[-1].args[1], "info")
             DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
+            self.assertTrue(any("Build detail:" in LINE for LINE in DEBUG_LINES))
             self.assertTrue(any("Effective backup settings detail:" in LINE for LINE in DEBUG_LINES))
             self.assertTrue(any("Loaded manifest entries:" in LINE for LINE in DEBUG_LINES))
             self.assertTrue(any("Sync summary detail:" in LINE for LINE in DEBUG_LINES))

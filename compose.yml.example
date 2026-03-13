@@ -4,7 +4,7 @@
 # The file demonstrates service-level separation, secret-file wiring, and
 # host/container environment variable mapping via ".env.example".
 # ------------------------------------------------------------------------------
-name: iclouddd-docker
+name: pyiclodoc-drive-docker
 
 # ------------------------------------------------------------------------------
 # Docker extension fields for environment variables. This is used by all

@@ -5,7 +5,7 @@
 
 set -eu
 
-HEARTBEAT_FILE="${HEARTBEAT_FILE:-/logs/iclouddd-heartbeat.txt}"
+HEARTBEAT_FILE="${HEARTBEAT_FILE:-/logs/pyiclodoc-drive-heartbeat.txt}"
 MAX_AGE_SECONDS="${HEALTHCHECK_MAX_AGE_SECONDS:-900}"
 
 command -v parallel >/dev/null 2>&1

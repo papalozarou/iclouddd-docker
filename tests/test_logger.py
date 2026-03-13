@@ -33,7 +33,7 @@ class TestLogger(unittest.TestCase):
 # --------------------------------------------------------------------------
     def test_log_line_writes_and_prints(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
-            LOG_FILE = Path(TMPDIR) / "iclouddd-worker.log"
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
 
             with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
                 with patch("builtins.print") as PRINT:
@@ -49,7 +49,7 @@ class TestLogger(unittest.TestCase):
 # --------------------------------------------------------------------------
     def test_log_line_suppresses_debug_when_info_level(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
-            LOG_FILE = Path(TMPDIR) / "iclouddd-worker.log"
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
 
             with patch.dict("os.environ", {"LOG_LEVEL": "info"}):
                 with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
@@ -64,7 +64,7 @@ class TestLogger(unittest.TestCase):
 # --------------------------------------------------------------------------
     def test_log_line_emits_debug_when_debug_level(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
-            LOG_FILE = Path(TMPDIR) / "iclouddd-worker.log"
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
 
             with patch.dict("os.environ", {"LOG_LEVEL": "debug"}):
                 with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
@@ -81,7 +81,7 @@ class TestLogger(unittest.TestCase):
 # --------------------------------------------------------------------------
     def test_log_line_emits_info_when_info_level(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
-            LOG_FILE = Path(TMPDIR) / "iclouddd-worker.log"
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
 
             with patch.dict("os.environ", {"LOG_LEVEL": "info"}):
                 with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
@@ -98,7 +98,7 @@ class TestLogger(unittest.TestCase):
 # --------------------------------------------------------------------------
     def test_log_line_emits_error_when_info_level(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
-            LOG_FILE = Path(TMPDIR) / "iclouddd-worker.log"
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
 
             with patch.dict("os.environ", {"LOG_LEVEL": "info"}):
                 with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
@@ -133,7 +133,7 @@ class TestLogger(unittest.TestCase):
 # --------------------------------------------------------------------------
     def test_log_line_invalid_log_level_falls_back_to_info(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
-            LOG_FILE = Path(TMPDIR) / "iclouddd-worker.log"
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
 
             with patch.dict("os.environ", {"LOG_LEVEL": "invalid"}):
                 with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
@@ -213,7 +213,7 @@ class TestLogger(unittest.TestCase):
 # --------------------------------------------------------------------------
     def test_log_line_rotates_oversized_log_and_writes_new_file(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
-            LOG_FILE = Path(TMPDIR) / "iclouddd-worker.log"
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
             LOG_FILE.write_text("old\n", encoding="utf-8")
 
             with patch.object(logger, "get_log_rotate_max_bytes", return_value=1):
@@ -224,7 +224,7 @@ class TestLogger(unittest.TestCase):
 
             CONTENTS = LOG_FILE.read_text(encoding="utf-8").strip()
             self.assertEqual(CONTENTS, "[2026-03-09 12:34:56 UTC] [INFO] Backup starting.")
-            ARCHIVES = list(Path(TMPDIR).glob("iclouddd-worker.*.log.gz"))
+            ARCHIVES = list(Path(TMPDIR).glob("pyiclodoc-drive-worker.*.log.gz"))
             self.assertEqual(len(ARCHIVES), 1)
             with gzip.open(ARCHIVES[0], "rt", encoding="utf-8") as HANDLE:
                 self.assertEqual(HANDLE.read().strip(), "old")
@@ -234,7 +234,7 @@ class TestLogger(unittest.TestCase):
 # --------------------------------------------------------------------------
     def test_log_line_rotates_previous_day_log(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
-            LOG_FILE = Path(TMPDIR) / "iclouddd-worker.log"
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
             LOG_FILE.write_text("old-day\n", encoding="utf-8")
             OLD_EPOCH = datetime(2026, 3, 8, 10, 0, 0, tzinfo=timezone.utc).timestamp()
             os.utime(LOG_FILE, (OLD_EPOCH, OLD_EPOCH))
@@ -250,7 +250,7 @@ class TestLogger(unittest.TestCase):
                             with patch("builtins.print"):
                                 logger.log_line(LOG_FILE, "info", "new-day")
 
-            ARCHIVES = list(Path(TMPDIR).glob("iclouddd-worker.*.log.gz"))
+            ARCHIVES = list(Path(TMPDIR).glob("pyiclodoc-drive-worker.*.log.gz"))
             self.assertEqual(len(ARCHIVES), 1)
             with gzip.open(ARCHIVES[0], "rt", encoding="utf-8") as HANDLE:
                 self.assertEqual(HANDLE.read().strip(), "old-day")
@@ -260,9 +260,9 @@ class TestLogger(unittest.TestCase):
 # --------------------------------------------------------------------------
     def test_prune_rotated_logs_removes_expired_archives(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
-            LOG_FILE = Path(TMPDIR) / "iclouddd-worker.log"
-            OLD_ARCHIVE = Path(TMPDIR) / "iclouddd-worker.20200101-000000.log.gz"
-            NEW_ARCHIVE = Path(TMPDIR) / "iclouddd-worker.20990101-000000.log.gz"
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            OLD_ARCHIVE = Path(TMPDIR) / "pyiclodoc-drive-worker.20200101-000000.log.gz"
+            NEW_ARCHIVE = Path(TMPDIR) / "pyiclodoc-drive-worker.20990101-000000.log.gz"
             OLD_ARCHIVE.write_bytes(b"x")
             NEW_ARCHIVE.write_bytes(b"y")
 

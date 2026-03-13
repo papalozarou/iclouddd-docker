@@ -84,11 +84,11 @@ These are usually left as-is unless you have a specific reason to change them.
   Supported values are `info` and `debug`; default is `info`.
   `debug` includes per-item sync traces such as directories ensured,
   files queued/transferred, unchanged skips, and transfer failures.
-- `C_LOG_ROTATE_DAILY`: rotate `iclouddd-worker.log` when local date changes
+- `C_LOG_ROTATE_DAILY`: rotate `pyiclodoc-drive-worker.log` when local date changes
   (`true`/`false`, default `true`).
-- `C_LOG_ROTATE_MAX_MIB`: rotate `iclouddd-worker.log` when file size reaches this MiB
+- `C_LOG_ROTATE_MAX_MIB`: rotate `pyiclodoc-drive-worker.log` when file size reaches this MiB
   threshold (default `100`).
-- `C_LOG_ROTATE_KEEP_DAYS`: keep rotated `iclouddd-worker.*.log.gz` archives for this
+- `C_LOG_ROTATE_KEEP_DAYS`: keep rotated `pyiclodoc-drive-worker.*.log.gz` archives for this
   many days before pruning (default `14`).
 
 N.B.
@@ -120,10 +120,10 @@ Runtime layout:
 
 ```text
 /config
-├── iclouddd-auth_state.json
-├── iclouddd-manifest.json
-├── iclouddd-safety_net_done.flag
-├── iclouddd-safety_net_blocked.flag
+├── pyiclodoc-drive-auth_state.json
+├── pyiclodoc-drive-manifest.json
+├── pyiclodoc-drive-safety_net_done.flag
+├── pyiclodoc-drive-safety_net_blocked.flag
 ├── cookies/
 ├── session/
 ├── icloudpd/
@@ -135,7 +135,7 @@ Runtime layout:
 
 N.B.
 
-- `iclouddd-safety_net_done.flag` is created when first-run safety checks pass.
-- `iclouddd-safety_net_blocked.flag` is created when first-run safety checks block
+- `pyiclodoc-drive-safety_net_done.flag` is created when first-run safety checks pass.
+- `pyiclodoc-drive-safety_net_blocked.flag` is created when first-run safety checks block
   backup.
 - `icloudpd/cookies` and `icloudpd/session` are compatibility symlinks.

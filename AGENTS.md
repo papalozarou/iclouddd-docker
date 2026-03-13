@@ -19,8 +19,10 @@ This file defines various coding standards for agents to adhere to.
 - MUST: If no baseline commit exists, stop and request user approval to create an initial commit before proceeding with code edits
 - MUST: After each block of suggested and user-approved changes is applied, explicitly suggest a commit (with a clear commit message) before moving to the next change block
 - MUST: When a new rule is requested, ask whether it should be project-local (`AGENTS.local.md`) or added to the shared template (`AGENTS.md`) before editing rules
+- MUST: If you propose implementing on a specific branch, perform the work on that branch first and only merge to main after user confirmation
+- MUST: Before any edits, state current branch and intended target branch in one line
 - SHOULD: If the rule is project-local, suggest creating or updating `AGENTS.local.md` and ensure it is ignored by baseline ignore files
-- SHOULD: If a requested change set is focused but substantial, suggest creating and working on a dedicated Git branch before applying edits
+- SHOULD: If a requested change set is focused but substantial, suggest working on a dedicated Git branch before applying edits, creating the branch if necessary
 
 ## README.md and comments
 - MUST: Use UK English, not US

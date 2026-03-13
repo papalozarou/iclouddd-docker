@@ -129,6 +129,32 @@ class ICloudDriveClient:
             self._traversal_stats["workers_active"] = max(WORKERS_ACTIVE, 0)
 
 # --------------------------------------------------------------------------
+# This function records serial traversal directory-entry state.
+#
+# Returns: None.
+# --------------------------------------------------------------------------
+    def _record_serial_directory_enter(self) -> None:
+        with self._stats_lock:
+            self._traversal_stats["directories_pending"] += 1
+            self._traversal_stats["workers_active"] = 1
+
+# --------------------------------------------------------------------------
+# This function records serial traversal directory-exit state.
+#
+# Returns: None.
+# --------------------------------------------------------------------------
+    def _record_serial_directory_exit(self) -> None:
+        with self._stats_lock:
+            self._traversal_stats["directories_pending"] = max(
+                self._traversal_stats["directories_pending"] - 1,
+                0,
+            )
+            self._traversal_stats["directories_completed"] += 1
+            self._traversal_stats["workers_active"] = (
+                1 if self._traversal_stats["directories_pending"] > 0 else 0
+            )
+
+# --------------------------------------------------------------------------
 # This function records a directory-read attempt outcome for traversal
 # telemetry and retains the slowest directory reads.
 #
@@ -495,7 +521,6 @@ class ICloudDriveClient:
             CHILD_DIRECTORIES.append((RELATIVE_PATH, CHILD))
 
         return ENTRIES, CHILD_DIRECTORIES
-        return self._walk_node(DRIVE_ROOT, "")
 
 # --------------------------------------------------------------------------
 # This function reads directory payload with bounded retries for transient
@@ -565,21 +590,25 @@ class ICloudDriveClient:
 # Returns: Flat list of discovered remote entries under the node.
 # --------------------------------------------------------------------------
     def _walk_node(self, NODE: Any, CURRENT_PATH: str) -> list[RemoteEntry]:
+        self._record_serial_directory_enter()
         RESULT: list[RemoteEntry] = []
 
-        DIRECTORY_INFO = self._node_dir(NODE, CURRENT_PATH)
-        DIRS = DIRECTORY_INFO.get("dirs", [])
-        FILES = DIRECTORY_INFO.get("files", [])
-        NAMES = DIRECTORY_INFO.get("names", [])
+        try:
+            DIRECTORY_INFO = self._node_dir(NODE, CURRENT_PATH)
+            DIRS = DIRECTORY_INFO.get("dirs", [])
+            FILES = DIRECTORY_INFO.get("files", [])
+            NAMES = DIRECTORY_INFO.get("names", [])
 
-        if isinstance(NAMES, list) and NAMES:
-            RESULT.extend(self._entries_from_names(NODE, CURRENT_PATH, NAMES))
+            if isinstance(NAMES, list) and NAMES:
+                RESULT.extend(self._entries_from_names(NODE, CURRENT_PATH, NAMES))
+                return RESULT
+
+            RESULT.extend(self._entries_from_directories(NODE, CURRENT_PATH, DIRS))
+            RESULT.extend(self._entries_from_files(CURRENT_PATH, FILES))
+
             return RESULT
-
-        RESULT.extend(self._entries_from_directories(NODE, CURRENT_PATH, DIRS))
-        RESULT.extend(self._entries_from_files(CURRENT_PATH, FILES))
-
-        return RESULT
+        finally:
+            self._record_serial_directory_exit()
 
 # --------------------------------------------------------------------------
 # This function safely fetches directory metadata from a node.

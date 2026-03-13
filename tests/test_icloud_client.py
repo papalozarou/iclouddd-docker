@@ -241,6 +241,10 @@ class TestICloudClientTraversal(unittest.TestCase):
             ENTRIES = CLIENT.list_entries()
             PATHS = sorted(ENTRY.path for ENTRY in ENTRIES)
             self.assertEqual(PATHS, ["docs", "docs/inner.txt", "root.txt"])
+            STATS = CLIENT.get_traversal_stats_snapshot()
+            self.assertGreater(STATS.get("directories_completed", 0), 0)
+            self.assertEqual(STATS.get("directories_pending", 0), 0)
+            self.assertEqual(STATS.get("workers_active", 0), 0)
 
     def test_list_entries_supports_name_list_payload(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:

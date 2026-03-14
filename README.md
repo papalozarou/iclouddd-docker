@@ -14,6 +14,12 @@ It should have all the bits you need for real-world usage, such as:
 
 It is intended to be set and forget – start it, authorise when needed, and let it do the rest.
 
+*N.B.*
+
+You have probably already guessed from the `PROMPT.md` file that this was AI built. 
+
+It started as an experiment to see whether Claude Code or Codex spat out better code using the default models, which I beleive were Sonnet 4.6 and GPT-5.3-Codex. I asked Claude and Codex to rate the outputs and they both said Codex's was significantly better. The project grew from there as I wasn't satisfied with ~11 hour backups using other images. 
+
 ## Example usage
 
 The example `compose.yml` and `.env` files run two isolated containers out of the box, Alice and Bob, each with separate config, output, and logs. These examples will give you a flavour of what PyiCloDoc Drive can do, and enough information to configure to your needs. Complete documentation is linked at the end of this readme.

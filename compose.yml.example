@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# This Compose example defines two isolated iCloud Drive backup workers.
+# This Compose example defines two isolated PyiCloDoc Drive workers.
 #
 # The file demonstrates service-level separation, secret-file wiring, and
 # host/container environment variable mapping via ".env.example".
@@ -8,7 +8,7 @@ name: pyiclodoc-drive
 
 # ------------------------------------------------------------------------------
 # Docker extension fields for environment variables. This is used by all
-# containers to ensure that the timezone, UID, and GID are the same.
+# containers to ensure that the timezone, UID, GID and log settings are the same.
 # ------------------------------------------------------------------------------
 x-env:
   &default-env
@@ -37,8 +37,8 @@ x-security:
 # ------------------------------------------------------------------------------
 # Define secret-file mappings consumed by worker services.
 #
-# Each secret maps to a local file path under "./secrets".
-# Services reference these by secret name under their "secrets" key.
+# Each secret maps to a local file path under "H_DKR_SECRETS". Services 
+# reference these by secret name under their "secrets" key.
 # ------------------------------------------------------------------------------
 secrets:
   telegram_bot_token:

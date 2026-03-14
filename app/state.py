@@ -10,6 +10,7 @@ from pathlib import Path
 import json
 from typing import Any
 
+from app.logger import get_timestamp
 from app.time_utils import now_local_iso
 
 
@@ -33,8 +34,57 @@ def read_json(PATH: Path) -> dict[str, Any]:
     if not PATH.exists():
         return {}
 
-    with PATH.open("r", encoding="utf-8") as HANDLE:
-        return json.load(HANDLE)
+    try:
+        with PATH.open("r", encoding="utf-8") as HANDLE:
+            return json.load(HANDLE)
+    except json.JSONDecodeError as ERROR:
+        warn_state_issue(
+            f"Corrupt JSON state ignored at {PATH}: "
+            f"{type(ERROR).__name__}: {ERROR}",
+        )
+        quarantine_corrupt_json(PATH)
+        return {}
+    except OSError as ERROR:
+        warn_state_issue(
+            f"State read failed at {PATH}: {type(ERROR).__name__}: {ERROR}",
+        )
+        return {}
+
+
+# ------------------------------------------------------------------------------
+# This function emits a state-layer warning to worker stdout.
+#
+# 1. "MESSAGE" is warning content to print.
+#
+# Returns: None.
+# ------------------------------------------------------------------------------
+def warn_state_issue(MESSAGE: str) -> None:
+    print(f"[{get_timestamp()}] [ERROR] {MESSAGE}", flush=True)
+
+
+# ------------------------------------------------------------------------------
+# This function quarantines a corrupt JSON file to stop repeated parse failures.
+#
+# 1. "PATH" is the invalid JSON file path.
+#
+# Returns: None.
+# ------------------------------------------------------------------------------
+def quarantine_corrupt_json(PATH: Path) -> None:
+    QUARANTINE_PATH = PATH.with_suffix(f"{PATH.suffix}.corrupt")
+
+    try:
+        if QUARANTINE_PATH.exists():
+            QUARANTINE_PATH.unlink()
+    except OSError:
+        return
+
+    try:
+        PATH.replace(QUARANTINE_PATH)
+    except OSError as ERROR:
+        warn_state_issue(
+            f"Failed to quarantine corrupt JSON state at {PATH}: "
+            f"{type(ERROR).__name__}: {ERROR}",
+        )
 
 
 # ------------------------------------------------------------------------------

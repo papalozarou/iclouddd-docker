@@ -35,6 +35,41 @@ class TestState(unittest.TestCase):
         self.assertEqual(RESULT, {})
 
 # --------------------------------------------------------------------------
+# This test confirms malformed JSON is quarantined and replaced with an
+# empty payload.
+# --------------------------------------------------------------------------
+    def test_read_json_quarantines_malformed_json(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "broken.json"
+            PATH.write_text("{not-valid", encoding="utf-8")
+
+            with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                with patch("builtins.print") as PRINT:
+                    RESULT = read_json(PATH)
+
+            self.assertEqual(RESULT, {})
+            self.assertFalse(PATH.exists())
+            self.assertTrue((Path(TMPDIR) / "broken.json.corrupt").exists())
+            self.assertTrue(any("Corrupt JSON state ignored" in CALL.args[0] for CALL in PRINT.call_args_list))
+
+# --------------------------------------------------------------------------
+# This test confirms read failures fall back safely to an empty payload.
+# --------------------------------------------------------------------------
+    def test_read_json_returns_empty_dict_when_open_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "broken.json"
+            PATH.write_text("{}", encoding="utf-8")
+
+            with patch.object(Path, "open", side_effect=OSError("permission denied")):
+                with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                    with patch("builtins.print") as PRINT:
+                        RESULT = read_json(PATH)
+
+            self.assertEqual(RESULT, {})
+            self.assertTrue(PATH.exists())
+            self.assertTrue(any("State read failed" in CALL.args[0] for CALL in PRINT.call_args_list))
+
+# --------------------------------------------------------------------------
 # This test confirms JSON writes are persisted with the expected structure.
 # --------------------------------------------------------------------------
     def test_write_json_persists_payload(self) -> None:
@@ -56,6 +91,23 @@ class TestState(unittest.TestCase):
         with tempfile.TemporaryDirectory() as TMPDIR:
             PATH = Path(TMPDIR) / "auth_state.json"
             STATE = load_auth_state(PATH)
+
+        self.assertEqual(STATE.last_auth_utc, "1970-01-01T00:00:00+00:00")
+        self.assertFalse(STATE.auth_pending)
+        self.assertFalse(STATE.reauth_pending)
+        self.assertEqual(STATE.reminder_stage, "none")
+
+# --------------------------------------------------------------------------
+# This test confirms corrupt auth-state JSON falls back to safe defaults.
+# --------------------------------------------------------------------------
+    def test_load_auth_state_defaults_for_corrupt_json(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "auth_state.json"
+            PATH.write_text("{bad", encoding="utf-8")
+
+            with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                with patch("builtins.print"):
+                    STATE = load_auth_state(PATH)
 
         self.assertEqual(STATE.last_auth_utc, "1970-01-01T00:00:00+00:00")
         self.assertFalse(STATE.auth_pending)
@@ -107,6 +159,20 @@ class TestState(unittest.TestCase):
             PATH = Path(TMPDIR) / "manifest.json"
             PATH.write_text(json.dumps(["invalid"]), encoding="utf-8")
             MANIFEST = load_manifest(PATH)
+
+        self.assertEqual(MANIFEST, {})
+
+# --------------------------------------------------------------------------
+# This test confirms corrupt manifest JSON falls back to an empty manifest.
+# --------------------------------------------------------------------------
+    def test_load_manifest_returns_empty_for_corrupt_json(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "manifest.json"
+            PATH.write_text("{bad", encoding="utf-8")
+
+            with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                with patch("builtins.print"):
+                    MANIFEST = load_manifest(PATH)
 
         self.assertEqual(MANIFEST, {})
 

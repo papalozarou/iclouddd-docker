@@ -5,14 +5,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
-from importlib import metadata as importlib_metadata
-import os
+from datetime import datetime, timezone
 from pathlib import Path
 import threading
 import time
 
 import app.auth_runtime as auth_runtime
+import app.backup_runtime as backup_runtime
 import app.command_runtime as command_runtime
 from app.config import AppConfig, load_config
 from app.credential_store import configure_keyring, load_credentials, save_credentials
@@ -33,14 +32,11 @@ from app.scheduler import (
     parse_weekday_list,
 )
 from app.state import AuthState, load_auth_state, load_manifest, now_iso, save_auth_state, save_manifest
-from app.syncer import get_transfer_worker_count, perform_incremental_sync, run_first_time_safety_net
+from app.syncer import perform_incremental_sync, run_first_time_safety_net
 from app.telegram_bot import TelegramConfig, fetch_updates, parse_command, send_message
 from app.telegram_messages import (
-    build_backup_complete_message,
-    build_backup_requested_message,
     build_backup_skipped_auth_incomplete_message,
     build_backup_skipped_reauth_pending_message,
-    build_backup_started_message,
     build_container_started_message,
     build_container_stopped_message,
     build_one_shot_waiting_for_auth_message,
@@ -283,11 +279,7 @@ def process_reauth_reminders(
 # Returns: Zero-padded duration string.
 # ------------------------------------------------------------------------------
 def format_duration_clock(TOTAL_SECONDS: int) -> str:
-    SAFE_SECONDS = max(TOTAL_SECONDS, 0)
-    HOURS = SAFE_SECONDS // 3600
-    MINUTES = (SAFE_SECONDS % 3600) // 60
-    SECONDS = SAFE_SECONDS % 60
-    return f"{HOURS:02d}:{MINUTES:02d}:{SECONDS:02d}"
+    return backup_runtime.format_duration_clock(TOTAL_SECONDS)
 
 
 # ------------------------------------------------------------------------------
@@ -299,10 +291,7 @@ def format_duration_clock(TOTAL_SECONDS: int) -> str:
 # Returns: Human-readable transfer speed string.
 # ------------------------------------------------------------------------------
 def format_average_speed(TRANSFERRED_BYTES: int, DURATION_SECONDS: int) -> str:
-    SAFE_BYTES = max(TRANSFERRED_BYTES, 0)
-    SAFE_DURATION_SECONDS = max(DURATION_SECONDS, 1)
-    MEBIBYTES_PER_SECOND = SAFE_BYTES / SAFE_DURATION_SECONDS / (1024 * 1024)
-    return f"{MEBIBYTES_PER_SECOND:.2f} MiB/s"
+    return backup_runtime.format_average_speed(TRANSFERRED_BYTES, DURATION_SECONDS)
 
 
 # ------------------------------------------------------------------------------
@@ -311,17 +300,7 @@ def format_average_speed(TRANSFERRED_BYTES: int, DURATION_SECONDS: int) -> str:
 # Returns: Mapping with app build ref and pyicloud package version.
 # ------------------------------------------------------------------------------
 def get_build_detail() -> dict[str, str]:
-    APP_BUILD_REF = os.getenv("C_APP_BUILD_REF", "unknown").strip() or "unknown"
-
-    try:
-        PYICLOUD_VERSION = importlib_metadata.version("pyicloud")
-    except importlib_metadata.PackageNotFoundError:
-        PYICLOUD_VERSION = "unknown"
-
-    return {
-        "app_build_ref": APP_BUILD_REF,
-        "pyicloud_version": PYICLOUD_VERSION,
-    }
+    return backup_runtime.get_build_detail()
 
 
 # ------------------------------------------------------------------------------
@@ -408,58 +387,26 @@ def run_backup(
     LOG_FILE: Path,
     TRIGGER: str,
 ) -> None:
-    log_effective_backup_settings(CONFIG, LOG_FILE)
-    MANIFEST = load_manifest(CONFIG.manifest_path)
-    log_line(LOG_FILE, "debug", f"Loaded manifest entries: {len(MANIFEST)}")
     APPLE_ID_LABEL = format_apple_id_label(CONFIG.icloud_email)
-    RUN_START_EPOCH = int(time.time())
     SCHEDULE_LINE = format_schedule_line(CONFIG, TRIGGER)
-    notify(
-        TELEGRAM,
-        build_backup_started_message(APPLE_ID_LABEL, SCHEDULE_LINE),
-    )
-
-    SUMMARY, NEW_MANIFEST = perform_incremental_sync(
+    return backup_runtime.run_backup(
         CLIENT,
-        CONFIG.output_dir,
-        MANIFEST,
-        CONFIG.sync_workers,
+        CONFIG,
+        TELEGRAM,
         LOG_FILE,
-        BACKUP_DELETE_REMOVED=CONFIG.backup_delete_removed,
-    )
-    log_line(
-        LOG_FILE,
-        "debug",
-        "Sync summary detail: "
-        f"total={SUMMARY.total_files}, "
-        f"transferred={SUMMARY.transferred_files}, "
-        f"bytes={SUMMARY.transferred_bytes}, "
-        f"skipped={SUMMARY.skipped_files}, "
-        f"errors={SUMMARY.error_files}, "
-        f"manifest_entries={len(NEW_MANIFEST)}",
-    )
-    save_manifest(CONFIG.manifest_path, NEW_MANIFEST)
-
-    DURATION_SECONDS = int(time.time()) - RUN_START_EPOCH
-    AVERAGE_SPEED = format_average_speed(SUMMARY.transferred_bytes, DURATION_SECONDS)
-    STATUS_LINES = [
-        f"Transferred: {SUMMARY.transferred_files}/{SUMMARY.total_files}",
-        f"Skipped: {SUMMARY.skipped_files}",
-        f"Errors: {SUMMARY.error_files}",
-        f"Duration: {format_duration_clock(DURATION_SECONDS)}",
-    ]
-
-    if SUMMARY.transferred_files > 0:
-        STATUS_LINES.append(f"Average speed: {AVERAGE_SPEED}")
-
-    COMPLETION_MESSAGE = build_backup_complete_message(APPLE_ID_LABEL, STATUS_LINES)
-    notify(TELEGRAM, COMPLETION_MESSAGE)
-    log_line(
-        LOG_FILE,
-        "info",
-        "Backup complete. "
-        f"Transferred {SUMMARY.transferred_files}/{SUMMARY.total_files}, "
-        f"skipped {SUMMARY.skipped_files}, errors {SUMMARY.error_files}.",
+        TRIGGER,
+        APPLE_ID_LABEL,
+        SCHEDULE_LINE,
+        LOAD_MANIFEST_FN=load_manifest,
+        SAVE_MANIFEST_FN=save_manifest,
+        LOG_LINE_FN=log_line,
+        NOTIFY_FN=notify,
+        FORMAT_DURATION_FN=format_duration_clock,
+        FORMAT_SPEED_FN=format_average_speed,
+        LOG_SETTINGS_FN=lambda CONFIG_ARG, LOG_FILE_ARG, _LOG_LINE_FN: (
+            log_effective_backup_settings(CONFIG_ARG, LOG_FILE_ARG)
+        ),
+        PERFORM_SYNC_FN=perform_incremental_sync,
     )
 
 
@@ -472,31 +419,11 @@ def run_backup(
 # Returns: None.
 # ------------------------------------------------------------------------------
 def log_effective_backup_settings(CONFIG: AppConfig, LOG_FILE: Path) -> None:
-    SYNC_WORKERS_LABEL = "auto" if CONFIG.sync_workers == 0 else str(CONFIG.sync_workers)
-    EFFECTIVE_WORKERS = get_transfer_worker_count(CONFIG.sync_workers)
-    BUILD_DETAIL = get_build_detail()
-    log_line(
+    return backup_runtime.log_effective_backup_settings(
+        CONFIG,
         LOG_FILE,
-        "debug",
-        "Build detail: "
-        f"app_build_ref={BUILD_DETAIL['app_build_ref']}, "
-        f"pyicloud_version={BUILD_DETAIL['pyicloud_version']}",
-    )
-    log_line(
-        LOG_FILE,
-        "debug",
-        "Effective backup settings detail: "
-        f"run_once={CONFIG.run_once}, "
-        f"schedule_mode={CONFIG.schedule_mode}, "
-        f"schedule_interval_minutes={CONFIG.schedule_interval_minutes}, "
-        f"schedule_backup_time={CONFIG.schedule_backup_time}, "
-        f"schedule_weekdays={CONFIG.schedule_weekdays}, "
-        f"schedule_monthly_week={CONFIG.schedule_monthly_week}, "
-        f"sync_traversal_workers={CONFIG.traversal_workers}, "
-        f"sync_download_workers={SYNC_WORKERS_LABEL}, "
-        f"effective_download_workers={EFFECTIVE_WORKERS}, "
-        f"sync_download_chunk_mib={CONFIG.download_chunk_mib}, "
-        f"backup_delete_removed={CONFIG.backup_delete_removed}",
+        LOG_LINE_FN=log_line,
+        GET_BUILD_DETAIL_FN=get_build_detail,
     )
 
 

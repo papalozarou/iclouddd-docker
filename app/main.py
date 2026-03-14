@@ -13,6 +13,7 @@ import threading
 import time
 
 import app.auth_runtime as auth_runtime
+import app.command_runtime as command_runtime
 from app.config import AppConfig, load_config
 from app.credential_store import configure_keyring, load_credentials, save_credentials
 from app.icloud_client import ICloudDriveClient
@@ -35,7 +36,6 @@ from app.state import AuthState, load_auth_state, load_manifest, now_iso, save_a
 from app.syncer import get_transfer_worker_count, perform_incremental_sync, run_first_time_safety_net
 from app.telegram_bot import TelegramConfig, fetch_updates, parse_command, send_message
 from app.telegram_messages import (
-    build_authentication_required_message,
     build_backup_complete_message,
     build_backup_requested_message,
     build_backup_skipped_auth_incomplete_message,
@@ -44,7 +44,6 @@ from app.telegram_messages import (
     build_container_started_message,
     build_container_stopped_message,
     build_one_shot_waiting_for_auth_message,
-    build_reauthentication_required_for_apple_id_message,
     build_safety_net_blocked_message,
 )
 from app.time_utils import now_local
@@ -383,25 +382,13 @@ def process_commands(
     USERNAME: str,
     UPDATE_OFFSET: int | None,
 ) -> tuple[list[tuple[str, str]], int | None]:
-    UPDATES = fetch_updates(TELEGRAM, UPDATE_OFFSET)
-
-    if not UPDATES:
-        return [], UPDATE_OFFSET
-
-    COMMANDS: list[tuple[str, str]] = []
-    MAX_UPDATE = UPDATE_OFFSET or 0
-
-    for UPDATE in UPDATES:
-        EVENT = parse_command(UPDATE, USERNAME, TELEGRAM.chat_id)
-        UPDATE_ID = int(UPDATE.get("update_id", 0))
-        MAX_UPDATE = max(MAX_UPDATE, UPDATE_ID + 1)
-
-        if EVENT is None:
-            continue
-
-        COMMANDS.append((EVENT.command, EVENT.args))
-
-    return COMMANDS, MAX_UPDATE
+    return command_runtime.process_commands(
+        TELEGRAM,
+        USERNAME,
+        UPDATE_OFFSET,
+        FETCH_UPDATES_FN=fetch_updates,
+        PARSE_COMMAND_FN=parse_command,
+    )
 
 
 # ------------------------------------------------------------------------------
@@ -536,47 +523,21 @@ def handle_command(
     TELEGRAM: TelegramConfig,
 ) -> tuple[AuthState, bool, bool]:
     APPLE_ID_LABEL = format_apple_id_label(CONFIG.icloud_email)
-
-    if COMMAND == "backup":
-        notify(
-            TELEGRAM,
-            build_backup_requested_message(APPLE_ID_LABEL),
-        )
-        return AUTH_STATE, IS_AUTHENTICATED, True
-
-    if COMMAND == "auth" and not ARGS:
-        NEW_STATE = replace(AUTH_STATE, auth_pending=True)
-        save_auth_state(CONFIG.auth_state_path, NEW_STATE)
-        notify(
-            TELEGRAM,
-            build_authentication_required_message(
-                APPLE_ID_LABEL, CONFIG.container_username
-            ),
-        )
-        return NEW_STATE, IS_AUTHENTICATED, False
-
-    if COMMAND == "reauth" and not ARGS:
-        NEW_STATE = replace(AUTH_STATE, reauth_pending=True)
-        save_auth_state(CONFIG.auth_state_path, NEW_STATE)
-        notify(
-            TELEGRAM,
-            build_reauthentication_required_for_apple_id_message(
-                APPLE_ID_LABEL, CONFIG.container_username
-            ),
-        )
-        return NEW_STATE, IS_AUTHENTICATED, False
-
-    NEW_STATE, NEW_AUTH, DETAILS = attempt_auth(
+    return command_runtime.handle_command(
+        COMMAND,
+        ARGS,
+        CONFIG,
         CLIENT,
         AUTH_STATE,
-        CONFIG.auth_state_path,
+        IS_AUTHENTICATED,
         TELEGRAM,
-        CONFIG.container_username,
-        CONFIG.icloud_email,
-        ARGS,
+        APPLE_ID_LABEL,
+        ATTEMPT_AUTH_FN=attempt_auth,
+        NOTIFY_FN=notify,
+        SAVE_AUTH_STATE_FN=save_auth_state,
+        LOG_LINE_FN=log_line,
+        LOG_FILE_PATH=CONFIG.logs_dir / "pyiclodoc-drive-worker.log",
     )
-    log_line(CONFIG.logs_dir / "pyiclodoc-drive-worker.log", "info", f"Auth command result: {DETAILS}")
-    return NEW_STATE, NEW_AUTH, False
 
 
 # ------------------------------------------------------------------------------

@@ -700,8 +700,8 @@ def attempt_auth(
                 "Authentication required",
                 f"Authentication required for Apple ID {APPLE_ID_LABEL}.",
                 [
-                    f"Send: {USERNAME} auth 123456",
-                    f"Or: {USERNAME} reauth 123456",
+                    f"Send `{USERNAME} auth 123456`",
+                    f"Or `{USERNAME} reauth 123456`",
                 ],
             ),
         )
@@ -715,7 +715,7 @@ def attempt_auth(
             "❌",
             "Authentication failed",
             f"Authentication failed for Apple ID {APPLE_ID_LABEL}.",
-            [f"Reason: {DETAILS}"],
+            [DETAILS],
         ),
     )
     return NEW_STATE, False, DETAILS
@@ -763,7 +763,7 @@ def enforce_safety_net(CONFIG: AppConfig, TELEGRAM: TelegramConfig, LOG_FILE: Pa
             f"Backup blocked for Apple ID {APPLE_ID_LABEL}.",
             [
                 "Permission mismatches detected in existing files.",
-                "Expected: "
+                "Expected "
                 f"uid {RESULT.expected_uid}, "
                 f"gid {RESULT.expected_gid}",
                 f"Sample mismatches: {SAMPLE_TEXT}",
@@ -806,7 +806,10 @@ def process_reauth_reminders(
                 "🔑",
                 "Reauthentication required",
                 "Reauthentication is due within two days.",
-                [f"Send: {USERNAME} reauth"],
+                [
+                    f"Send `{USERNAME} auth 123456`",
+                    f"Or `{USERNAME} reauth 123456`",
+                ],
             ),
         )
         NEW_STATE = replace(AUTH_STATE, reminder_stage="prompt2", reauth_pending=True)
@@ -820,6 +823,10 @@ def process_reauth_reminders(
                 "📣",
                 "Reauth reminder",
                 "Reauthentication will be required within five days.",
+                [
+                    f"Send `{USERNAME} auth 123456`",
+                    f"Or `{USERNAME} reauth 123456`",
+                ],
             ),
         )
         NEW_STATE = replace(AUTH_STATE, reminder_stage="alert5")
@@ -1030,7 +1037,10 @@ def handle_command(
                 "🔑",
                 "Authentication required",
                 f"Authentication required for Apple ID {APPLE_ID_LABEL}.",
-                [f"Send: {CONFIG.container_username} auth 123456"],
+                [
+                    f"Send `{CONFIG.container_username} auth 123456`",
+                    f"Or `{CONFIG.container_username} reauth 123456`",
+                ],
             ),
         )
         return NEW_STATE, IS_AUTHENTICATED, False
@@ -1044,7 +1054,10 @@ def handle_command(
                 "🔑",
                 "Reauthentication required",
                 f"Reauthentication required for Apple ID {APPLE_ID_LABEL}.",
-                [f"Send: {CONFIG.container_username} reauth 123456"],
+                [
+                    f"Send `{CONFIG.container_username} auth 123456`",
+                    f"Or `{CONFIG.container_username} reauth 123456`",
+                ],
             ),
         )
         return NEW_STATE, IS_AUTHENTICATED, False
@@ -1195,7 +1208,7 @@ def main() -> int:
                         f"Authentication required for Apple ID {APPLE_ID_LABEL}.",
                         [
                             "One-shot mode is waiting for an auth command before backup.",
-                            "Wait window: "
+                            "The wait window is "
                             f"{max(1, RUN_ONCE_AUTH_WAIT_SECONDS // 60)} mins.",
                         ],
                     ),
@@ -1215,7 +1228,7 @@ def main() -> int:
                         "⏭️",
                         "Backup skipped",
                         f"Backup skipped for Apple ID {APPLE_ID_LABEL}.",
-                        ["Reason: Authentication incomplete."],
+                        ["Authentication incomplete."],
                     ),
                 )
                 STOP_STATUS = "One-shot backup skipped due to incomplete authentication."
@@ -1228,7 +1241,7 @@ def main() -> int:
                         "⏭️",
                         "Backup skipped",
                         f"Backup skipped for Apple ID {APPLE_ID_LABEL}.",
-                        ["Reason: Reauthentication pending."],
+                        ["Reauthentication pending."],
                     ),
                 )
                 STOP_STATUS = "One-shot backup skipped due to pending reauthentication."
@@ -1293,7 +1306,7 @@ def main() -> int:
                         "⏭️",
                         "Backup skipped",
                         f"Backup skipped for Apple ID {APPLE_ID_LABEL}.",
-                        ["Reason: Authentication incomplete."],
+                        ["Authentication incomplete."],
                     ),
                 )
                 time.sleep(5)
@@ -1306,7 +1319,7 @@ def main() -> int:
                         "⏭️",
                         "Backup skipped",
                         f"Backup skipped for Apple ID {APPLE_ID_LABEL}.",
-                        ["Reason: Reauthentication pending."],
+                        ["Reauthentication pending."],
                     ),
                 )
                 time.sleep(5)

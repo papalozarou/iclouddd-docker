@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tests._stubs import install_dependency_stubs
 
@@ -108,10 +109,13 @@ class TestMainReminderLogic(unittest.TestCase):
                 reminder_stage="none",
             )
 
-            UPDATED = process_reauth_reminders(STATE, STATE_PATH, TELEGRAM, "alice", 30)
+            with patch("app.main.notify") as NOTIFY:
+                UPDATED = process_reauth_reminders(STATE, STATE_PATH, TELEGRAM, "alice", 30)
 
             self.assertEqual(UPDATED.reminder_stage, "alert5")
             self.assertFalse(UPDATED.reauth_pending)
+            self.assertIn("Send `alice auth 123456`", NOTIFY.call_args[0][1])
+            self.assertIn("Or `alice reauth 123456`", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms the two-day prompt stage enables reauthentication
@@ -128,10 +132,13 @@ class TestMainReminderLogic(unittest.TestCase):
                 reminder_stage="alert5",
             )
 
-            UPDATED = process_reauth_reminders(STATE, STATE_PATH, TELEGRAM, "alice", 30)
+            with patch("app.main.notify") as NOTIFY:
+                UPDATED = process_reauth_reminders(STATE, STATE_PATH, TELEGRAM, "alice", 30)
 
             self.assertEqual(UPDATED.reminder_stage, "prompt2")
             self.assertTrue(UPDATED.reauth_pending)
+            self.assertIn("Send `alice auth 123456`", NOTIFY.call_args[0][1])
+            self.assertIn("Or `alice reauth 123456`", NOTIFY.call_args[0][1])
 
 
 # ------------------------------------------------------------------------------

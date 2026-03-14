@@ -235,6 +235,8 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertFalse(NEW_STATE.reauth_pending)
             CLIENT.start_authentication.assert_called_once()
             self.assertIn("Authentication required", NOTIFY.call_args[0][1])
+            self.assertIn("Send `alice auth 123456`", NOTIFY.call_args[0][1])
+            self.assertIn("Or `alice reauth 123456`", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms attempt_auth generic failure sends failure message.
@@ -262,6 +264,8 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertTrue(NEW_STATE.auth_pending)
             CLIENT.start_authentication.assert_called_once()
             self.assertIn("Authentication failed", NOTIFY.call_args[0][1])
+            self.assertIn("Bad credentials", NOTIFY.call_args[0][1])
+            self.assertNotIn("Reason:", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms a done marker short-circuits safety-net checks.
@@ -328,7 +332,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertTrue((CONFIG.config_dir / "pyiclodoc-drive-safety_net_blocked.flag").exists())
             self.assertIn("Safety net blocked", NOTIFY.call_args[0][1])
             self.assertIn(
-                "Expected: uid 1000, gid 1000",
+                "Expected uid 1000, gid 1000",
                 NOTIFY.call_args[0][1],
             )
 
@@ -575,6 +579,8 @@ class TestMainEntrypoint(unittest.TestCase):
             MESSAGES = [CALL.args[1] for CALL in NOTIFY.call_args_list]
             self.assertTrue(any("Backup skipped" in MESSAGE for MESSAGE in MESSAGES))
             self.assertTrue(any("Authentication incomplete" in MESSAGE for MESSAGE in MESSAGES))
+            self.assertTrue(any("The wait window is 15 mins." in MESSAGE for MESSAGE in MESSAGES))
+            self.assertFalse(any("Reason:" in MESSAGE for MESSAGE in MESSAGES))
 
 # --------------------------------------------------------------------------
 # This test confirms one-shot mode returns 3 when reauth is pending.

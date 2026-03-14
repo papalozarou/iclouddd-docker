@@ -451,6 +451,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertTrue(IS_AUTHENTICATED)
             self.assertTrue(REQUESTED)
             self.assertIn("Backup requested", NOTIFY.call_args[0][1])
+            self.assertIn("Manual backup requested for Apple ID alice@example.com.", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms handle_command auth prompt path persists pending state.
@@ -462,7 +463,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
 
             with patch("app.main.save_auth_state") as SAVE:
-                with patch("app.main.notify"):
+                with patch("app.main.notify") as NOTIFY:
                     NEW_STATE, _, REQUESTED = handle_command(
                         "auth",
                         "",
@@ -476,6 +477,8 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertTrue(NEW_STATE.auth_pending)
             self.assertFalse(REQUESTED)
             SAVE.assert_called_once()
+            self.assertIn("Send `alice auth 123456`", NOTIFY.call_args[0][1])
+            self.assertIn("Or `alice reauth 123456`", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms handle_command reauth prompt path persists pending state.
@@ -487,7 +490,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
 
             with patch("app.main.save_auth_state") as SAVE:
-                with patch("app.main.notify"):
+                with patch("app.main.notify") as NOTIFY:
                     NEW_STATE, _, REQUESTED = handle_command(
                         "reauth",
                         "",
@@ -501,6 +504,8 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertTrue(NEW_STATE.reauth_pending)
             self.assertFalse(REQUESTED)
             SAVE.assert_called_once()
+            self.assertIn("Send `alice auth 123456`", NOTIFY.call_args[0][1])
+            self.assertIn("Or `alice reauth 123456`", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms handle_command auth flow delegates to attempt_auth.
@@ -645,10 +650,16 @@ class TestMainEntrypoint(unittest.TestCase):
                                         with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
                                             with patch("app.main.enforce_safety_net", return_value=True):
                                                 with patch("app.main.run_backup") as RUN_BACKUP:
-                                                    RESULT = __import__("app.main", fromlist=["main"]).main()
+                                                    with patch("app.main.notify") as NOTIFY:
+                                                        RESULT = __import__("app.main", fromlist=["main"]).main()
 
             self.assertEqual(RESULT, 0)
             RUN_BACKUP.assert_called_once()
+            self.assertGreaterEqual(NOTIFY.call_count, 2)
+            self.assertIn("*🟢 PCD Drive - Container started*", NOTIFY.call_args_list[0].args[1])
+            self.assertIn("Worker started for Apple ID alice@example.com.", NOTIFY.call_args_list[0].args[1])
+            self.assertIn("*🛑 PCD Drive - Container stopped*", NOTIFY.call_args_list[-1].args[1])
+            self.assertIn("Run completed and container exited.", NOTIFY.call_args_list[-1].args[1])
 
 # --------------------------------------------------------------------------
 # This test confirms one-shot mode runs backup after auth wait succeeds.

@@ -12,8 +12,7 @@ from pathlib import Path
 import threading
 import time
 
-from dateutil import parser as date_parser
-
+import app.auth_runtime as auth_runtime
 from app.config import AppConfig, load_config
 from app.credential_store import configure_keyring, load_credentials, save_credentials
 from app.icloud_client import ICloudDriveClient
@@ -36,8 +35,6 @@ from app.state import AuthState, load_auth_state, load_manifest, now_iso, save_a
 from app.syncer import get_transfer_worker_count, perform_incremental_sync, run_first_time_safety_net
 from app.telegram_bot import TelegramConfig, fetch_updates, parse_command, send_message
 from app.telegram_messages import (
-    build_authentication_complete_message,
-    build_authentication_failed_message,
     build_authentication_required_message,
     build_backup_complete_message,
     build_backup_requested_message,
@@ -47,9 +44,7 @@ from app.telegram_messages import (
     build_container_started_message,
     build_container_stopped_message,
     build_one_shot_waiting_for_auth_message,
-    build_reauth_reminder_message,
     build_reauthentication_required_for_apple_id_message,
-    build_reauthentication_required_message,
     build_safety_net_blocked_message,
 )
 from app.time_utils import now_local
@@ -130,38 +125,6 @@ def validate_config(CONFIG: AppConfig) -> list[str]:
 
 
 # ------------------------------------------------------------------------------
-# This function parses an ISO timestamp with a strict epoch fallback.
-#
-# 1. "VALUE" is an ISO-formatted timestamp string.
-#
-# Returns: Offset-aware datetime; Unix epoch when parsing fails.
-#
-# Notes: dateutil parsing reference:
-# https://dateutil.readthedocs.io/en/stable/parser.html
-# ------------------------------------------------------------------------------
-def parse_iso(VALUE: str) -> datetime:
-    try:
-        return date_parser.isoparse(VALUE)
-    except (TypeError, ValueError, OverflowError):
-        return datetime(1970, 1, 1, tzinfo=timezone.utc)
-
-
-# ------------------------------------------------------------------------------
-# This function calculates remaining whole days before reauthentication.
-#
-# 1. "LAST_AUTH_UTC" is stored offset-aware auth timestamp.
-# 2. "INTERVAL_DAYS" is the reauthentication interval in days.
-#
-# Returns: Remaining whole days before reauthentication should complete.
-# ------------------------------------------------------------------------------
-def reauth_days_left(LAST_AUTH_UTC: str, INTERVAL_DAYS: int) -> int:
-    LAST_AUTH = parse_iso(LAST_AUTH_UTC)
-    ELAPSED = now_local() - LAST_AUTH
-    ELAPSED_DAYS = max(int(ELAPSED.total_seconds() // 86400), 0)
-    return INTERVAL_DAYS - ELAPSED_DAYS
-
-
-# ------------------------------------------------------------------------------
 # This function updates the healthcheck heartbeat file timestamp.
 #
 # 1. "PATH" is the heartbeat file path.
@@ -226,6 +189,94 @@ def format_apple_id_label(APPLE_ID: str) -> str:
 
 
 # ------------------------------------------------------------------------------
+# This function parses an ISO timestamp with a strict epoch fallback.
+#
+# 1. "VALUE" is an ISO-formatted timestamp string.
+#
+# Returns: Offset-aware datetime; Unix epoch when parsing fails.
+# ------------------------------------------------------------------------------
+def parse_iso(VALUE: str) -> datetime:
+    return auth_runtime.parse_iso(VALUE)
+
+
+# ------------------------------------------------------------------------------
+# This function calculates remaining whole days before reauthentication.
+#
+# 1. "LAST_AUTH_UTC" is stored offset-aware auth timestamp.
+# 2. "INTERVAL_DAYS" is the reauthentication interval in days.
+#
+# Returns: Remaining whole days before reauthentication should complete.
+# ------------------------------------------------------------------------------
+def reauth_days_left(LAST_AUTH_UTC: str, INTERVAL_DAYS: int) -> int:
+    return auth_runtime.reauth_days_left(LAST_AUTH_UTC, INTERVAL_DAYS)
+
+
+# ------------------------------------------------------------------------------
+# This function executes authentication and persists updated auth state.
+#
+# 1. "CLIENT" is iCloud client wrapper.
+# 2. "AUTH_STATE" is current auth state.
+# 3. "AUTH_STATE_PATH" is auth state file path.
+# 4. "TELEGRAM" is Telegram integration configuration.
+# 5. "USERNAME" is command prefix used by Telegram control.
+# 6. "PROVIDED_CODE" is optional MFA code.
+#
+# Returns: Tuple "(new_state, is_authenticated, details_message)".
+# ------------------------------------------------------------------------------
+def attempt_auth(
+    CLIENT: ICloudDriveClient,
+    AUTH_STATE: AuthState,
+    AUTH_STATE_PATH: Path,
+    TELEGRAM: TelegramConfig,
+    USERNAME: str,
+    APPLE_ID: str,
+    PROVIDED_CODE: str,
+) -> tuple[AuthState, bool, str]:
+    return auth_runtime.attempt_auth(
+        CLIENT,
+        AUTH_STATE,
+        AUTH_STATE_PATH,
+        TELEGRAM,
+        USERNAME,
+        APPLE_ID,
+        PROVIDED_CODE,
+        NOW_ISO_FN=now_iso,
+        SAVE_AUTH_STATE_FN=save_auth_state,
+        NOTIFY_FN=notify,
+    )
+
+
+# ------------------------------------------------------------------------------
+# This function applies 5-day and 2-day reauthentication reminder stages.
+#
+# 1. "AUTH_STATE" is current auth state.
+# 2. "AUTH_STATE_PATH" is persistence file path.
+# 3. "TELEGRAM" is Telegram integration configuration.
+# 4. "USERNAME" is Telegram command prefix.
+# 5. "INTERVAL_DAYS" is reauthentication interval in days.
+#
+# Returns: Updated authentication state.
+# ------------------------------------------------------------------------------
+def process_reauth_reminders(
+    AUTH_STATE: AuthState,
+    AUTH_STATE_PATH: Path,
+    TELEGRAM: TelegramConfig,
+    USERNAME: str,
+    INTERVAL_DAYS: int,
+) -> AuthState:
+    return auth_runtime.process_reauth_reminders(
+        AUTH_STATE,
+        AUTH_STATE_PATH,
+        TELEGRAM,
+        USERNAME,
+        INTERVAL_DAYS,
+        REAUTH_DAYS_LEFT_FN=reauth_days_left,
+        SAVE_AUTH_STATE_FN=save_auth_state,
+        NOTIFY_FN=notify,
+    )
+
+
+# ------------------------------------------------------------------------------
 # This function formats elapsed seconds as "HH:MM:SS".
 #
 # 1. "TOTAL_SECONDS" is elapsed duration in seconds.
@@ -275,67 +326,6 @@ def get_build_detail() -> dict[str, str]:
 
 
 # ------------------------------------------------------------------------------
-# This function executes authentication and persists updated auth state.
-#
-# 1. "CLIENT" is iCloud client wrapper.
-# 2. "AUTH_STATE" is current auth state.
-# 3. "AUTH_STATE_PATH" is auth state file path.
-# 4. "TELEGRAM" is Telegram integration configuration.
-# 5. "USERNAME" is command prefix used by Telegram control.
-# 6. "PROVIDED_CODE" is optional MFA code.
-#
-# Returns: Tuple "(new_state, is_authenticated, details_message)".
-# ------------------------------------------------------------------------------
-def attempt_auth(
-    CLIENT: ICloudDriveClient,
-    AUTH_STATE: AuthState,
-    AUTH_STATE_PATH: Path,
-    TELEGRAM: TelegramConfig,
-    USERNAME: str,
-    APPLE_ID: str,
-    PROVIDED_CODE: str,
-) -> tuple[AuthState, bool, str]:
-    CODE = PROVIDED_CODE.strip()
-    APPLE_ID_LABEL = format_apple_id_label(APPLE_ID)
-
-    if CODE:
-        IS_SUCCESS, DETAILS = CLIENT.complete_authentication(CODE)
-    else:
-        IS_SUCCESS, DETAILS = CLIENT.start_authentication()
-
-    if IS_SUCCESS:
-        NEW_STATE = AuthState(
-            last_auth_utc=now_iso(),
-            auth_pending=False,
-            reauth_pending=False,
-            reminder_stage="none",
-        )
-        save_auth_state(AUTH_STATE_PATH, NEW_STATE)
-        notify(
-            TELEGRAM,
-            build_authentication_complete_message(APPLE_ID_LABEL, DETAILS),
-        )
-        return NEW_STATE, True, DETAILS
-
-    if "Two-factor code is required" in DETAILS:
-        NEW_STATE = replace(AUTH_STATE, auth_pending=True)
-        save_auth_state(AUTH_STATE_PATH, NEW_STATE)
-        notify(
-            TELEGRAM,
-            build_authentication_required_message(APPLE_ID_LABEL, USERNAME),
-        )
-        return NEW_STATE, False, DETAILS
-
-    NEW_STATE = replace(AUTH_STATE, auth_pending=True)
-    save_auth_state(AUTH_STATE_PATH, NEW_STATE)
-    notify(
-        TELEGRAM,
-        build_authentication_failed_message(APPLE_ID_LABEL, DETAILS),
-    )
-    return NEW_STATE, False, DETAILS
-
-
-# ------------------------------------------------------------------------------
 # This function enforces first-run safety checks before backups are allowed.
 #
 # 1. "CONFIG" is runtime configuration.
@@ -377,52 +367,6 @@ def enforce_safety_net(CONFIG: AppConfig, TELEGRAM: TelegramConfig, LOG_FILE: Pa
     )
     BLOCKED_MARKER.write_text("blocked\n", encoding="utf-8")
     return False
-
-
-# ------------------------------------------------------------------------------
-# This function applies 5-day and 2-day reauthentication reminder stages.
-#
-# 1. "AUTH_STATE" is current auth state.
-# 2. "AUTH_STATE_PATH" is persistence file path.
-# 3. "TELEGRAM" is Telegram integration configuration.
-# 4. "USERNAME" is Telegram command prefix.
-# 5. "INTERVAL_DAYS" is reauthentication interval in days.
-#
-# Returns: Updated authentication state.
-# ------------------------------------------------------------------------------
-def process_reauth_reminders(
-    AUTH_STATE: AuthState,
-    AUTH_STATE_PATH: Path,
-    TELEGRAM: TelegramConfig,
-    USERNAME: str,
-    INTERVAL_DAYS: int,
-) -> AuthState:
-    DAYS_LEFT = reauth_days_left(AUTH_STATE.last_auth_utc, INTERVAL_DAYS)
-
-    if DAYS_LEFT > 5:
-        NEW_STATE = replace(AUTH_STATE, reminder_stage="none", reauth_pending=False)
-        save_auth_state(AUTH_STATE_PATH, NEW_STATE)
-        return NEW_STATE
-
-    if DAYS_LEFT <= 2 and AUTH_STATE.reminder_stage != "prompt2":
-        notify(
-            TELEGRAM,
-            build_reauthentication_required_message(USERNAME),
-        )
-        NEW_STATE = replace(AUTH_STATE, reminder_stage="prompt2", reauth_pending=True)
-        save_auth_state(AUTH_STATE_PATH, NEW_STATE)
-        return NEW_STATE
-
-    if DAYS_LEFT <= 5 and AUTH_STATE.reminder_stage == "none":
-        notify(
-            TELEGRAM,
-            build_reauth_reminder_message(USERNAME),
-        )
-        NEW_STATE = replace(AUTH_STATE, reminder_stage="alert5")
-        save_auth_state(AUTH_STATE_PATH, NEW_STATE)
-        return NEW_STATE
-
-    return AUTH_STATE
 
 
 # ------------------------------------------------------------------------------

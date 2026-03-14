@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Callable
 
 from app.state import AuthState, save_auth_state
 from app.telegram_bot import TelegramConfig, fetch_updates, parse_command
@@ -14,6 +15,27 @@ from app.telegram_messages import (
     build_backup_requested_message,
     build_reauthentication_required_for_apple_id_message,
 )
+
+
+# ------------------------------------------------------------------------------
+# This data class groups Telegram polling callbacks used by command polling.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class CommandPollingDeps:
+    fetch_updates_fn: Callable = fetch_updates
+    parse_command_fn: Callable = parse_command
+
+
+# ------------------------------------------------------------------------------
+# This data class groups runtime callbacks used by command handling.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class CommandRuntimeDeps:
+    attempt_auth_fn: Callable
+    notify_fn: Callable[[TelegramConfig, str], None]
+    save_auth_state_fn: Callable[[Path, AuthState], None] = save_auth_state
+    log_line_fn: Callable | None = None
+    log_file_path: Path | None = None
 
 
 # ------------------------------------------------------------------------------
@@ -29,10 +51,10 @@ def process_commands(
     TELEGRAM: TelegramConfig,
     USERNAME: str,
     UPDATE_OFFSET: int | None,
-    FETCH_UPDATES_FN=fetch_updates,
-    PARSE_COMMAND_FN=parse_command,
+    DEPS: CommandPollingDeps | None = None,
 ) -> tuple[list[tuple[str, str]], int | None]:
-    UPDATES = FETCH_UPDATES_FN(TELEGRAM, UPDATE_OFFSET)
+    RUNTIME_DEPS = DEPS or CommandPollingDeps()
+    UPDATES = RUNTIME_DEPS.fetch_updates_fn(TELEGRAM, UPDATE_OFFSET)
 
     if not UPDATES:
         return [], UPDATE_OFFSET
@@ -41,7 +63,7 @@ def process_commands(
     MAX_UPDATE = UPDATE_OFFSET or 0
 
     for UPDATE in UPDATES:
-        EVENT = PARSE_COMMAND_FN(UPDATE, USERNAME, TELEGRAM.chat_id)
+        EVENT = RUNTIME_DEPS.parse_command_fn(UPDATE, USERNAME, TELEGRAM.chat_id)
         UPDATE_ID = int(UPDATE.get("update_id", 0))
         MAX_UPDATE = max(MAX_UPDATE, UPDATE_ID + 1)
 
@@ -64,11 +86,7 @@ def process_commands(
 # 6. "IS_AUTHENTICATED" tracks current auth validity.
 # 7. "TELEGRAM" is Telegram integration configuration.
 # 8. "APPLE_ID_LABEL" is the formatted Apple ID label.
-# 9. "ATTEMPT_AUTH_FN" executes auth flow.
-# 10. "NOTIFY_FN" sends Telegram messages.
-# 11. "SAVE_AUTH_STATE_FN" persists auth state.
-# 12. "LOG_LINE_FN" writes worker logs.
-# 13. "LOG_FILE_PATH" is the worker log path.
+# 9. "DEPS" groups runtime callbacks used by command handling.
 #
 # Returns: Tuple "(auth_state, is_authenticated, backup_requested)".
 # ------------------------------------------------------------------------------
@@ -81,14 +99,10 @@ def handle_command(
     IS_AUTHENTICATED: bool,
     TELEGRAM: TelegramConfig,
     APPLE_ID_LABEL: str,
-    ATTEMPT_AUTH_FN,
-    NOTIFY_FN,
-    SAVE_AUTH_STATE_FN=save_auth_state,
-    LOG_LINE_FN=None,
-    LOG_FILE_PATH: Path | None = None,
+    DEPS: CommandRuntimeDeps,
 ) -> tuple[AuthState, bool, bool]:
     if COMMAND == "backup":
-        NOTIFY_FN(
+        DEPS.notify_fn(
             TELEGRAM,
             build_backup_requested_message(APPLE_ID_LABEL),
         )
@@ -96,8 +110,8 @@ def handle_command(
 
     if COMMAND == "auth" and not ARGS:
         NEW_STATE = replace(AUTH_STATE, auth_pending=True)
-        SAVE_AUTH_STATE_FN(CONFIG.auth_state_path, NEW_STATE)
-        NOTIFY_FN(
+        DEPS.save_auth_state_fn(CONFIG.auth_state_path, NEW_STATE)
+        DEPS.notify_fn(
             TELEGRAM,
             build_authentication_required_message(
                 APPLE_ID_LABEL, CONFIG.container_username
@@ -107,8 +121,8 @@ def handle_command(
 
     if COMMAND == "reauth" and not ARGS:
         NEW_STATE = replace(AUTH_STATE, reauth_pending=True)
-        SAVE_AUTH_STATE_FN(CONFIG.auth_state_path, NEW_STATE)
-        NOTIFY_FN(
+        DEPS.save_auth_state_fn(CONFIG.auth_state_path, NEW_STATE)
+        DEPS.notify_fn(
             TELEGRAM,
             build_reauthentication_required_for_apple_id_message(
                 APPLE_ID_LABEL, CONFIG.container_username
@@ -116,7 +130,7 @@ def handle_command(
         )
         return NEW_STATE, IS_AUTHENTICATED, False
 
-    NEW_STATE, NEW_AUTH, DETAILS = ATTEMPT_AUTH_FN(
+    NEW_STATE, NEW_AUTH, DETAILS = DEPS.attempt_auth_fn(
         CLIENT,
         AUTH_STATE,
         CONFIG.auth_state_path,
@@ -126,7 +140,7 @@ def handle_command(
         ARGS,
     )
 
-    if LOG_LINE_FN is not None and LOG_FILE_PATH is not None:
-        LOG_LINE_FN(LOG_FILE_PATH, "info", f"Auth command result: {DETAILS}")
+    if DEPS.log_line_fn is not None and DEPS.log_file_path is not None:
+        DEPS.log_line_fn(DEPS.log_file_path, "info", f"Auth command result: {DETAILS}")
 
     return NEW_STATE, NEW_AUTH, False

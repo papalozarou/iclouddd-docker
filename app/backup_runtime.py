@@ -4,9 +4,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from importlib import metadata as importlib_metadata
 import os
 import time
+from typing import Callable
 
 from app.syncer import get_transfer_worker_count, perform_incremental_sync
 from app.telegram_messages import build_backup_complete_message, build_backup_started_message
@@ -62,6 +64,21 @@ def get_build_detail() -> dict[str, str]:
 
 
 # ------------------------------------------------------------------------------
+# This data class groups runtime callbacks used by backup execution.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class BackupRuntimeDeps:
+    load_manifest_fn: Callable
+    save_manifest_fn: Callable
+    log_line_fn: Callable
+    notify_fn: Callable
+    get_build_detail_fn: Callable[[], dict[str, str]] = get_build_detail
+    format_duration_fn: Callable[[int], str] = format_duration_clock
+    format_speed_fn: Callable[[int, int], str] = format_average_speed
+    perform_sync_fn: Callable = perform_incremental_sync
+
+
+# ------------------------------------------------------------------------------
 # This function logs effective non-secret backup settings for debug runs.
 #
 # 1. "CONFIG" is runtime configuration.
@@ -112,16 +129,9 @@ def log_effective_backup_settings(
 # 2. "CONFIG" is runtime configuration.
 # 3. "TELEGRAM" is Telegram integration configuration.
 # 4. "LOG_FILE" is worker log destination.
-# 5. "TRIGGER" is backup trigger context.
-# 6. "APPLE_ID_LABEL" is formatted Apple ID label.
-# 7. "SCHEDULE_LINE" is formatted schedule line.
-# 8. "LOAD_MANIFEST_FN" loads persisted manifest.
-# 9. "SAVE_MANIFEST_FN" persists refreshed manifest.
-# 10. "LOG_LINE_FN" writes worker logs.
-# 11. "NOTIFY_FN" sends Telegram notifications.
-# 12. "FORMAT_DURATION_FN" formats elapsed run time.
-# 13. "FORMAT_SPEED_FN" formats average transfer speed.
-# 14. "LOG_SETTINGS_FN" logs effective backup settings.
+# 5. "APPLE_ID_LABEL" is formatted Apple ID label.
+# 6. "SCHEDULE_LINE" is formatted schedule line.
+# 7. "DEPS" groups runtime callbacks used by backup execution.
 #
 # Returns: None.
 # ------------------------------------------------------------------------------
@@ -130,28 +140,25 @@ def run_backup(
     CONFIG,
     TELEGRAM,
     LOG_FILE,
-    TRIGGER: str,
     APPLE_ID_LABEL: str,
     SCHEDULE_LINE: str,
-    LOAD_MANIFEST_FN,
-    SAVE_MANIFEST_FN,
-    LOG_LINE_FN,
-    NOTIFY_FN,
-    FORMAT_DURATION_FN=format_duration_clock,
-    FORMAT_SPEED_FN=format_average_speed,
-    LOG_SETTINGS_FN=log_effective_backup_settings,
-    PERFORM_SYNC_FN=perform_incremental_sync,
+    DEPS: BackupRuntimeDeps,
 ) -> None:
-    LOG_SETTINGS_FN(CONFIG, LOG_FILE, LOG_LINE_FN)
-    MANIFEST = LOAD_MANIFEST_FN(CONFIG.manifest_path)
-    LOG_LINE_FN(LOG_FILE, "debug", f"Loaded manifest entries: {len(MANIFEST)}")
+    log_effective_backup_settings(
+        CONFIG,
+        LOG_FILE,
+        DEPS.log_line_fn,
+        DEPS.get_build_detail_fn,
+    )
+    MANIFEST = DEPS.load_manifest_fn(CONFIG.manifest_path)
+    DEPS.log_line_fn(LOG_FILE, "debug", f"Loaded manifest entries: {len(MANIFEST)}")
     RUN_START_EPOCH = int(time.time())
-    NOTIFY_FN(
+    DEPS.notify_fn(
         TELEGRAM,
         build_backup_started_message(APPLE_ID_LABEL, SCHEDULE_LINE),
     )
 
-    SUMMARY, NEW_MANIFEST = PERFORM_SYNC_FN(
+    SUMMARY, NEW_MANIFEST = DEPS.perform_sync_fn(
         CLIENT,
         CONFIG.output_dir,
         MANIFEST,
@@ -159,7 +166,7 @@ def run_backup(
         LOG_FILE,
         BACKUP_DELETE_REMOVED=CONFIG.backup_delete_removed,
     )
-    LOG_LINE_FN(
+    DEPS.log_line_fn(
         LOG_FILE,
         "debug",
         "Sync summary detail: "
@@ -175,16 +182,16 @@ def run_backup(
     DELETE_PHASE_SKIPPED = bool(getattr(SUMMARY, "delete_phase_skipped", False))
 
     if TRAVERSAL_COMPLETE:
-        SAVE_MANIFEST_FN(CONFIG.manifest_path, NEW_MANIFEST)
+        DEPS.save_manifest_fn(CONFIG.manifest_path, NEW_MANIFEST)
     else:
-        LOG_LINE_FN(
+        DEPS.log_line_fn(
             LOG_FILE,
             "error",
             "Manifest save skipped because traversal was incomplete.",
         )
 
     DURATION_SECONDS = int(time.time()) - RUN_START_EPOCH
-    AVERAGE_SPEED = FORMAT_SPEED_FN(SUMMARY.transferred_bytes, DURATION_SECONDS)
+    AVERAGE_SPEED = DEPS.format_speed_fn(SUMMARY.transferred_bytes, DURATION_SECONDS)
     STATUS_LINES: list[str] = []
 
     if not TRAVERSAL_COMPLETE:
@@ -204,7 +211,7 @@ def run_backup(
             f"Transferred: {SUMMARY.transferred_files}/{SUMMARY.total_files}",
             f"Skipped: {SUMMARY.skipped_files}",
             f"Errors: {SUMMARY.error_files}",
-            f"Duration: {FORMAT_DURATION_FN(DURATION_SECONDS)}",
+            f"Duration: {DEPS.format_duration_fn(DURATION_SECONDS)}",
         ]
     )
 
@@ -212,8 +219,8 @@ def run_backup(
         STATUS_LINES.append(f"Average speed: {AVERAGE_SPEED}")
 
     COMPLETION_MESSAGE = build_backup_complete_message(APPLE_ID_LABEL, STATUS_LINES)
-    NOTIFY_FN(TELEGRAM, COMPLETION_MESSAGE)
-    LOG_LINE_FN(
+    DEPS.notify_fn(TELEGRAM, COMPLETION_MESSAGE)
+    DEPS.log_line_fn(
         LOG_FILE,
         "info" if TRAVERSAL_COMPLETE else "error",
         "Backup complete. " if TRAVERSAL_COMPLETE else "Backup completed with incomplete traversal. "

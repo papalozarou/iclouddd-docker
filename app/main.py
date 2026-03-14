@@ -242,9 +242,11 @@ def attempt_auth(
         USERNAME,
         APPLE_ID,
         PROVIDED_CODE,
-        NOW_ISO_FN=now_iso,
-        SAVE_AUTH_STATE_FN=save_auth_state,
-        NOTIFY_FN=notify,
+        DEPS=auth_runtime.AuthRuntimeDeps(
+            now_iso_fn=now_iso,
+            save_auth_state_fn=save_auth_state,
+            notify_fn=notify,
+        ),
     )
 
 
@@ -272,9 +274,11 @@ def process_reauth_reminders(
         TELEGRAM,
         USERNAME,
         INTERVAL_DAYS,
+        DEPS=auth_runtime.AuthRuntimeDeps(
+            save_auth_state_fn=save_auth_state,
+            notify_fn=notify,
+        ),
         REAUTH_DAYS_LEFT_FN=reauth_days_left,
-        SAVE_AUTH_STATE_FN=save_auth_state,
-        NOTIFY_FN=notify,
     )
 
 
@@ -372,8 +376,10 @@ def process_commands(
         TELEGRAM,
         USERNAME,
         UPDATE_OFFSET,
-        FETCH_UPDATES_FN=fetch_updates,
-        PARSE_COMMAND_FN=parse_command,
+        DEPS=command_runtime.CommandPollingDeps(
+            fetch_updates_fn=fetch_updates,
+            parse_command_fn=parse_command,
+        ),
     )
 
 
@@ -401,19 +407,18 @@ def run_backup(
         CONFIG,
         TELEGRAM,
         LOG_FILE,
-        TRIGGER,
         APPLE_ID_LABEL,
         SCHEDULE_LINE,
-        LOAD_MANIFEST_FN=load_manifest,
-        SAVE_MANIFEST_FN=save_manifest,
-        LOG_LINE_FN=log_line,
-        NOTIFY_FN=notify,
-        FORMAT_DURATION_FN=format_duration_clock,
-        FORMAT_SPEED_FN=format_average_speed,
-        LOG_SETTINGS_FN=lambda CONFIG_ARG, LOG_FILE_ARG, _LOG_LINE_FN: (
-            log_effective_backup_settings(CONFIG_ARG, LOG_FILE_ARG)
+        DEPS=backup_runtime.BackupRuntimeDeps(
+            load_manifest_fn=load_manifest,
+            save_manifest_fn=save_manifest,
+            log_line_fn=log_line,
+            notify_fn=notify,
+            get_build_detail_fn=get_build_detail,
+            format_duration_fn=format_duration_clock,
+            format_speed_fn=format_average_speed,
+            perform_sync_fn=perform_incremental_sync,
         ),
-        PERFORM_SYNC_FN=perform_incremental_sync,
     )
 
 
@@ -466,11 +471,13 @@ def handle_command(
         IS_AUTHENTICATED,
         TELEGRAM,
         APPLE_ID_LABEL,
-        ATTEMPT_AUTH_FN=attempt_auth,
-        NOTIFY_FN=notify,
-        SAVE_AUTH_STATE_FN=save_auth_state,
-        LOG_LINE_FN=log_line,
-        LOG_FILE_PATH=CONFIG.logs_dir / "pyiclodoc-drive-worker.log",
+        DEPS=command_runtime.CommandRuntimeDeps(
+            attempt_auth_fn=attempt_auth,
+            notify_fn=notify,
+            save_auth_state_fn=save_auth_state,
+            log_line_fn=log_line,
+            log_file_path=CONFIG.logs_dir / "pyiclodoc-drive-worker.log",
+        ),
     )
 
 

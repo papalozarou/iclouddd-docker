@@ -4,9 +4,10 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Callable
 
 from dateutil import parser as date_parser
 
@@ -83,6 +84,16 @@ def reauth_days_left(LAST_AUTH_UTC: str, INTERVAL_DAYS: int) -> int:
 
 
 # ------------------------------------------------------------------------------
+# This data class groups runtime callbacks used by auth operations.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class AuthRuntimeDeps:
+    now_iso_fn: Callable[[], str] = now_iso
+    save_auth_state_fn: Callable[[Path, AuthState], None] = save_auth_state
+    notify_fn: Callable[[TelegramConfig, str], None] = notify
+
+
+# ------------------------------------------------------------------------------
 # This function executes authentication and persists updated auth state.
 #
 # 1. "CLIENT" is iCloud client wrapper.
@@ -102,10 +113,9 @@ def attempt_auth(
     USERNAME: str,
     APPLE_ID: str,
     PROVIDED_CODE: str,
-    NOW_ISO_FN=now_iso,
-    SAVE_AUTH_STATE_FN=save_auth_state,
-    NOTIFY_FN=notify,
+    DEPS: AuthRuntimeDeps | None = None,
 ) -> tuple[AuthState, bool, str]:
+    RUNTIME_DEPS = DEPS or AuthRuntimeDeps()
     CODE = PROVIDED_CODE.strip()
     APPLE_ID_LABEL = format_apple_id_label(APPLE_ID)
 
@@ -116,13 +126,13 @@ def attempt_auth(
 
     if IS_SUCCESS:
         NEW_STATE = AuthState(
-            last_auth_utc=NOW_ISO_FN(),
+            last_auth_utc=RUNTIME_DEPS.now_iso_fn(),
             auth_pending=False,
             reauth_pending=False,
             reminder_stage="none",
         )
-        SAVE_AUTH_STATE_FN(AUTH_STATE_PATH, NEW_STATE)
-        NOTIFY_FN(
+        RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
+        RUNTIME_DEPS.notify_fn(
             TELEGRAM,
             build_authentication_complete_message(APPLE_ID_LABEL, DETAILS),
         )
@@ -130,16 +140,16 @@ def attempt_auth(
 
     if "Two-factor code is required" in DETAILS:
         NEW_STATE = replace(AUTH_STATE, auth_pending=True)
-        SAVE_AUTH_STATE_FN(AUTH_STATE_PATH, NEW_STATE)
-        NOTIFY_FN(
+        RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
+        RUNTIME_DEPS.notify_fn(
             TELEGRAM,
             build_authentication_required_message(APPLE_ID_LABEL, USERNAME),
         )
         return NEW_STATE, False, DETAILS
 
     NEW_STATE = replace(AUTH_STATE, auth_pending=True)
-    SAVE_AUTH_STATE_FN(AUTH_STATE_PATH, NEW_STATE)
-    NOTIFY_FN(
+    RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
+    RUNTIME_DEPS.notify_fn(
         TELEGRAM,
         build_authentication_failed_message(APPLE_ID_LABEL, DETAILS),
     )
@@ -163,34 +173,34 @@ def process_reauth_reminders(
     TELEGRAM: TelegramConfig,
     USERNAME: str,
     INTERVAL_DAYS: int,
-    REAUTH_DAYS_LEFT_FN=reauth_days_left,
-    SAVE_AUTH_STATE_FN=save_auth_state,
-    NOTIFY_FN=notify,
+    DEPS: AuthRuntimeDeps | None = None,
+    REAUTH_DAYS_LEFT_FN: Callable[[str, int], int] = reauth_days_left,
 ) -> AuthState:
+    RUNTIME_DEPS = DEPS or AuthRuntimeDeps()
     DAYS_LEFT = REAUTH_DAYS_LEFT_FN(AUTH_STATE.last_auth_utc, INTERVAL_DAYS)
 
     if DAYS_LEFT > 5:
         NEW_STATE = replace(AUTH_STATE, reminder_stage="none", reauth_pending=False)
         if NEW_STATE != AUTH_STATE:
-            SAVE_AUTH_STATE_FN(AUTH_STATE_PATH, NEW_STATE)
+            RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
         return NEW_STATE
 
     if DAYS_LEFT <= 2 and AUTH_STATE.reminder_stage != "prompt2":
-        NOTIFY_FN(
+        RUNTIME_DEPS.notify_fn(
             TELEGRAM,
             build_reauthentication_required_message(USERNAME),
         )
         NEW_STATE = replace(AUTH_STATE, reminder_stage="prompt2", reauth_pending=True)
-        SAVE_AUTH_STATE_FN(AUTH_STATE_PATH, NEW_STATE)
+        RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
         return NEW_STATE
 
     if DAYS_LEFT <= 5 and AUTH_STATE.reminder_stage == "none":
-        NOTIFY_FN(
+        RUNTIME_DEPS.notify_fn(
             TELEGRAM,
             build_reauth_reminder_message(USERNAME),
         )
         NEW_STATE = replace(AUTH_STATE, reminder_stage="alert5")
-        SAVE_AUTH_STATE_FN(AUTH_STATE_PATH, NEW_STATE)
+        RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
         return NEW_STATE
 
     return AUTH_STATE

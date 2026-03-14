@@ -665,6 +665,19 @@ def list_entries_with_progress(
                         f"retryable_errors={STATS.get('dir_retryable_errors', 0)}, "
                         f"hard_failures={STATS.get('dir_hard_failures', 0)}",
                     )
+                    FAILURE_SAMPLES = STATS.get("dir_failure_samples", [])
+                    if isinstance(FAILURE_SAMPLES, list):
+                        for SAMPLE in FAILURE_SAMPLES:
+                            if not isinstance(SAMPLE, dict):
+                                continue
+                            log_line(
+                                LOG_FILE,
+                                "debug",
+                                "Traversal failure sample: "
+                                f"status={SAMPLE.get('status', 'unknown')}, "
+                                f"path={SAMPLE.get('path', '/')}, "
+                                f"reason={SAMPLE.get('reason', '<none>')}",
+                            )
                     if SLOW_TOP:
                         log_line(
                             LOG_FILE,

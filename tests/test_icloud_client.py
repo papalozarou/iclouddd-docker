@@ -386,6 +386,13 @@ class TestICloudClientTraversal(unittest.TestCase):
             self.assertEqual(RESULT["names"], ["docs", "a.txt"])
             self.assertEqual(NODE.dir.call_count, 3)
             self.assertEqual(SLEEP.call_count, 2)
+            STATS = CLIENT.get_traversal_stats_snapshot()
+            self.assertEqual(STATS.get("dir_retryable_errors", 0), 2)
+            self.assertEqual(STATS.get("dir_hard_failures", 0), 0)
+            FAILURE_SAMPLES = STATS.get("dir_failure_samples", [])
+            self.assertEqual(len(FAILURE_SAMPLES), 2)
+            self.assertEqual(FAILURE_SAMPLES[0]["status"], "retryable_error")
+            self.assertIn("RuntimeError", FAILURE_SAMPLES[0]["reason"])
 
     def test_node_dir_does_not_retry_non_retryable_errors(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
@@ -400,6 +407,11 @@ class TestICloudClientTraversal(unittest.TestCase):
             self.assertEqual(RESULT, {"dirs": [], "files": [], "names": []})
             self.assertEqual(NODE.dir.call_count, 1)
             self.assertEqual(SLEEP.call_count, 0)
+            STATS = CLIENT.get_traversal_stats_snapshot()
+            self.assertEqual(STATS.get("dir_hard_failures", 0), 1)
+            FAILURE_SAMPLES = STATS.get("dir_failure_samples", [])
+            self.assertEqual(len(FAILURE_SAMPLES), 1)
+            self.assertEqual(FAILURE_SAMPLES[0]["status"], "hard_failure")
 
     def test_entries_from_files_supports_filename_and_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:

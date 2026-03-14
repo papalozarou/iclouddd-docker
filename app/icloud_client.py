@@ -22,6 +22,7 @@ DIR_RETRY_BASE_DELAY_SECONDS = 0.05
 DIR_RETRY_MAX_DELAY_SECONDS = 0.40
 TRAVERSAL_SLOW_DIR_SECONDS = 5.0
 TRAVERSAL_SLOW_DIR_LIMIT = 5
+TRAVERSAL_FAILURE_SAMPLE_LIMIT = 5
 
 
 # ------------------------------------------------------------------------------
@@ -71,6 +72,7 @@ class ICloudDriveClient:
             "dir_non_directory": 0,
             "dir_retryable_errors": 0,
             "dir_hard_failures": 0,
+            "dir_failure_samples": [],
             "slow_dirs": [],
         }
 
@@ -165,6 +167,7 @@ class ICloudDriveClient:
 # 3. "IS_RETRY" indicates whether this attempt is a retry attempt.
 # 4. "STATUS" is one of: "ok", "non_directory", "retryable_error",
 #    "hard_failure".
+# 5. "FAILURE_REASON" is short exception context for failure states.
 #
 # Returns: None.
 # --------------------------------------------------------------------------
@@ -174,17 +177,22 @@ class ICloudDriveClient:
         DURATION_SECONDS: float,
         IS_RETRY: bool,
         STATUS: str,
+        FAILURE_REASON: str = "",
     ) -> None:
         with self._stats_lock:
             self._traversal_stats["dir_reads"] += 1
             if IS_RETRY:
                 self._traversal_stats["dir_retries"] += 1
+
+            if STATUS == "retryable_error":
                 self._traversal_stats["dir_retryable_errors"] += 1
+                self._record_directory_failure_sample(CURRENT_PATH, STATUS, FAILURE_REASON)
 
             if STATUS == "non_directory":
                 self._traversal_stats["dir_non_directory"] += 1
             elif STATUS == "hard_failure":
                 self._traversal_stats["dir_hard_failures"] += 1
+                self._record_directory_failure_sample(CURRENT_PATH, STATUS, FAILURE_REASON)
 
             if DURATION_SECONDS < TRAVERSAL_SLOW_DIR_SECONDS:
                 return
@@ -198,6 +206,35 @@ class ICloudDriveClient:
             )
             SLOW_DIRS.sort(key=lambda ITEM: float(ITEM.get("duration_seconds", 0.0)), reverse=True)
             self._traversal_stats["slow_dirs"] = SLOW_DIRS[:TRAVERSAL_SLOW_DIR_LIMIT]
+
+# --------------------------------------------------------------------------
+# This function stores a bounded set of directory read failure samples.
+#
+# 1. "CURRENT_PATH" is current remote path being listed.
+# 2. "STATUS" is failure status label.
+# 3. "FAILURE_REASON" is short exception context.
+#
+# Returns: None.
+# --------------------------------------------------------------------------
+    def _record_directory_failure_sample(
+        self,
+        CURRENT_PATH: str,
+        STATUS: str,
+        FAILURE_REASON: str,
+    ) -> None:
+        FAILURE_SAMPLES = list(self._traversal_stats.get("dir_failure_samples", []))
+
+        if len(FAILURE_SAMPLES) >= TRAVERSAL_FAILURE_SAMPLE_LIMIT:
+            return
+
+        FAILURE_SAMPLES.append(
+            {
+                "path": CURRENT_PATH or "/",
+                "status": STATUS,
+                "reason": FAILURE_REASON or "<none>",
+            }
+        )
+        self._traversal_stats["dir_failure_samples"] = FAILURE_SAMPLES
 
 # --------------------------------------------------------------------------
 # This function aligns cookie and session paths with an
@@ -566,18 +603,23 @@ class ICloudDriveClient:
                     time.monotonic() - STARTED_EPOCH,
                     IS_RETRY,
                     "hard_failure",
+                    "ValueError",
                 )
                 return None
-            except Exception:
+            except Exception as ERROR:
+                ATTEMPT += 1
+                IS_FINAL_ATTEMPT = ATTEMPT >= DIR_RETRY_ATTEMPTS
+                STATUS = "hard_failure" if IS_FINAL_ATTEMPT else "retryable_error"
+                FAILURE_REASON = f"{type(ERROR).__name__}: {ERROR}"
                 self._record_directory_read(
                     CURRENT_PATH,
                     time.monotonic() - STARTED_EPOCH,
                     IS_RETRY,
-                    "hard_failure",
+                    STATUS,
+                    FAILURE_REASON,
                 )
-                ATTEMPT += 1
 
-                if ATTEMPT >= DIR_RETRY_ATTEMPTS:
+                if IS_FINAL_ATTEMPT:
                     return None
 
                 time.sleep(self._retry_delay_seconds(ATTEMPT))

@@ -23,6 +23,7 @@ This file defines various coding standards for agents to adhere to.
 
 ## Branch and commit flow
 - MUST: Before any edits, state current branch and intended target branch in one line
+- MUST: Before creating a new branch for approved work, check whether an existing relevant branch already exists and prefer using it where practical
 - MUST: If you propose implementing on a specific branch, perform the work on that branch first and only merge to main after user confirmation
 - MUST: After each block of suggested and user-approved changes is applied, explicitly suggest a commit (with a clear commit message) before moving to the next change block
 

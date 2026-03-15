@@ -293,6 +293,164 @@ class TestICloudClientTraversal(unittest.TestCase):
 
             SERIAL_WALK.assert_called_once()
 
+    def test_record_traversal_queue_state_clamps_negative_values(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
+
+            CLIENT._record_traversal_queue_state(-1, -2, -3)
+
+            STATS = CLIENT.get_traversal_stats_snapshot()
+            self.assertEqual(STATS["directories_completed"], 0)
+            self.assertEqual(STATS["directories_pending"], 0)
+            self.assertEqual(STATS["workers_active"], 0)
+
+    def test_record_serial_directory_enter_and_exit_updates_stats(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
+
+            CLIENT._record_serial_directory_enter()
+            CLIENT._record_serial_directory_exit()
+
+            STATS = CLIENT.get_traversal_stats_snapshot()
+            self.assertEqual(STATS["directories_pending"], 0)
+            self.assertEqual(STATS["directories_completed"], 1)
+            self.assertEqual(STATS["workers_active"], 0)
+
+    def test_record_directory_read_tracks_slow_paths_and_failure_samples(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
+
+            CLIENT._record_directory_read("/slow", 6.0, False, "ok")
+            CLIENT._record_directory_read("/retry", 1.0, True, "retryable_error", "timeout")
+            CLIENT._record_directory_read("/hard", 1.0, False, "hard_failure", "boom")
+
+            STATS = CLIENT.get_traversal_stats_snapshot()
+            self.assertEqual(STATS["dir_reads"], 3)
+            self.assertEqual(STATS["dir_retries"], 1)
+            self.assertEqual(STATS["dir_retryable_errors"], 1)
+            self.assertEqual(STATS["dir_hard_failures"], 1)
+            self.assertEqual(STATS["slow_dirs"][0]["path"], "/slow")
+            self.assertEqual(len(STATS["dir_failure_samples"]), 2)
+
+    def test_record_directory_failure_sample_respects_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
+
+            for INDEX in range(7):
+                CLIENT._record_directory_failure_sample(f"/p{INDEX}", "hard_failure", "boom")
+
+            STATS = CLIENT.get_traversal_stats_snapshot()
+            self.assertEqual(len(STATS["dir_failure_samples"]), 5)
+
+    def test_walk_node_parallel_collects_and_sorts_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = AppConfig(**(build_config_for_icloud(TMPDIR).__dict__ | {"traversal_workers": 2}))
+            CLIENT = ICloudDriveClient(CONFIG)
+            ROOT_NODE = object()
+            CHILD_NODE = object()
+
+            with patch.object(
+                CLIENT,
+                "_walk_node_shallow",
+                side_effect=[
+                    (
+                        [SimpleNamespace(path="b.txt"), SimpleNamespace(path="dir")],
+                        [("dir", CHILD_NODE)],
+                    ),
+                    (
+                        [SimpleNamespace(path="dir/a.txt")],
+                        [],
+                    ),
+                ],
+            ):
+                RESULT = CLIENT._walk_node_parallel(ROOT_NODE, "")
+
+            self.assertEqual([ENTRY.path for ENTRY in RESULT], ["b.txt", "dir", "dir/a.txt"])
+            STATS = CLIENT.get_traversal_stats_snapshot()
+            self.assertEqual(STATS["directories_completed"], 2)
+            self.assertEqual(STATS["directories_pending"], 0)
+
+    def test_walk_node_shallow_prefers_name_payloads(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
+            NODE = Mock()
+
+            with patch.object(
+                CLIENT,
+                "_node_dir",
+                return_value={"dirs": [], "files": [], "names": ["docs"]},
+            ):
+                with patch.object(
+                    CLIENT,
+                    "_shallow_entries_from_names",
+                    return_value=(["from-names"], []),
+                ) as FROM_NAMES:
+                    RESULT = CLIENT._walk_node_shallow(NODE, "")
+
+            self.assertEqual(RESULT, (["from-names"], []))
+            FROM_NAMES.assert_called_once_with(NODE, "", ["docs"])
+
+    def test_walk_node_shallow_uses_payload_entries_when_names_are_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
+            NODE = Mock()
+
+            with patch.object(
+                CLIENT,
+                "_node_dir",
+                return_value={"dirs": ["d"], "files": ["f"], "names": []},
+            ):
+                with patch.object(
+                    CLIENT,
+                    "_shallow_entries_from_payload",
+                    return_value=(["from-payload"], []),
+                ) as FROM_PAYLOAD:
+                    RESULT = CLIENT._walk_node_shallow(NODE, "")
+
+            self.assertEqual(RESULT, (["from-payload"], []))
+            FROM_PAYLOAD.assert_called_once_with(NODE, "", ["d"], ["f"])
+
+    def test_shallow_entries_from_names_skips_blank_and_missing_children(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
+            DIRECTORY_CHILD = FakeDriveChild("folder", MODIFIED="d1")
+            FILE_CHILD = FakeDriveChild("file", SIZE=2, MODIFIED="d2")
+
+            with patch.object(
+                CLIENT,
+                "_child_node",
+                side_effect=[DIRECTORY_CHILD, FILE_CHILD],
+            ):
+                RESULT, CHILD_DIRECTORIES = CLIENT._shallow_entries_from_names(
+                    {},
+                    "",
+                    [" ", "docs", "root.txt"],
+                )
+
+            self.assertEqual([ENTRY.path for ENTRY in RESULT], ["docs", "root.txt"])
+            self.assertEqual(CHILD_DIRECTORIES, [("docs", DIRECTORY_CHILD)])
+
+    def test_shallow_entries_from_payload_skips_blank_names_and_missing_children(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
+            DIR_ITEMS = [
+                {"name": "", "dateModified": "d0"},
+                {"name": "docs", "dateModified": "d1"},
+            ]
+            FILE_ITEMS = [{"name": "root.txt", "size": 2, "modified": "d2"}]
+            CHILD_NODE = object()
+
+            with patch.object(CLIENT, "_child_node", return_value=CHILD_NODE):
+                RESULT, CHILD_DIRECTORIES = CLIENT._shallow_entries_from_payload(
+                    {},
+                    "",
+                    DIR_ITEMS,
+                    FILE_ITEMS,
+                )
+
+            self.assertEqual([ENTRY.path for ENTRY in RESULT], ["root.txt", "docs"])
+            self.assertEqual(CHILD_DIRECTORIES, [("docs", CHILD_NODE)])
+
     def test_node_dir_and_child_node_error_paths(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_icloud(TMPDIR)

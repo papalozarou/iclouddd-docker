@@ -37,7 +37,7 @@ These are the env names used under `services.*.environment` in
 | `TELEGRAM_CHAT_ID` | Telegram chat ID integer string | `H_TGM_CHAT_ID` |
 | `TELEGRAM_BOT_TOKEN_FILE` | In-container file path containing the bot token | `<SVC>_TGM_BOT_TOKEN_FILE`, for example `ALICE_TGM_BOT_TOKEN_FILE` |
 
-N.B.
+*N.B.*
 
 - When `RUN_ONCE=true`, set `<SVC>_RESTART_POLICY=no`.
 - If `<SVC>_RESTART_POLICY` uses `unless-stopped` or similar, a one-shot
@@ -135,7 +135,7 @@ Runtime layout:
     └── keyring_pass.cfg
 ```
 
-N.B.
+*N.B.*
 
 - `pyiclodoc-drive-safety_net_done.flag` is created when first-run safety checks pass.
 - `pyiclodoc-drive-safety_net_blocked.flag` is created when first-run safety checks block

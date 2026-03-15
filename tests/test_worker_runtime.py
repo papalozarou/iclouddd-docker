@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from tests._stubs import install_dependency_stubs
 
@@ -16,7 +16,13 @@ from app.config import AppConfig
 from app.runtime_context import WorkerRuntimeContext
 from app.state import AuthState
 from app.telegram_bot import TelegramConfig
-from app.worker_runtime import run_scheduled_worker_loop
+from app.worker_runtime import (
+    WorkerRunResult,
+    run_one_shot_worker,
+    run_scheduled_worker_loop,
+    run_worker_runtime,
+    wait_for_one_shot_auth,
+)
 
 
 class StopWorkerLoop(Exception):
@@ -140,6 +146,113 @@ class TestWorkerRuntime(unittest.TestCase):
         )
 
 # --------------------------------------------------------------------------
+# This test confirms one-shot auth wait exits at the configured timeout
+# when authentication never completes.
+# --------------------------------------------------------------------------
+    def test_wait_for_one_shot_auth_returns_after_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
+            PROCESS_COMMANDS = Mock(return_value=([], None))
+            HANDLE_COMMAND = Mock()
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
+                HANDLE_COMMAND_FN=HANDLE_COMMAND,
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=Mock(),
+            )
+            DEPS.time_fn = Mock(side_effect=[0, 900])
+
+            RESULT_STATE, RESULT_AUTH = wait_for_one_shot_auth(
+                RUNTIME_CONTEXT,
+                Mock(),
+                AUTH_STATE,
+                False,
+                DEPS,
+            )
+
+        self.assertEqual(RESULT_STATE, AUTH_STATE)
+        self.assertFalse(RESULT_AUTH)
+        PROCESS_COMMANDS.assert_not_called()
+        HANDLE_COMMAND.assert_not_called()
+        DEPS.sleep_fn.assert_not_called()
+
+# --------------------------------------------------------------------------
+# This test confirms one-shot auth wait processes commands until auth
+# completes and then returns the updated state.
+# --------------------------------------------------------------------------
+    def test_wait_for_one_shot_auth_processes_commands_until_authenticated(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
+            UPDATED_STATE = AuthState(
+                "2026-03-15T12:00:00+00:00",
+                False,
+                False,
+                "none",
+            )
+            PROCESS_COMMANDS = Mock(return_value=([("auth", "123456")], 9))
+            HANDLE_COMMAND = Mock(return_value=(UPDATED_STATE, True, False))
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
+                HANDLE_COMMAND_FN=HANDLE_COMMAND,
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=Mock(),
+            )
+            DEPS.time_fn = Mock(side_effect=[0, 1, 2])
+
+            RESULT_STATE, RESULT_AUTH = wait_for_one_shot_auth(
+                RUNTIME_CONTEXT,
+                Mock(),
+                AUTH_STATE,
+                False,
+                DEPS,
+            )
+
+        self.assertEqual(RESULT_STATE, UPDATED_STATE)
+        self.assertTrue(RESULT_AUTH)
+        PROCESS_COMMANDS.assert_called_once()
+        HANDLE_COMMAND.assert_called_once()
+        DEPS.sleep_fn.assert_called_once()
+
+# --------------------------------------------------------------------------
+# This test confirms one-shot worker returns the safety-net blocked exit
+# result when authentication is complete but backup is not permitted.
+# --------------------------------------------------------------------------
+    def test_run_one_shot_worker_returns_safety_net_blocked_result(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
+            NOTIFY = Mock()
+            ENFORCE_SAFETY_NET = Mock(return_value=False)
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=Mock(return_value=([], None)),
+                HANDLE_COMMAND_FN=Mock(),
+                ENFORCE_SAFETY_NET_FN=ENFORCE_SAFETY_NET,
+                NOTIFY_FN=NOTIFY,
+                SLEEP_FN=Mock(),
+            )
+            DEPS.build_one_shot_waiting_for_auth_message_fn = Mock(return_value="waiting")
+
+            RESULT = run_one_shot_worker(
+                RUNTIME_CONTEXT,
+                Mock(),
+                AUTH_STATE,
+                True,
+                DEPS,
+            )
+
+        self.assertEqual(
+            RESULT,
+            WorkerRunResult(
+                exit_code=4,
+                stop_status="One-shot backup blocked by safety net.",
+            ),
+        )
+        ENFORCE_SAFETY_NET.assert_called_once()
+        NOTIFY.assert_not_called()
+        DEPS.run_backup_fn.assert_not_called()
+
+# --------------------------------------------------------------------------
 # This test confirms a skipped manual backup due to incomplete authentication
 # is cleared after one notification.
 # --------------------------------------------------------------------------
@@ -258,6 +371,78 @@ class TestWorkerRuntime(unittest.TestCase):
         NOTIFY.assert_not_called()
         self.assertEqual(ENFORCE_SAFETY_NET.call_count, 1)
         DEPS.run_backup_fn.assert_not_called()
+
+# --------------------------------------------------------------------------
+# This test confirms the scheduled loop sleeps and retries when neither the
+# schedule nor a manual backup request is due.
+# --------------------------------------------------------------------------
+    def test_run_scheduled_worker_loop_waits_when_no_backup_is_due(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
+            SLEEP = Mock(side_effect=StopWorkerLoop())
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=Mock(return_value=([], None)),
+                HANDLE_COMMAND_FN=Mock(),
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=SLEEP,
+            )
+            DEPS.time_fn = Mock(side_effect=[100, 100])
+            DEPS.get_next_run_epoch_fn = Mock(return_value=200)
+
+            with self.assertRaises(StopWorkerLoop):
+                run_scheduled_worker_loop(
+                    RUNTIME_CONTEXT,
+                    Mock(),
+                    AUTH_STATE,
+                    True,
+                    DEPS,
+                )
+
+        SLEEP.assert_called_once_with(5)
+        DEPS.notify_fn.assert_not_called()
+        DEPS.enforce_safety_net_fn.assert_not_called()
+        DEPS.run_backup_fn.assert_not_called()
+
+# --------------------------------------------------------------------------
+# This test confirms run_worker_runtime delegates to the scheduled loop and
+# returns the steady-state worker exit result.
+# --------------------------------------------------------------------------
+    def test_run_worker_runtime_returns_scheduled_worker_result(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
+            ATTEMPT_AUTH = Mock(return_value=(AUTH_STATE, True, "ok"))
+            PROCESS_COMMANDS = Mock(return_value=([], None))
+            HANDLE_COMMAND = Mock()
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
+                HANDLE_COMMAND_FN=HANDLE_COMMAND,
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=Mock(),
+            )
+            DEPS.attempt_auth_fn = ATTEMPT_AUTH
+            DEPS.log_line_fn = Mock()
+            DEPS.build_one_shot_waiting_for_auth_message_fn = Mock(return_value="waiting")
+
+            with patch("app.worker_runtime.run_scheduled_worker_loop") as RUN_LOOP:
+                RESULT = run_worker_runtime(
+                    RUNTIME_CONTEXT,
+                    Mock(),
+                    AUTH_STATE,
+                    DEPS,
+                )
+
+        self.assertEqual(
+            RESULT,
+            WorkerRunResult(
+                exit_code=0,
+                stop_status="Worker process exited.",
+            ),
+        )
+        ATTEMPT_AUTH.assert_called_once()
+        RUN_LOOP.assert_called_once()
+        self.assertEqual(DEPS.log_line_fn.call_count, 2)
 
 
 if __name__ == "__main__":

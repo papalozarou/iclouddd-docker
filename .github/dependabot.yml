@@ -1,0 +1,42 @@
+# ------------------------------------------------------------------------------
+# This configuration asks Dependabot to raise dependency update pull requests.
+#
+# The repo currently has Python dependencies, Docker image references, and
+# GitHub Actions workflows that benefit from regular update prompts.
+# ------------------------------------------------------------------------------
+
+version: 2
+
+updates:
+  # --------------------------------------------------------------------------
+  # Keep Python requirements current.
+  # --------------------------------------------------------------------------
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  # --------------------------------------------------------------------------
+  # Keep Docker base-image and image-reference tags current.
+  # --------------------------------------------------------------------------
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+
+  # --------------------------------------------------------------------------
+  # Keep workflow action versions current.
+  # --------------------------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"

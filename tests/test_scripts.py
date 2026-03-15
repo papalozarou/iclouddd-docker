@@ -230,8 +230,11 @@ class TestScripts(unittest.TestCase):
         with tempfile.TemporaryDirectory() as TMPDIR:
             BIN_DIR = Path(TMPDIR) / "bin"
             BIN_DIR.mkdir(parents=True, exist_ok=True)
+            NPROC_PATH = BIN_DIR / "nproc"
             GETCONF_PATH = BIN_DIR / "getconf"
+            NPROC_PATH.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
             GETCONF_PATH.write_text("#!/bin/sh\nprintf '2\\n'\n", encoding="utf-8")
+            NPROC_PATH.chmod(NPROC_PATH.stat().st_mode | stat.S_IXUSR)
             GETCONF_PATH.chmod(GETCONF_PATH.stat().st_mode | stat.S_IXUSR)
 
             ENV = {"PATH": f"{BIN_DIR}{os.pathsep}/usr/bin{os.pathsep}/bin"}

@@ -115,6 +115,21 @@ class TestState(unittest.TestCase):
         self.assertEqual(STATE.reminder_stage, "none")
 
 # --------------------------------------------------------------------------
+# This test confirms valid non-dictionary auth-state JSON falls back to safe
+# defaults.
+# --------------------------------------------------------------------------
+    def test_load_auth_state_defaults_for_non_dict_json(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "auth_state.json"
+            PATH.write_text(json.dumps(["unexpected"]), encoding="utf-8")
+            STATE = load_auth_state(PATH)
+
+        self.assertEqual(STATE.last_auth_utc, "1970-01-01T00:00:00+00:00")
+        self.assertFalse(STATE.auth_pending)
+        self.assertFalse(STATE.reauth_pending)
+        self.assertEqual(STATE.reminder_stage, "none")
+
+# --------------------------------------------------------------------------
 # This test confirms auth-state saving and loading round-trip correctly.
 # --------------------------------------------------------------------------
     def test_save_auth_state_round_trip(self) -> None:

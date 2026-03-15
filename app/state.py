@@ -120,6 +120,14 @@ def load_auth_state(PATH: Path) -> AuthState:
     PAYLOAD = read_json(PATH)
     DEFAULT_TIME = "1970-01-01T00:00:00+00:00"
 
+    if not isinstance(PAYLOAD, dict):
+        return AuthState(
+            last_auth_utc=DEFAULT_TIME,
+            auth_pending=False,
+            reauth_pending=False,
+            reminder_stage="none",
+        )
+
     return AuthState(
         last_auth_utc=str(PAYLOAD.get("last_auth_utc", DEFAULT_TIME)),
         auth_pending=bool(PAYLOAD.get("auth_pending", False)),

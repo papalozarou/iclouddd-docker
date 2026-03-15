@@ -89,17 +89,32 @@ isPositiveInteger() {
 #
 # 1. "${1:?}" is detected CPU count as a positive integer.
 #
-# Returns: Recommended "SYNC_TRAVERSAL_WORKERS" value from "1" to "8".
+# Returns: Recommended "SYNC_TRAVERSAL_WORKERS" value using a conservative
+# Linux-host default policy.
+# 
+# N.B.
+# The recommendation intentionally leaves headroom for NAS and host activity
+# instead of mirroring total online CPU count directly.
 # ------------------------------------------------------------------------------
 getRecommendedTraversalWorkers() {
   CPU_COUNT="${1:?}"
 
-  if [ "$CPU_COUNT" -gt 8 ]; then
-    printf '8\n'
+  if [ "$CPU_COUNT" -le 1 ]; then
+    printf '1\n'
     return 0
   fi
 
-  printf '%s\n' "$CPU_COUNT"
+  if [ "$CPU_COUNT" -le 4 ]; then
+    printf '2\n'
+    return 0
+  fi
+
+  if [ "$CPU_COUNT" -le 6 ]; then
+    printf '3\n'
+    return 0
+  fi
+
+  printf '4\n'
 }
 
 CPU_COUNT="$(getCpuCount "${1:-}")"

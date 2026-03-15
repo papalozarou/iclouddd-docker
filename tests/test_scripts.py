@@ -109,7 +109,7 @@ class TestScripts(unittest.TestCase):
 
 # --------------------------------------------------------------------------
 # This test confirms traversal-worker helper bounds output to the supported
-# maximum when CPU count exceeds the configured cap.
+# recommendation policy when CPU count exceeds the configured cap.
 # --------------------------------------------------------------------------
     def test_check_traversal_workers_caps_recommendation_at_eight(self) -> None:
         REPO_ROOT = get_repo_root()
@@ -125,11 +125,12 @@ class TestScripts(unittest.TestCase):
         self.assertEqual(RESULT.returncode, 0, msg=RESULT.stderr)
         self.assertEqual(
             RESULT.stdout,
-            "Detected CPU count: 12\nRecommended SYNC_TRAVERSAL_WORKERS=8\n",
+            "Detected CPU count: 12\nRecommended SYNC_TRAVERSAL_WORKERS=4\n",
         )
 
 # --------------------------------------------------------------------------
-# This test confirms traversal-worker helper preserves valid in-range input.
+# This test confirms traversal-worker helper recommends a conservative value
+# for a four-CPU host.
 # --------------------------------------------------------------------------
     def test_check_traversal_workers_uses_in_range_override(self) -> None:
         REPO_ROOT = get_repo_root()
@@ -145,7 +146,7 @@ class TestScripts(unittest.TestCase):
         self.assertEqual(RESULT.returncode, 0, msg=RESULT.stderr)
         self.assertEqual(
             RESULT.stdout,
-            "Detected CPU count: 4\nRecommended SYNC_TRAVERSAL_WORKERS=4\n",
+            "Detected CPU count: 4\nRecommended SYNC_TRAVERSAL_WORKERS=2\n",
         )
 
 # --------------------------------------------------------------------------
@@ -194,7 +195,7 @@ class TestScripts(unittest.TestCase):
         self.assertEqual(RESULT.returncode, 0, msg=RESULT.stderr)
         self.assertEqual(
             RESULT.stdout,
-            "Detected CPU count: 6\nRecommended SYNC_TRAVERSAL_WORKERS=6\n",
+            "Detected CPU count: 6\nRecommended SYNC_TRAVERSAL_WORKERS=3\n",
         )
 
 # --------------------------------------------------------------------------
@@ -267,7 +268,28 @@ class TestScripts(unittest.TestCase):
         self.assertEqual(RESULT.returncode, 0, msg=RESULT.stderr)
         self.assertEqual(
             RESULT.stdout,
-            "Detected CPU count: 3\nRecommended SYNC_TRAVERSAL_WORKERS=3\n",
+            "Detected CPU count: 3\nRecommended SYNC_TRAVERSAL_WORKERS=2\n",
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms traversal-worker helper keeps single-CPU hosts on one
+# traversal worker.
+# --------------------------------------------------------------------------
+    def test_check_traversal_workers_recommends_one_for_single_cpu(self) -> None:
+        REPO_ROOT = get_repo_root()
+        SCRIPT_PATH = REPO_ROOT / "check-traversal-workers.sh"
+
+        RESULT = subprocess.run(
+            ["sh", str(SCRIPT_PATH), "1"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(RESULT.returncode, 0, msg=RESULT.stderr)
+        self.assertEqual(
+            RESULT.stdout,
+            "Detected CPU count: 1\nRecommended SYNC_TRAVERSAL_WORKERS=1\n",
         )
 
 

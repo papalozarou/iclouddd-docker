@@ -85,6 +85,8 @@ class TestSchedulerParsing(unittest.TestCase):
     def test_parse_daily_rejects_malformed_value(self) -> None:
         self.assertIsNone(parse_daily("2pm"))
         self.assertIsNone(parse_daily("24:00"))
+        self.assertIsNone(parse_daily("aa:00"))
+        self.assertIsNone(parse_daily("02:60"))
 
 # --------------------------------------------------------------------------
 # This test confirms weekday parsing is case-insensitive.
@@ -119,6 +121,17 @@ class TestSchedulerEpochCalculation(unittest.TestCase):
         )
 
 # --------------------------------------------------------------------------
+# This test confirms invalid daily schedule text falls back to the current
+# timestamp.
+# --------------------------------------------------------------------------
+    def test_calculate_next_daily_run_returns_now_for_invalid_time(self) -> None:
+        NOW_VALUE = datetime(2026, 3, 10, 3, 0, tzinfo=timezone.utc)
+
+        NEXT_EPOCH = calculate_next_daily_run_epoch(NOW_VALUE, "bad")
+
+        self.assertEqual(NEXT_EPOCH, int(NOW_VALUE.timestamp()))
+
+# --------------------------------------------------------------------------
 # This test confirms weekly schedules advance by seven days when the
 # same-day target time has already passed.
 # --------------------------------------------------------------------------
@@ -131,6 +144,17 @@ class TestSchedulerEpochCalculation(unittest.TestCase):
             NEXT_EPOCH,
             int(datetime(2026, 3, 16, 2, 0, tzinfo=timezone.utc).timestamp()),
         )
+
+# --------------------------------------------------------------------------
+# This test confirms invalid weekly schedule inputs fall back to the current
+# timestamp.
+# --------------------------------------------------------------------------
+    def test_calculate_next_weekly_run_returns_now_for_invalid_inputs(self) -> None:
+        NOW_VALUE = datetime(2026, 3, 9, 3, 0, tzinfo=timezone.utc)
+
+        NEXT_EPOCH = calculate_next_weekly_run_epoch(NOW_VALUE, "funday", "bad")
+
+        self.assertEqual(NEXT_EPOCH, int(NOW_VALUE.timestamp()))
 
 # --------------------------------------------------------------------------
 # This test confirms twice-weekly schedules pick the earliest valid
@@ -151,10 +175,46 @@ class TestSchedulerEpochCalculation(unittest.TestCase):
         )
 
 # --------------------------------------------------------------------------
+# This test confirms invalid twice-weekly weekday lists fall back to the
+# current timestamp.
+# --------------------------------------------------------------------------
+    def test_calculate_next_twice_weekly_run_returns_now_for_invalid_weekdays(self) -> None:
+        NOW_VALUE = datetime(2026, 3, 9, 1, 0, tzinfo=timezone.utc)
+
+        NEXT_EPOCH = calculate_next_twice_weekly_run_epoch(
+            NOW_VALUE,
+            "monday",
+            "02:00",
+        )
+
+        self.assertEqual(NEXT_EPOCH, int(NOW_VALUE.timestamp()))
+
+# --------------------------------------------------------------------------
 # This test confirms monthly weekday lookup supports the "last" token.
 # --------------------------------------------------------------------------
     def test_get_monthly_weekday_day_returns_last_weekday(self) -> None:
         self.assertEqual(get_monthly_weekday_day(2026, 2, 0, "last"), 23)
+
+# --------------------------------------------------------------------------
+# This test confirms monthly weekday lookup returns None for impossible
+# weekday values in the "last" branch.
+# --------------------------------------------------------------------------
+    def test_get_monthly_weekday_day_returns_none_for_invalid_last_weekday(self) -> None:
+        self.assertIsNone(get_monthly_weekday_day(2026, 2, 9, "last"))
+
+# --------------------------------------------------------------------------
+# This test confirms monthly weekday lookup returns None for impossible
+# weekday values in ordinal branches.
+# --------------------------------------------------------------------------
+    def test_get_monthly_weekday_day_returns_none_for_invalid_ordinal_weekday(self) -> None:
+        self.assertIsNone(get_monthly_weekday_day(2026, 2, 9, "first"))
+
+# --------------------------------------------------------------------------
+# This test confirms monthly weekday lookup returns None for unknown
+# month-week tokens.
+# --------------------------------------------------------------------------
+    def test_get_monthly_weekday_day_returns_none_for_invalid_monthly_week(self) -> None:
+        self.assertIsNone(get_monthly_weekday_day(2026, 2, 0, "fifth"))
 
 # --------------------------------------------------------------------------
 # This test confirms monthly schedules advance into the next month once
@@ -174,6 +234,59 @@ class TestSchedulerEpochCalculation(unittest.TestCase):
             NEXT_EPOCH,
             int(datetime(2026, 4, 6, 2, 0, tzinfo=timezone.utc).timestamp()),
         )
+
+# --------------------------------------------------------------------------
+# This test confirms invalid monthly schedule inputs fall back to the
+# current timestamp.
+# --------------------------------------------------------------------------
+    def test_calculate_next_monthly_run_returns_now_for_invalid_inputs(self) -> None:
+        NOW_VALUE = datetime(2026, 3, 3, 3, 0, tzinfo=timezone.utc)
+
+        NEXT_EPOCH = calculate_next_monthly_run_epoch(
+            NOW_VALUE,
+            "funday",
+            "first",
+            "bad",
+        )
+
+        self.assertEqual(NEXT_EPOCH, int(NOW_VALUE.timestamp()))
+
+# --------------------------------------------------------------------------
+# This test confirms monthly scheduling skips months that do not produce a
+# usable weekday match and uses the first later valid candidate.
+# --------------------------------------------------------------------------
+    def test_calculate_next_monthly_run_skips_invalid_candidate_month(self) -> None:
+        NOW_VALUE = datetime(2026, 3, 3, 3, 0, tzinfo=timezone.utc)
+
+        with patch("app.scheduler.get_monthly_weekday_day", side_effect=[None, 6]):
+            NEXT_EPOCH = calculate_next_monthly_run_epoch(
+                NOW_VALUE,
+                "monday",
+                "first",
+                "02:00",
+            )
+
+        self.assertEqual(
+            NEXT_EPOCH,
+            int(datetime(2026, 4, 6, 2, 0, tzinfo=timezone.utc).timestamp()),
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms monthly scheduling falls back to the current timestamp
+# when no candidate month yields a valid target day.
+# --------------------------------------------------------------------------
+    def test_calculate_next_monthly_run_returns_now_when_all_candidates_fail(self) -> None:
+        NOW_VALUE = datetime(2026, 3, 3, 3, 0, tzinfo=timezone.utc)
+
+        with patch("app.scheduler.get_monthly_weekday_day", return_value=None):
+            NEXT_EPOCH = calculate_next_monthly_run_epoch(
+                NOW_VALUE,
+                "monday",
+                "first",
+                "02:00",
+            )
+
+        self.assertEqual(NEXT_EPOCH, int(NOW_VALUE.timestamp()))
 
 # --------------------------------------------------------------------------
 # This test confirms interval scheduling uses the provided epoch and
@@ -205,6 +318,72 @@ class TestSchedulerEpochCalculation(unittest.TestCase):
 # --------------------------------------------------------------------------
     def test_get_next_run_epoch_weekly_returns_now_epoch_for_invalid_weekday(self) -> None:
         CONFIG = build_scheduler_config(schedule_mode="weekly", schedule_weekdays="funday")
+
+        self.assertEqual(get_next_run_epoch(CONFIG, 4321), 4321)
+
+# --------------------------------------------------------------------------
+# This test confirms weekly mode delegates to the weekly helper when the
+# configured weekday is valid.
+# --------------------------------------------------------------------------
+    def test_get_next_run_epoch_weekly_uses_weekly_helper(self) -> None:
+        CONFIG = build_scheduler_config(
+            schedule_mode="weekly",
+            schedule_weekdays="thursday",
+            schedule_backup_time="02:00",
+        )
+
+        with patch("app.scheduler.now_local", return_value=datetime(2026, 3, 9, 1, 0, tzinfo=timezone.utc)):
+            RESULT = get_next_run_epoch(CONFIG, 4321)
+
+        self.assertEqual(
+            RESULT,
+            int(datetime(2026, 3, 12, 2, 0, tzinfo=timezone.utc).timestamp()),
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms twice-weekly mode delegates to the twice-weekly helper.
+# --------------------------------------------------------------------------
+    def test_get_next_run_epoch_twice_weekly_uses_twice_weekly_helper(self) -> None:
+        CONFIG = build_scheduler_config(
+            schedule_mode="twice_weekly",
+            schedule_weekdays="monday,thursday",
+            schedule_backup_time="02:00",
+        )
+
+        with patch("app.scheduler.now_local", return_value=datetime(2026, 3, 9, 1, 0, tzinfo=timezone.utc)):
+            RESULT = get_next_run_epoch(CONFIG, 4321)
+
+        self.assertEqual(
+            RESULT,
+            int(datetime(2026, 3, 9, 2, 0, tzinfo=timezone.utc).timestamp()),
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms monthly mode delegates to the monthly helper when the
+# configured weekday list is valid.
+# --------------------------------------------------------------------------
+    def test_get_next_run_epoch_monthly_uses_monthly_helper(self) -> None:
+        CONFIG = build_scheduler_config(
+            schedule_mode="monthly",
+            schedule_weekdays="monday",
+            schedule_monthly_week="first",
+            schedule_backup_time="02:00",
+        )
+
+        with patch("app.scheduler.now_local", return_value=datetime(2026, 3, 1, 1, 0, tzinfo=timezone.utc)):
+            RESULT = get_next_run_epoch(CONFIG, 4321)
+
+        self.assertEqual(
+            RESULT,
+            int(datetime(2026, 3, 2, 2, 0, tzinfo=timezone.utc).timestamp()),
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms monthly mode falls back to "NOW_EPOCH" when weekday
+# parsing is invalid.
+# --------------------------------------------------------------------------
+    def test_get_next_run_epoch_monthly_returns_now_epoch_for_invalid_weekday(self) -> None:
+        CONFIG = build_scheduler_config(schedule_mode="monthly", schedule_weekdays="funday")
 
         self.assertEqual(get_next_run_epoch(CONFIG, 4321), 4321)
 
@@ -292,4 +471,28 @@ class TestSchedulerFormatting(unittest.TestCase):
         self.assertEqual(
             format_schedule_line(CONFIG, "scheduled"),
             "Scheduled monthly on the first monday at 02:00.",
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms unknown schedule modes fall back to a plain configured
+# mode description.
+# --------------------------------------------------------------------------
+    def test_format_schedule_description_for_unknown_mode(self) -> None:
+        CONFIG = build_scheduler_config(schedule_mode="custom")
+
+        self.assertEqual(
+            format_schedule_description(CONFIG, "scheduled"),
+            "Configured mode custom",
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms unknown trigger values fall back to sentence-style
+# schedule descriptions.
+# --------------------------------------------------------------------------
+    def test_format_schedule_line_for_unknown_trigger(self) -> None:
+        CONFIG = build_scheduler_config(schedule_mode="daily", schedule_backup_time="02:00")
+
+        self.assertEqual(
+            format_schedule_line(CONFIG, "adhoc"),
+            "Daily at 02:00.",
         )

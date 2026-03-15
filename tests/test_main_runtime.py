@@ -415,6 +415,10 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertIn("Errors: 0", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Duration:", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Average speed:", NOTIFY.call_args_list[1].args[1])
+            self.assertEqual(
+                LOG_LINE.call_args_list[-1].args[2],
+                "Backup complete. Transferred 2/3, skipped 1, errors 0.",
+            )
 
 # --------------------------------------------------------------------------
 # This test confirms backup completion omits speed when no files transfer.
@@ -486,6 +490,10 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                     and "Manifest save skipped because traversal was incomplete." in CALL.args[2]
                     for CALL in LOG_LINE.call_args_list
                 )
+            )
+            self.assertEqual(
+                LOG_LINE.call_args_list[-1].args[2],
+                "Backup completed with incomplete traversal. Transferred 1/3, skipped 1, errors 1.",
             )
 
 # --------------------------------------------------------------------------

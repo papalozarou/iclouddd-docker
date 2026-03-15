@@ -298,11 +298,19 @@ def run_backup(
         STATUS_LINES.append(f"Average speed: {AVERAGE_SPEED}")
 
     COMPLETION_MESSAGE = build_backup_complete_message(APPLE_ID_LABEL, STATUS_LINES)
+    COMPLETION_LOG_PREFIX = (
+        "Backup complete."
+        if TRAVERSAL_COMPLETE
+        else "Backup completed with incomplete traversal."
+    )
+    COMPLETION_LOG_MESSAGE = (
+        f"{COMPLETION_LOG_PREFIX} "
+        f"Transferred {SUMMARY.transferred_files}/{SUMMARY.total_files}, "
+        f"skipped {SUMMARY.skipped_files}, errors {SUMMARY.error_files}."
+    )
     DEPS.notify_fn(TELEGRAM, COMPLETION_MESSAGE)
     DEPS.log_line_fn(
         LOG_FILE,
         "info" if TRAVERSAL_COMPLETE else "error",
-        "Backup complete. " if TRAVERSAL_COMPLETE else "Backup completed with incomplete traversal. "
-        f"Transferred {SUMMARY.transferred_files}/{SUMMARY.total_files}, "
-        f"skipped {SUMMARY.skipped_files}, errors {SUMMARY.error_files}.",
+        COMPLETION_LOG_MESSAGE,
     )

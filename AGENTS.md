@@ -105,6 +105,7 @@ Examples:
 - SHOULD: Where practical, favour extensible designs that allow safe future change without large rewrites
 - MUST NOT: Use quick-fix, hacky, or temporary code in final changes
 - MUST: Implement production-ready solutions with explicit error handling and clear control flow
+- MUST: Prefer root-cause fixes over patches, hot fixes, or symptom-only changes where practical
 - MUST: Refactor instead of layering workarounds when existing code structure is weak
 - MUST: Remove dead code, debug artefacts, and commented-out code before completion
 - SHOULD: Use TDD where practical

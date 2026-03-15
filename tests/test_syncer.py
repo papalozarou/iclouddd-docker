@@ -1082,6 +1082,7 @@ class TestSyncerHelpers(unittest.TestCase):
 
             self.assertEqual(SUMMARY.error_files, 0)
             self.assertEqual(SUMMARY.deleted_files, 2)
+            self.assertEqual(SUMMARY.deleted_directories, 1)
             self.assertTrue((ROOT_DIR / "docs" / "keep.txt").exists())
             self.assertFalse((ROOT_DIR / "docs" / "stale.txt").exists())
             self.assertFalse((ROOT_DIR / "docs" / "archive" / "old.txt").exists())

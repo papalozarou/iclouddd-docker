@@ -13,6 +13,7 @@ from tests._stubs import install_dependency_stubs
 
 install_dependency_stubs()
 
+from app.backup_runtime import format_deleted_summary
 from app.config import AppConfig
 from app.main import (
     attempt_auth,
@@ -82,6 +83,24 @@ def build_config_for_runtime(TMPDIR: str) -> AppConfig:
 # These tests verify auth, commands, and safety-net runtime helper behaviour.
 # ------------------------------------------------------------------------------
 class TestMainRuntimeHelpers(unittest.TestCase):
+# --------------------------------------------------------------------------
+# This test confirms deleted-path summary text uses natural singular and
+# plural wording.
+# --------------------------------------------------------------------------
+    def test_format_deleted_summary_uses_natural_wording(self) -> None:
+        self.assertEqual(
+            format_deleted_summary(0, 0),
+            "Deleted: 0 files, 0 directories",
+        )
+        self.assertEqual(
+            format_deleted_summary(1, 0),
+            "Deleted: 1 file, 0 directories",
+        )
+        self.assertEqual(
+            format_deleted_summary(2, 1),
+            "Deleted: 2 files, 1 directory",
+        )
+
 # --------------------------------------------------------------------------
 # This test confirms parse_iso falls back to epoch for invalid values.
 # --------------------------------------------------------------------------
@@ -411,7 +430,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertIn("*📦 PCD Drive - Backup complete*", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Backup finished for Apple ID alice@example.com.", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Transferred: 2/3", NOTIFY.call_args_list[1].args[1])
-            self.assertIn("Deleted: 0", NOTIFY.call_args_list[1].args[1])
+            self.assertIn("Deleted: 0 files, 0 directories", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Skipped: 1", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Errors: 0", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Duration:", NOTIFY.call_args_list[1].args[1])
@@ -434,6 +453,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 transferred_files=0,
                 transferred_bytes=0,
                 deleted_files=0,
+                deleted_directories=0,
                 total_files=3,
                 skipped_files=3,
                 error_files=0,
@@ -447,7 +467,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                                 run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE, "scheduled")
 
             self.assertEqual(NOTIFY.call_count, 2)
-            self.assertIn("Deleted: 0", NOTIFY.call_args_list[1].args[1])
+            self.assertIn("Deleted: 0 files, 0 directories", NOTIFY.call_args_list[1].args[1])
             self.assertNotIn("Average speed:", NOTIFY.call_args_list[1].args[1])
 
 # --------------------------------------------------------------------------
@@ -464,6 +484,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 transferred_files=1,
                 transferred_bytes=1024,
                 deleted_files=0,
+                deleted_directories=0,
                 total_files=3,
                 skipped_files=1,
                 error_files=1,
@@ -488,7 +509,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 "Delete removed: Skipped because traversal was incomplete",
                 NOTIFY.call_args_list[1].args[1],
             )
-            self.assertIn("Deleted: 0", NOTIFY.call_args_list[1].args[1])
+            self.assertIn("Deleted: 0 files, 0 directories", NOTIFY.call_args_list[1].args[1])
             self.assertTrue(
                 any(
                     CALL.args[1] == "error"
@@ -502,10 +523,10 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             )
 
 # --------------------------------------------------------------------------
-# This test confirms backup completion surfaces deleted file count in the
-# Telegram summary when files are removed locally.
+# This test confirms backup completion surfaces deleted file and directory
+# counts in the Telegram summary when paths are removed locally.
 # --------------------------------------------------------------------------
-    def test_run_backup_reports_deleted_files_in_completion_message(self) -> None:
+    def test_run_backup_reports_deleted_paths_in_completion_message(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_runtime(TMPDIR)
             TELEGRAM = TelegramConfig("token", "12345")
@@ -515,6 +536,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 transferred_files=2,
                 transferred_bytes=2048,
                 deleted_files=3,
+                deleted_directories=1,
                 total_files=3,
                 skipped_files=1,
                 error_files=0,
@@ -529,7 +551,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
 
             self.assertEqual(NOTIFY.call_count, 2)
             self.assertIn("Transferred: 2/3", NOTIFY.call_args_list[1].args[1])
-            self.assertIn("Deleted: 3", NOTIFY.call_args_list[1].args[1])
+            self.assertIn("Deleted: 3 files, 1 directory", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Skipped: 1", NOTIFY.call_args_list[1].args[1])
 
 # --------------------------------------------------------------------------

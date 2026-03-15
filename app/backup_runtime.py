@@ -124,6 +124,25 @@ def format_average_speed(TRANSFERRED_BYTES: int, DURATION_SECONDS: int) -> str:
 
 
 # ------------------------------------------------------------------------------
+# This function formats deleted-path summary text for completion messages.
+#
+# 1. "DELETED_FILES" is the count of deleted local files.
+# 2. "DELETED_DIRECTORIES" is the count of deleted local directories.
+#
+# Returns: Human-readable delete summary with natural singular/plural wording.
+# ------------------------------------------------------------------------------
+def format_deleted_summary(DELETED_FILES: int, DELETED_DIRECTORIES: int) -> str:
+    SAFE_DELETED_FILES = max(int(DELETED_FILES), 0)
+    SAFE_DELETED_DIRECTORIES = max(int(DELETED_DIRECTORIES), 0)
+    FILE_LABEL = "file" if SAFE_DELETED_FILES == 1 else "files"
+    DIRECTORY_LABEL = "directory" if SAFE_DELETED_DIRECTORIES == 1 else "directories"
+    return (
+        f"Deleted: {SAFE_DELETED_FILES} {FILE_LABEL}, "
+        f"{SAFE_DELETED_DIRECTORIES} {DIRECTORY_LABEL}"
+    )
+
+
+# ------------------------------------------------------------------------------
 # This function returns runtime build metadata for startup diagnostics.
 #
 # Returns: Mapping with app build ref and pyicloud package version.
@@ -288,7 +307,10 @@ def run_backup(
     STATUS_LINES.extend(
         [
             f"Transferred: {SUMMARY.transferred_files}/{SUMMARY.total_files}",
-            f"Deleted: {max(int(getattr(SUMMARY, 'deleted_files', 0)), 0)}",
+            format_deleted_summary(
+                getattr(SUMMARY, "deleted_files", 0),
+                getattr(SUMMARY, "deleted_directories", 0),
+            ),
             f"Skipped: {SUMMARY.skipped_files}",
             f"Errors: {SUMMARY.error_files}",
             f"Duration: {DEPS.format_duration_fn(DURATION_SECONDS)}",

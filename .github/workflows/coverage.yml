@@ -1,0 +1,63 @@
+# ------------------------------------------------------------------------------
+# This workflow runs the full test suite with coverage reporting.
+#
+# Coverage runs separately from the main test workflow so ordinary push and pull
+# request feedback stays simple while coverage policy remains explicit. The test
+# suite uses local stubs for optional runtime dependencies, so CI installs only
+# the coverage tool itself.
+# ------------------------------------------------------------------------------
+
+name: Coverage
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - automations
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ------------------------------------------------------------------------
+      # Fetch the repository contents for coverage execution.
+      # ------------------------------------------------------------------------
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------------
+      # Install the supported Python runtime for the worker and tests.
+      # ------------------------------------------------------------------------
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ------------------------------------------------------------------------
+      # Install the coverage tool used by the workflow.
+      # ------------------------------------------------------------------------
+      - name: Install dependencies
+        run: |
+          set -eu
+          python3 -m pip install coverage
+
+      # ------------------------------------------------------------------------
+      # Run the full test suite and enforce the current coverage floor.
+      # ------------------------------------------------------------------------
+      - name: Run coverage
+        run: |
+          set -eu
+          python3 -m coverage run -m unittest -q
+          python3 -m coverage report --fail-under=95 -m
+          python3 -m coverage xml
+
+      # ------------------------------------------------------------------------
+      # Upload the XML report so coverage output remains available after runs.
+      # ------------------------------------------------------------------------
+      - name: Upload coverage artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml

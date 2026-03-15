@@ -53,8 +53,8 @@ FROM ${ALPINE_IMAGE}
 # ------------------------------------------------------------------------------
 LABEL org.opencontainers.image.title="iCloud Drive Backup Container" \
       org.opencontainers.image.description="Incremental iCloud Drive backups with Telegram control." \
-      org.opencontainers.image.source="https://github.com/papalozarou/pyiclodoc-drive-docker" \
-      org.opencontainers.image.licenses="UNLICENSED"
+      org.opencontainers.image.source="https://github.com/papalozarou/pyiclodoc-drive" \
+      org.opencontainers.image.licenses="GPL-3.0-only"
 
 # ------------------------------------------------------------------------------
 # Configure Python runtime defaults for container-friendly behaviour.

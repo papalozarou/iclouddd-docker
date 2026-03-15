@@ -90,11 +90,18 @@ class TestTelegramMessages(unittest.TestCase):
 
     def test_build_backup_complete_message(self) -> None:
         MESSAGE = build_backup_complete_message(
-            "alice@example.com", ["Transferred: 1/1", "Skipped: 0", "Errors: 0"]
+            "alice@example.com",
+            [
+                "Transferred: 1/1",
+                "Deleted: 0 files, 0 directories",
+                "Skipped: 0",
+                "Errors: 0",
+            ],
         )
         self.assertIn("*📦 PCD Drive - Backup complete*", MESSAGE)
         self.assertIn("Backup finished for Apple ID alice@example.com.", MESSAGE)
         self.assertIn("Transferred: 1/1", MESSAGE)
+        self.assertIn("Deleted: 0 files, 0 directories", MESSAGE)
 
     def test_build_backup_requested_message(self) -> None:
         MESSAGE = build_backup_requested_message("alice@example.com")

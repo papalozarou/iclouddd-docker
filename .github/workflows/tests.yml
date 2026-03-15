@@ -1,0 +1,41 @@
+# ------------------------------------------------------------------------------
+# This workflow runs the unit test suite for pushes and pull requests.
+#
+# The unit suite uses repository-local test stubs for optional runtime
+# dependencies, so CI does not need to install the full runtime requirement set
+# before executing "unittest".
+# ------------------------------------------------------------------------------
+
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - automations
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ------------------------------------------------------------------------
+      # Fetch the repository contents for test execution.
+      # ------------------------------------------------------------------------
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------------
+      # Install the supported Python runtime for the worker and tests.
+      # ------------------------------------------------------------------------
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ------------------------------------------------------------------------
+      # Run the full unittest suite exactly as used in local verification.
+      # ------------------------------------------------------------------------
+      - name: Run unit tests
+        run: python3 -m unittest -q

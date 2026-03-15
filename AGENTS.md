@@ -23,6 +23,7 @@ This file defines various coding standards for agents to adhere to.
 
 ## Branch and commit flow
 - MUST: Before any edits, state current branch and intended target branch in one line
+- MUST: Before creating a new branch for approved work, check whether an existing relevant branch already exists and prefer using it where practical
 - MUST: If you propose implementing on a specific branch, perform the work on that branch first and only merge to main after user confirmation
 - MUST: After each block of suggested and user-approved changes is applied, explicitly suggest a commit (with a clear commit message) before moving to the next change block
 
@@ -105,6 +106,7 @@ Examples:
 - SHOULD: Where practical, favour extensible designs that allow safe future change without large rewrites
 - MUST NOT: Use quick-fix, hacky, or temporary code in final changes
 - MUST: Implement production-ready solutions with explicit error handling and clear control flow
+- MUST: Prefer root-cause fixes over patches, hot fixes, or symptom-only changes where practical
 - MUST: Refactor instead of layering workarounds when existing code structure is weak
 - MUST: Remove dead code, debug artefacts, and commented-out code before completion
 - SHOULD: Use TDD where practical
@@ -146,7 +148,8 @@ Examples:
 ## Language-specific rules
 - MUST: Language-specific rules override global naming rules when conflicts occur
 - MUST: For Python, use snake_case for functions and methods unless external interfaces require otherwise
-- MUST: For Python, use UPPER_SNAKE_CASE for variables, constants, and configuration identifiers
+- MUST: For Python, use snake_case for local variables and parameters unless external interfaces require otherwise
+- MUST: For Python, reserve UPPER_SNAKE_CASE for constants and configuration identifiers
 - MUST: For shell and Bash, use camelCase for function names following verbValue or verbObject patterns
 - MUST: For shell and Bash, use UPPER_SNAKE_CASE for variables
 - MUST: For shell and Bash, keep scripts POSIX-compliant unless Bash is explicitly required

@@ -297,6 +297,7 @@ def run_scheduled_worker_loop(
                     RUNTIME_CONTEXT.APPLE_ID_LABEL
                 ),
             )
+            BACKUP_REQUESTED = False
             DEPS.sleep_fn(5)
             continue
 
@@ -307,6 +308,7 @@ def run_scheduled_worker_loop(
                     RUNTIME_CONTEXT.APPLE_ID_LABEL
                 ),
             )
+            BACKUP_REQUESTED = False
             DEPS.sleep_fn(5)
             continue
 
@@ -315,6 +317,7 @@ def run_scheduled_worker_loop(
             RUNTIME_CONTEXT.TELEGRAM,
             RUNTIME_CONTEXT.LOG_FILE,
         ):
+            BACKUP_REQUESTED = False
             DEPS.sleep_fn(30)
             continue
 

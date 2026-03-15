@@ -13,6 +13,7 @@ import time
 import unittest
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from tests._stubs import install_dependency_stubs
@@ -20,17 +21,28 @@ from tests._stubs import install_dependency_stubs
 install_dependency_stubs()
 
 from app.syncer import (
+    apply_remote_modified_time,
+    build_local_file_index,
+    collect_local_files,
     collect_mismatches,
+    ensure_directories,
+    entry_metadata,
     get_transfer_failure_reason,
+    get_traversal_hard_failure_count,
     get_auto_worker_count,
     get_transfer_worker_count,
     is_known_package_path,
+    list_entries_with_progress,
+    package_entry_metadata,
     is_retryable_transfer_error,
+    is_local_file_aligned_with_remote,
     needs_transfer,
     normalise_transfer_reason,
+    parse_remote_modified_epoch,
     package_signature,
     perform_incremental_sync,
     PROGRESS_LOG_SEPARATOR,
+    run_first_time_safety_net,
     transfer_if_required,
 )
 
@@ -135,6 +147,338 @@ class TestSyncerHelpers(unittest.TestCase):
         }
 
         self.assertFalse(needs_transfer(ENTRY, MANIFEST))
+
+# --------------------------------------------------------------------------
+# This test confirms directory entries always trigger transfer planning so
+# they can be preserved in the manifest.
+# --------------------------------------------------------------------------
+    def test_needs_transfer_for_directory_manifest_entry(self) -> None:
+        ENTRY = RemoteEntry(
+            path="docs",
+            is_dir=False,
+            size=10,
+            modified="2026-03-07T12:00:00Z",
+        )
+        MANIFEST = {
+            "docs": {
+                "is_dir": True,
+                "size": 0,
+                "modified": "2026-03-01T00:00:00Z",
+            }
+        }
+
+        self.assertTrue(needs_transfer(ENTRY, MANIFEST))
+
+# --------------------------------------------------------------------------
+# This test confirms package entries trigger transfer when signatures differ.
+# --------------------------------------------------------------------------
+    def test_needs_transfer_for_changed_package_signature(self) -> None:
+        ENTRY = RemoteEntry(
+            path="docs/archive.bundle",
+            is_dir=False,
+            size=11,
+            modified="2026-03-08T12:00:00Z",
+        )
+        MANIFEST = {
+            "docs/archive.bundle": {
+                "is_dir": False,
+                "entry_kind": "package",
+                "package_signature": "stale",
+                "package_state": "package",
+            }
+        }
+
+        self.assertTrue(needs_transfer(ENTRY, MANIFEST))
+
+# --------------------------------------------------------------------------
+# This test confirms normal file entries trigger transfer when size differs.
+# --------------------------------------------------------------------------
+    def test_needs_transfer_for_changed_file_size(self) -> None:
+        ENTRY = RemoteEntry(
+            path="docs/a.txt",
+            is_dir=False,
+            size=11,
+            modified="2026-03-07T12:00:00Z",
+        )
+        MANIFEST = {
+            "docs/a.txt": {
+                "is_dir": False,
+                "size": 10,
+                "modified": "2026-03-07T12:00:00Z",
+            }
+        }
+
+        self.assertTrue(needs_transfer(ENTRY, MANIFEST))
+
+# --------------------------------------------------------------------------
+# This test confirms normal file entries trigger transfer when modified time
+# differs.
+# --------------------------------------------------------------------------
+    def test_needs_transfer_for_changed_file_modified_time(self) -> None:
+        ENTRY = RemoteEntry(
+            path="docs/a.txt",
+            is_dir=False,
+            size=10,
+            modified="2026-03-08T12:00:00Z",
+        )
+        MANIFEST = {
+            "docs/a.txt": {
+                "is_dir": False,
+                "size": 10,
+                "modified": "2026-03-07T12:00:00Z",
+            }
+        }
+
+        self.assertTrue(needs_transfer(ENTRY, MANIFEST))
+
+# --------------------------------------------------------------------------
+# This test confirms safety-net file collection skips directories and stops
+# at the configured sample limit.
+# --------------------------------------------------------------------------
+    def test_collect_local_files_limits_results_to_sample_size(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            (ROOT_DIR / "docs").mkdir(parents=True, exist_ok=True)
+            (ROOT_DIR / "docs" / "a.txt").write_text("a", encoding="utf-8")
+            (ROOT_DIR / "docs" / "b.txt").write_text("b", encoding="utf-8")
+
+            RESULT = collect_local_files(ROOT_DIR, 1)
+
+        self.assertEqual(len(RESULT), 1)
+        self.assertIn(RESULT[0].name, {"a.txt", "b.txt"})
+
+# --------------------------------------------------------------------------
+# This test confirms first-run safety net returns a non-blocking result for
+# empty output trees.
+# --------------------------------------------------------------------------
+    def test_run_first_time_safety_net_returns_safe_result_for_empty_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RESULT = run_first_time_safety_net(Path(TMPDIR), 5)
+
+        self.assertFalse(RESULT.should_block)
+        self.assertEqual(RESULT.mismatched_samples, [])
+
+# --------------------------------------------------------------------------
+# This test confirms entry metadata labels files and directories correctly.
+# --------------------------------------------------------------------------
+    def test_entry_metadata_uses_expected_entry_kind(self) -> None:
+        FILE_ENTRY = RemoteEntry("docs/a.txt", False, 10, "m1")
+        DIR_ENTRY = RemoteEntry("docs", True, 0, "m2")
+
+        self.assertEqual(entry_metadata(FILE_ENTRY)["entry_kind"], "file")
+        self.assertEqual(entry_metadata(DIR_ENTRY)["entry_kind"], "dir")
+
+# --------------------------------------------------------------------------
+# This test confirms package metadata stores both package state and derived
+# signature.
+# --------------------------------------------------------------------------
+    def test_package_entry_metadata_includes_package_fields(self) -> None:
+        ENTRY = RemoteEntry("docs/archive.bundle", False, 10, "m1")
+
+        RESULT = package_entry_metadata(ENTRY, "package")
+
+        self.assertEqual(RESULT["entry_kind"], "package")
+        self.assertEqual(RESULT["package_state"], "package")
+        self.assertEqual(RESULT["package_signature"], package_signature(ENTRY))
+
+# --------------------------------------------------------------------------
+# This test confirms traversal hard-failure count falls back safely when the
+# client does not expose a stats snapshot.
+# --------------------------------------------------------------------------
+    def test_get_traversal_hard_failure_count_handles_missing_snapshot(self) -> None:
+        self.assertEqual(get_traversal_hard_failure_count(object()), 0)
+
+# --------------------------------------------------------------------------
+# This test confirms traversal hard-failure count ignores non-dictionary
+# stats payloads.
+# --------------------------------------------------------------------------
+    def test_get_traversal_hard_failure_count_handles_non_dict_snapshot(self) -> None:
+        CLIENT = SimpleNamespace(get_traversal_stats_snapshot=lambda: [])
+        self.assertEqual(get_traversal_hard_failure_count(CLIENT), 0)
+
+# --------------------------------------------------------------------------
+# This test confirms traversal hard-failure count is clamped at zero for
+# invalid negative values.
+# --------------------------------------------------------------------------
+    def test_get_traversal_hard_failure_count_clamps_negative_value(self) -> None:
+        CLIENT = SimpleNamespace(get_traversal_stats_snapshot=lambda: {"dir_hard_failures": -2})
+        self.assertEqual(get_traversal_hard_failure_count(CLIENT), 0)
+
+# --------------------------------------------------------------------------
+# This test confirms ensure_directories creates nested paths and emits a
+# debug log when logging is enabled.
+# --------------------------------------------------------------------------
+    def test_ensure_directories_creates_paths_and_logs(self) -> None:
+        DIRECTORIES = [RemoteEntry("docs/nested", True, 0, "m1")]
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            LOG_FILE = ROOT_DIR / "worker.log"
+
+            with patch("app.syncer.log_line") as LOG_LINE:
+                ensure_directories(ROOT_DIR, DIRECTORIES, LOG_FILE)
+
+            self.assertTrue((ROOT_DIR / "docs" / "nested").exists())
+            self.assertTrue(any("Directory ensured: docs/nested" in CALL.args[2] for CALL in LOG_LINE.call_args_list))
+
+# --------------------------------------------------------------------------
+# This test confirms local file index building skips files whose metadata
+# cannot be read.
+# --------------------------------------------------------------------------
+    def test_build_local_file_index_skips_stat_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            FILE_PATH = ROOT_DIR / "docs" / "keep.txt"
+            FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            FILE_PATH.write_text("keep", encoding="utf-8")
+
+            with patch("app.syncer.iter_local_files", return_value=[FILE_PATH]):
+                with patch.object(Path, "stat", side_effect=OSError("stat failed")):
+                    RESULT = build_local_file_index(ROOT_DIR)
+
+        self.assertEqual(RESULT, {})
+
+# --------------------------------------------------------------------------
+# This test confirms local-file reconciliation returns false when metadata is
+# missing or invalid.
+# --------------------------------------------------------------------------
+    def test_is_local_file_aligned_with_remote_handles_missing_or_invalid_time(self) -> None:
+        ENTRY = RemoteEntry("docs/a.txt", False, 10, "bad")
+
+        self.assertFalse(is_local_file_aligned_with_remote(ENTRY, None))
+        self.assertFalse(is_local_file_aligned_with_remote(ENTRY, (10, 1.0)))
+
+# --------------------------------------------------------------------------
+# This test confirms remote modified parsing handles blank, UTC-suffixed,
+# naive, and invalid timestamp forms.
+# --------------------------------------------------------------------------
+    def test_parse_remote_modified_epoch_handles_supported_and_invalid_formats(self) -> None:
+        self.assertIsNone(parse_remote_modified_epoch(""))
+        self.assertIsNone(parse_remote_modified_epoch("not-a-date"))
+        self.assertIsNotNone(parse_remote_modified_epoch("2026-03-12T10:15:30Z"))
+        self.assertIsNotNone(parse_remote_modified_epoch("2026-03-12T10:15:30"))
+
+# --------------------------------------------------------------------------
+# This test confirms timestamp application skips invalid remote timestamps
+# and emits a debug reason when logging is enabled.
+# --------------------------------------------------------------------------
+    def test_apply_remote_modified_time_skips_invalid_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOCAL_PATH = Path(TMPDIR) / "docs" / "a.txt"
+            LOCAL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            LOCAL_PATH.write_text("x", encoding="utf-8")
+
+            with patch("app.syncer.log_line") as LOG_LINE:
+                RESULT = apply_remote_modified_time(LOCAL_PATH, "bad", Path(TMPDIR) / "worker.log")
+
+        self.assertFalse(RESULT)
+        self.assertTrue(any("Timestamp skipped parse:" in CALL.args[2] for CALL in LOG_LINE.call_args_list))
+
+# --------------------------------------------------------------------------
+# This test confirms timestamp application logs and returns false when file
+# metadata cannot be updated.
+# --------------------------------------------------------------------------
+    def test_apply_remote_modified_time_logs_utime_error(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOCAL_PATH = Path(TMPDIR) / "docs" / "a.txt"
+            LOCAL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            LOCAL_PATH.write_text("x", encoding="utf-8")
+
+            with patch("app.syncer.os.utime", side_effect=OSError("utime failed")):
+                with patch("app.syncer.log_line") as LOG_LINE:
+                    RESULT = apply_remote_modified_time(
+                        LOCAL_PATH,
+                        "2026-03-12T10:15:30Z",
+                        Path(TMPDIR) / "worker.log",
+                    )
+
+        self.assertFalse(RESULT)
+        self.assertTrue(any("Timestamp apply error:" in CALL.args[2] for CALL in LOG_LINE.call_args_list))
+
+# --------------------------------------------------------------------------
+# This test confirms transfer helper short-circuits when the caller already
+# knows transfer is not required.
+# --------------------------------------------------------------------------
+    def test_transfer_if_required_returns_skipped_when_transfer_not_needed(self) -> None:
+        ENTRY = RemoteEntry("docs/a.txt", False, 10, "m1")
+
+        RESULT = transfer_if_required(FakeClient([], {}), Path("/tmp"), ENTRY, False)
+
+        self.assertEqual(RESULT, (True, 1, "skipped"))
+
+# --------------------------------------------------------------------------
+# This test confirms known local package directories return package success
+# when package export succeeds.
+# --------------------------------------------------------------------------
+    def test_transfer_if_required_returns_package_for_existing_local_package_dir(self) -> None:
+        ENTRY = RemoteEntry("docs/archive.bundle", False, 10, "m1")
+        CLIENT = FakeClient([ENTRY], {})
+        CLIENT.package_results["docs/archive.bundle"] = True
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            PACKAGE_DIR = ROOT_DIR / "docs" / "archive.bundle"
+            PACKAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+            RESULT = transfer_if_required(CLIENT, ROOT_DIR, ENTRY, True)
+
+        self.assertEqual(RESULT, (True, 1, "package"))
+
+# --------------------------------------------------------------------------
+# This test confirms known local package directories surface package-fallback
+# failure reasons when export fails without reconciliation markers.
+# --------------------------------------------------------------------------
+    def test_transfer_if_required_returns_package_reason_for_existing_local_package_dir(self) -> None:
+        ENTRY = RemoteEntry("docs/archive.bundle", False, 10, "m1")
+        CLIENT = FakeClient([ENTRY], {})
+        CLIENT.package_results["docs/archive.bundle"] = False
+        CLIENT.package_failure_reasons["docs/archive.bundle"] = "package_download_failed"
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            PACKAGE_DIR = ROOT_DIR / "docs" / "archive.bundle"
+            PACKAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+            RESULT = transfer_if_required(CLIENT, ROOT_DIR, ENTRY, True)
+
+        self.assertEqual(RESULT, (False, 1, "package_download_failed"))
+
+# --------------------------------------------------------------------------
+# This test confirms known package paths return package success when package
+# export succeeds without a pre-existing local directory.
+# --------------------------------------------------------------------------
+    def test_transfer_if_required_returns_package_for_known_package_path(self) -> None:
+        ENTRY = RemoteEntry("docs/archive.bundle", False, 10, "m1")
+        CLIENT = FakeClient([ENTRY], {})
+        CLIENT.package_results["docs/archive.bundle"] = True
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RESULT = transfer_if_required(CLIENT, Path(TMPDIR), ENTRY, True)
+
+        self.assertEqual(RESULT, (True, 1, "package"))
+
+# --------------------------------------------------------------------------
+# This test confirms transfer failure reason helper handles equal and missing
+# reason tokens predictably.
+# --------------------------------------------------------------------------
+    def test_get_transfer_failure_reason_handles_equal_and_missing_tokens(self) -> None:
+        self.assertEqual(get_transfer_failure_reason("download_failed", "download_failed"), "download_failed")
+        self.assertEqual(get_transfer_failure_reason("", "package_download_failed"), "package_download_failed")
+        self.assertEqual(get_transfer_failure_reason("download_failed", ""), "download_failed")
+
+# --------------------------------------------------------------------------
+# This test confirms normalised transfer reasons fall back to "unknown"
+# for blank or separator-only values.
+# --------------------------------------------------------------------------
+    def test_normalise_transfer_reason_returns_unknown_for_blank_values(self) -> None:
+        self.assertEqual(normalise_transfer_reason(""), "unknown")
+        self.assertEqual(normalise_transfer_reason(" ; fallback=package"), "unknown")
+
+# --------------------------------------------------------------------------
+# This test confirms known package-path detection rejects blank values.
+# --------------------------------------------------------------------------
+    def test_is_known_package_path_rejects_blank_value(self) -> None:
+        self.assertFalse(is_known_package_path(" "))
 
 # --------------------------------------------------------------------------
 # This test confirms package entries use package signatures for transfer
@@ -737,6 +1081,8 @@ class TestSyncerHelpers(unittest.TestCase):
             )
 
             self.assertEqual(SUMMARY.error_files, 0)
+            self.assertEqual(SUMMARY.deleted_files, 2)
+            self.assertEqual(SUMMARY.deleted_directories, 1)
             self.assertTrue((ROOT_DIR / "docs" / "keep.txt").exists())
             self.assertFalse((ROOT_DIR / "docs" / "stale.txt").exists())
             self.assertFalse((ROOT_DIR / "docs" / "archive" / "old.txt").exists())

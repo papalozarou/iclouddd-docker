@@ -73,6 +73,8 @@ class SyncResult:
     total_files: int
     transferred_files: int
     transferred_bytes: int
+    deleted_files: int
+    deleted_directories: int
     skipped_files: int
     error_files: int
     traversal_complete: bool = True
@@ -157,7 +159,6 @@ def collect_local_files(OUTPUT_DIR: Path, SAMPLE_SIZE: int) -> list[Path]:
     return RESULT
 
 
-# ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 # This function returns sampled files with non-matching ownership.
 #
@@ -587,6 +588,9 @@ def perform_incremental_sync(
         NEW_MANIFEST[ENTRY.path] = entry_metadata(ENTRY)
 
     DELETE_PHASE_SKIPPED = BACKUP_DELETE_REMOVED and not TRAVERSAL_COMPLETE
+    DELETED_FILES = 0
+    DELETED_DIRS = 0
+    DELETE_ERRORS = 0
 
     if DELETE_PHASE_SKIPPED and LOG_FILE is not None:
         log_line(
@@ -620,6 +624,8 @@ def perform_incremental_sync(
         len(FILES),
         TRANSFERRED,
         TRANSFERRED_BYTES,
+        DELETED_FILES,
+        DELETED_DIRS,
         SKIPPED,
         ERRORS,
         traversal_complete=TRAVERSAL_COMPLETE,

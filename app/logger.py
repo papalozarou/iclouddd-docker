@@ -257,6 +257,15 @@ def rotate_log_file(LOG_FILE: Path) -> None:
             with gzip.open(COMPRESSED_PATH, "wb") as TARGET:
                 shutil.copyfileobj(SOURCE, TARGET)
     except OSError:
+        try:
+            ROTATED_PATH.unlink()
+        except OSError:
+            pass
+
+        try:
+            COMPRESSED_PATH.unlink()
+        except OSError:
+            pass
         return
 
     try:

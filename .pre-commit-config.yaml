@@ -1,0 +1,40 @@
+# ------------------------------------------------------------------------------
+# This pre-commit configuration defines lightweight local guardrails.
+#
+# The hooks stay intentionally fast: syntax checks plus a small targeted test
+# slice that catches common state, time, and script regressions before a commit
+# is created.
+# ------------------------------------------------------------------------------
+
+repos:
+  # --------------------------------------------------------------------------
+  # Run quick local hooks maintained directly in this repository.
+  # --------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      # ----------------------------------------------------------------------
+      # Validate Python source can be compiled cleanly.
+      # ----------------------------------------------------------------------
+      - id: python-compile
+        name: Python compile
+        entry: python3 -m compileall app tests
+        language: system
+        pass_filenames: false
+
+      # ----------------------------------------------------------------------
+      # Validate shell script syntax for the maintained scripts.
+      # ----------------------------------------------------------------------
+      - id: shell-syntax
+        name: Shell syntax
+        entry: sh -c 'sh -n check-traversal-workers.sh && sh -n scripts/entrypoint.sh && sh -n scripts/healthcheck.sh && sh -n scripts/start.sh'
+        language: system
+        pass_filenames: false
+
+      # ----------------------------------------------------------------------
+      # Run a small fast test slice that protects common helper regressions.
+      # ----------------------------------------------------------------------
+      - id: fast-unit-tests
+        name: Fast unit tests
+        entry: python3 -m unittest tests.test_scripts tests.test_state tests.test_time_utils -q
+        language: system
+        pass_filenames: false

@@ -3,6 +3,9 @@
 # file output.
 # ------------------------------------------------------------------------------
 
+from __future__ import annotations
+
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 import gzip
@@ -22,6 +25,17 @@ ROTATED_FILE_PATTERN = "{name}.{stamp}.log"
 
 
 # ------------------------------------------------------------------------------
+# This data class stores the effective logger policy for the current process.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class LoggerConfig:
+    level: str
+    rotate_max_bytes: int
+    rotate_daily: bool
+    rotate_keep_days: int
+
+
+# ------------------------------------------------------------------------------
 # This function produces a configured-timezone timestamp string.
 #
 # Returns: Display timestamp including timezone abbreviation.
@@ -31,17 +45,50 @@ def get_timestamp() -> str:
 
 
 # ------------------------------------------------------------------------------
+# This function reads all logger settings from environment in one pass.
+#
+# Returns: Immutable logger policy used by console and file logging.
+# ------------------------------------------------------------------------------
+def load_logger_config() -> LoggerConfig:
+    DEFAULT_MAX_BYTES = 100 * 1024 * 1024
+    DEFAULT_KEEP_DAYS = 14
+
+    RAW_LEVEL = os.getenv("LOG_LEVEL", "info").strip().lower()
+    LEVEL = RAW_LEVEL if RAW_LEVEL in LOG_LEVELS else "info"
+
+    RAW_MAX_MIB = os.getenv("LOG_ROTATE_MAX_MIB", "100").strip()
+    if RAW_MAX_MIB.isdigit() and int(RAW_MAX_MIB) >= 1:
+        ROTATE_MAX_BYTES = int(RAW_MAX_MIB) * 1024 * 1024
+    else:
+        ROTATE_MAX_BYTES = DEFAULT_MAX_BYTES
+
+    RAW_ROTATE_DAILY = os.getenv("LOG_ROTATE_DAILY", "true").strip().lower()
+    if RAW_ROTATE_DAILY in {"0", "false", "no", "off"}:
+        ROTATE_DAILY = False
+    else:
+        ROTATE_DAILY = True
+
+    RAW_KEEP_DAYS = os.getenv("LOG_ROTATE_KEEP_DAYS", "14").strip()
+    if RAW_KEEP_DAYS.isdigit() and int(RAW_KEEP_DAYS) >= 1:
+        ROTATE_KEEP_DAYS = int(RAW_KEEP_DAYS)
+    else:
+        ROTATE_KEEP_DAYS = DEFAULT_KEEP_DAYS
+
+    return LoggerConfig(
+        level=LEVEL,
+        rotate_max_bytes=ROTATE_MAX_BYTES,
+        rotate_daily=ROTATE_DAILY,
+        rotate_keep_days=ROTATE_KEEP_DAYS,
+    )
+
+
+# ------------------------------------------------------------------------------
 # This function returns the configured log threshold from environment.
 #
 # Returns: Normalised log level token.
 # ------------------------------------------------------------------------------
 def get_log_level() -> str:
-    RAW_VALUE = os.getenv("LOG_LEVEL", "info").strip().lower()
-
-    if RAW_VALUE in LOG_LEVELS:
-        return RAW_VALUE
-
-    return "info"
+    return load_logger_config().level
 
 
 # ------------------------------------------------------------------------------
@@ -51,9 +98,9 @@ def get_log_level() -> str:
 #
 # Returns: True when line should be written and printed.
 # ------------------------------------------------------------------------------
-def should_log(LEVEL: str) -> bool:
-    CURRENT_LEVEL = get_log_level()
-    CURRENT_WEIGHT = LOG_LEVELS.get(CURRENT_LEVEL, LOG_LEVELS["info"])
+def should_log(LEVEL: str, CONFIG: LoggerConfig | None = None) -> bool:
+    ACTIVE_CONFIG = CONFIG or load_logger_config()
+    CURRENT_WEIGHT = LOG_LEVELS.get(ACTIVE_CONFIG.level, LOG_LEVELS["info"])
     MESSAGE_WEIGHT = LOG_LEVELS.get(LEVEL.lower(), LOG_LEVELS["info"])
     return MESSAGE_WEIGHT >= CURRENT_WEIGHT
 
@@ -68,10 +115,12 @@ def should_log(LEVEL: str) -> bool:
 # Returns: None.
 # ------------------------------------------------------------------------------
 def log_line(LOG_FILE: Path, LEVEL: str, MESSAGE: str) -> None:
-    if not should_log(LEVEL):
+    LOGGER_CONFIG = load_logger_config()
+
+    if not should_log(LEVEL, LOGGER_CONFIG):
         return
 
-    rotate_log_if_needed(LOG_FILE)
+    rotate_log_if_needed(LOG_FILE, LOGGER_CONFIG)
 
     LEVEL_UPPER = LEVEL.upper()
     LINE = f"[{get_timestamp()}] [{LEVEL_UPPER}] {MESSAGE}"
@@ -104,16 +153,27 @@ def format_console_line(LINE: str, LEVEL_UPPER: str) -> str:
 #
 # Returns: None.
 # ------------------------------------------------------------------------------
-def rotate_log_if_needed(LOG_FILE: Path) -> None:
+def rotate_log_if_needed(
+    LOG_FILE: Path,
+    CONFIG: LoggerConfig | None = None,
+) -> None:
+    ACTIVE_CONFIG = CONFIG or load_logger_config()
+
     if not LOG_FILE.exists():
         return
 
-    SHOULD_ROTATE = should_rotate_for_size(LOG_FILE) or should_rotate_for_daily_rollover(LOG_FILE)
+    SHOULD_ROTATE = should_rotate_for_size(
+        LOG_FILE,
+        ACTIVE_CONFIG,
+    ) or should_rotate_for_daily_rollover(
+        LOG_FILE,
+        ACTIVE_CONFIG,
+    )
     if not SHOULD_ROTATE:
         return
 
     rotate_log_file(LOG_FILE)
-    prune_rotated_logs(LOG_FILE)
+    prune_rotated_logs(LOG_FILE, ACTIVE_CONFIG)
 
 
 # ------------------------------------------------------------------------------
@@ -123,8 +183,12 @@ def rotate_log_if_needed(LOG_FILE: Path) -> None:
 #
 # Returns: True when file size meets or exceeds configured threshold.
 # ------------------------------------------------------------------------------
-def should_rotate_for_size(LOG_FILE: Path) -> bool:
-    MAX_BYTES = get_log_rotate_max_bytes()
+def should_rotate_for_size(
+    LOG_FILE: Path,
+    CONFIG: LoggerConfig | None = None,
+) -> bool:
+    ACTIVE_CONFIG = CONFIG or load_logger_config()
+    MAX_BYTES = ACTIVE_CONFIG.rotate_max_bytes
     if MAX_BYTES < 1:
         return False
 
@@ -141,8 +205,13 @@ def should_rotate_for_size(LOG_FILE: Path) -> bool:
 #
 # Returns: True when file has entries from a previous local date.
 # ------------------------------------------------------------------------------
-def should_rotate_for_daily_rollover(LOG_FILE: Path) -> bool:
-    if not get_log_rotate_daily():
+def should_rotate_for_daily_rollover(
+    LOG_FILE: Path,
+    CONFIG: LoggerConfig | None = None,
+) -> bool:
+    ACTIVE_CONFIG = CONFIG or load_logger_config()
+
+    if not ACTIVE_CONFIG.rotate_daily:
         return False
 
     try:
@@ -193,8 +262,12 @@ def rotate_log_file(LOG_FILE: Path) -> None:
 #
 # Returns: None.
 # ------------------------------------------------------------------------------
-def prune_rotated_logs(LOG_FILE: Path) -> None:
-    KEEP_DAYS = get_log_rotate_keep_days()
+def prune_rotated_logs(
+    LOG_FILE: Path,
+    CONFIG: LoggerConfig | None = None,
+) -> None:
+    ACTIVE_CONFIG = CONFIG or load_logger_config()
+    KEEP_DAYS = ACTIVE_CONFIG.rotate_keep_days
     if KEEP_DAYS < 1:
         return
 
@@ -222,17 +295,7 @@ def prune_rotated_logs(LOG_FILE: Path) -> None:
 # Returns: Positive byte count, defaulting to 100 MiB.
 # ------------------------------------------------------------------------------
 def get_log_rotate_max_bytes() -> int:
-    DEFAULT_BYTES = 100 * 1024 * 1024
-    RAW_VALUE = os.getenv("LOG_ROTATE_MAX_MIB", "100").strip()
-
-    if not RAW_VALUE.isdigit():
-        return DEFAULT_BYTES
-
-    VALUE_MIB = int(RAW_VALUE)
-    if VALUE_MIB < 1:
-        return DEFAULT_BYTES
-
-    return VALUE_MIB * 1024 * 1024
+    return load_logger_config().rotate_max_bytes
 
 
 # ------------------------------------------------------------------------------
@@ -241,15 +304,7 @@ def get_log_rotate_max_bytes() -> int:
 # Returns: True when daily rollover is enabled, defaulting to true.
 # ------------------------------------------------------------------------------
 def get_log_rotate_daily() -> bool:
-    RAW_VALUE = os.getenv("LOG_ROTATE_DAILY", "true").strip().lower()
-
-    if RAW_VALUE in {"1", "true", "yes", "on"}:
-        return True
-
-    if RAW_VALUE in {"0", "false", "no", "off"}:
-        return False
-
-    return True
+    return load_logger_config().rotate_daily
 
 
 # ------------------------------------------------------------------------------
@@ -258,13 +313,4 @@ def get_log_rotate_daily() -> bool:
 # Returns: Positive day count, defaulting to 14 days.
 # ------------------------------------------------------------------------------
 def get_log_rotate_keep_days() -> int:
-    RAW_VALUE = os.getenv("LOG_ROTATE_KEEP_DAYS", "14").strip()
-
-    if not RAW_VALUE.isdigit():
-        return 14
-
-    VALUE = int(RAW_VALUE)
-    if VALUE < 1:
-        return 14
-
-    return VALUE
+    return load_logger_config().rotate_keep_days

@@ -18,6 +18,36 @@ from app import logger
 # ------------------------------------------------------------------------------
 class TestLogger(unittest.TestCase):
 # --------------------------------------------------------------------------
+# This test confirms the consolidated logger config loader preserves the
+# current environment-driven defaults and parsing rules.
+# --------------------------------------------------------------------------
+    def test_load_logger_config_parses_effective_policy(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            CONFIG = logger.load_logger_config()
+
+        self.assertEqual(CONFIG.level, "info")
+        self.assertEqual(CONFIG.rotate_max_bytes, 100 * 1024 * 1024)
+        self.assertTrue(CONFIG.rotate_daily)
+        self.assertEqual(CONFIG.rotate_keep_days, 14)
+
+        with patch.dict(
+            "os.environ",
+            {
+                "LOG_LEVEL": "DEBUG",
+                "LOG_ROTATE_MAX_MIB": "2",
+                "LOG_ROTATE_DAILY": "false",
+                "LOG_ROTATE_KEEP_DAYS": "7",
+            },
+            clear=True,
+        ):
+            CONFIG = logger.load_logger_config()
+
+        self.assertEqual(CONFIG.level, "debug")
+        self.assertEqual(CONFIG.rotate_max_bytes, 2 * 1024 * 1024)
+        self.assertFalse(CONFIG.rotate_daily)
+        self.assertEqual(CONFIG.rotate_keep_days, 7)
+
+# --------------------------------------------------------------------------
 # This test confirms timestamp rendering includes date/time and timezone.
 # --------------------------------------------------------------------------
     def test_get_timestamp_formats_expected_value(self) -> None:
@@ -216,11 +246,23 @@ class TestLogger(unittest.TestCase):
             LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
             LOG_FILE.write_text("old\n", encoding="utf-8")
 
-            with patch.object(logger, "get_log_rotate_max_bytes", return_value=1):
-                with patch.object(logger, "get_log_rotate_daily", return_value=False):
-                    with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
-                        with patch("builtins.print"):
-                            logger.log_line(LOG_FILE, "info", "Backup starting.")
+            with patch.object(
+                logger,
+                "load_logger_config",
+                return_value=logger.LoggerConfig(
+                    level="info",
+                    rotate_max_bytes=1,
+                    rotate_daily=False,
+                    rotate_keep_days=14,
+                ),
+            ):
+                with patch.object(
+                    logger,
+                    "get_timestamp",
+                    return_value="2026-03-09 12:34:56 UTC",
+                ):
+                    with patch("builtins.print"):
+                        logger.log_line(LOG_FILE, "info", "Backup starting.")
 
             CONTENTS = LOG_FILE.read_text(encoding="utf-8").strip()
             self.assertEqual(CONTENTS, "[2026-03-09 12:34:56 UTC] [INFO] Backup starting.")
@@ -244,11 +286,23 @@ class TestLogger(unittest.TestCase):
                 "now_local",
                 return_value=datetime(2026, 3, 9, 10, 0, 0, tzinfo=timezone.utc),
             ):
-                with patch.object(logger, "get_log_rotate_max_bytes", return_value=10 * 1024 * 1024):
-                    with patch.object(logger, "get_timestamp", return_value="2026-03-09 10:00:00 UTC"):
-                        with patch.dict("os.environ", {"LOG_ROTATE_DAILY": "true"}, clear=True):
-                            with patch("builtins.print"):
-                                logger.log_line(LOG_FILE, "info", "new-day")
+                with patch.object(
+                    logger,
+                    "load_logger_config",
+                    return_value=logger.LoggerConfig(
+                        level="info",
+                        rotate_max_bytes=10 * 1024 * 1024,
+                        rotate_daily=True,
+                        rotate_keep_days=14,
+                    ),
+                ):
+                    with patch.object(
+                        logger,
+                        "get_timestamp",
+                        return_value="2026-03-09 10:00:00 UTC",
+                    ):
+                        with patch("builtins.print"):
+                            logger.log_line(LOG_FILE, "info", "new-day")
 
             ARCHIVES = list(Path(TMPDIR).glob("pyiclodoc-drive-worker.*.log.gz"))
             self.assertEqual(len(ARCHIVES), 1)

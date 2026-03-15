@@ -411,6 +411,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertIn("*📦 PCD Drive - Backup complete*", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Backup finished for Apple ID alice@example.com.", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Transferred: 2/3", NOTIFY.call_args_list[1].args[1])
+            self.assertIn("Deleted: 0", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Skipped: 1", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Errors: 0", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Duration:", NOTIFY.call_args_list[1].args[1])
@@ -432,6 +433,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             SUMMARY = SimpleNamespace(
                 transferred_files=0,
                 transferred_bytes=0,
+                deleted_files=0,
                 total_files=3,
                 skipped_files=3,
                 error_files=0,
@@ -445,6 +447,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                                 run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE, "scheduled")
 
             self.assertEqual(NOTIFY.call_count, 2)
+            self.assertIn("Deleted: 0", NOTIFY.call_args_list[1].args[1])
             self.assertNotIn("Average speed:", NOTIFY.call_args_list[1].args[1])
 
 # --------------------------------------------------------------------------
@@ -460,6 +463,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             SUMMARY = SimpleNamespace(
                 transferred_files=1,
                 transferred_bytes=1024,
+                deleted_files=0,
                 total_files=3,
                 skipped_files=1,
                 error_files=1,
@@ -484,6 +488,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 "Delete removed: Skipped because traversal was incomplete",
                 NOTIFY.call_args_list[1].args[1],
             )
+            self.assertIn("Deleted: 0", NOTIFY.call_args_list[1].args[1])
             self.assertTrue(
                 any(
                     CALL.args[1] == "error"
@@ -495,6 +500,37 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 LOG_LINE.call_args_list[-1].args[2],
                 "Backup completed with incomplete traversal. Transferred 1/3, skipped 1, errors 1.",
             )
+
+# --------------------------------------------------------------------------
+# This test confirms backup completion surfaces deleted file count in the
+# Telegram summary when files are removed locally.
+# --------------------------------------------------------------------------
+    def test_run_backup_reports_deleted_files_in_completion_message(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_runtime(TMPDIR)
+            TELEGRAM = TelegramConfig("token", "12345")
+            LOG_FILE = CONFIG.logs_dir / "pyiclodoc-drive-worker.log"
+            CLIENT = Mock()
+            SUMMARY = SimpleNamespace(
+                transferred_files=2,
+                transferred_bytes=2048,
+                deleted_files=3,
+                total_files=3,
+                skipped_files=1,
+                error_files=0,
+            )
+
+            with patch("app.main.load_manifest", return_value={"/a": {"etag": "1"}}):
+                with patch("app.main.perform_incremental_sync", return_value=(SUMMARY, {"/a": {"etag": "1"}})):
+                    with patch("app.main.save_manifest"):
+                        with patch("app.main.notify") as NOTIFY:
+                            with patch("app.main.log_line"):
+                                run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE, "scheduled")
+
+            self.assertEqual(NOTIFY.call_count, 2)
+            self.assertIn("Transferred: 2/3", NOTIFY.call_args_list[1].args[1])
+            self.assertIn("Deleted: 3", NOTIFY.call_args_list[1].args[1])
+            self.assertIn("Skipped: 1", NOTIFY.call_args_list[1].args[1])
 
 # --------------------------------------------------------------------------
 # This test confirms two-day reauth reminder sends a required action prompt.

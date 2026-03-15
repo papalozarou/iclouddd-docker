@@ -288,6 +288,7 @@ def run_backup(
     STATUS_LINES.extend(
         [
             f"Transferred: {SUMMARY.transferred_files}/{SUMMARY.total_files}",
+            f"Deleted: {max(int(getattr(SUMMARY, 'deleted_files', 0)), 0)}",
             f"Skipped: {SUMMARY.skipped_files}",
             f"Errors: {SUMMARY.error_files}",
             f"Duration: {DEPS.format_duration_fn(DURATION_SECONDS)}",

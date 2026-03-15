@@ -27,8 +27,8 @@ from app.main import (
     run_backup,
     start_heartbeat_updater,
     update_heartbeat,
-    wait_for_one_shot_auth,
 )
+from app.worker_runtime import wait_for_one_shot_auth
 from app.state import AuthState
 from app.telegram_bot import CommandEvent, TelegramConfig
 
@@ -159,11 +159,16 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             TELEGRAM = TelegramConfig("token", "12345")
 
             RESULT_STATE, RESULT_AUTH = wait_for_one_shot_auth(
-                CONFIG,
+                SimpleNamespace(CONFIG=CONFIG, TELEGRAM=TELEGRAM),
                 Mock(),
                 STATE,
                 True,
-                TELEGRAM,
+                SimpleNamespace(
+                    process_commands_fn=Mock(),
+                    handle_command_fn=Mock(),
+                    time_fn=lambda: 0,
+                    sleep_fn=Mock(),
+                ),
             )
 
         self.assertEqual(RESULT_STATE, STATE)
@@ -707,7 +712,7 @@ class TestMainEntrypoint(unittest.TestCase):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, False, "fail")):
                                             with patch(
-                                                "app.main.wait_for_one_shot_auth",
+                                                "app.worker_runtime.wait_for_one_shot_auth",
                                                 return_value=(STATE, False),
                                             ):
                                                 with patch("app.main.notify") as NOTIFY:
@@ -737,7 +742,7 @@ class TestMainEntrypoint(unittest.TestCase):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
                                             with patch(
-                                                "app.main.wait_for_one_shot_auth",
+                                                "app.worker_runtime.wait_for_one_shot_auth",
                                                 return_value=(STATE, True),
                                             ):
                                                 RESULT = __import__("app.main", fromlist=["main"]).main()
@@ -760,7 +765,16 @@ class TestMainEntrypoint(unittest.TestCase):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
-                                            with patch("app.main.enforce_safety_net", return_value=False):
+                                            with patch(
+                                                "app.worker_runtime.run_one_shot_worker",
+                                                return_value=SimpleNamespace(
+                                                    exit_code=4,
+                                                    stop_status=(
+                                                        "One-shot backup blocked by safety "
+                                                        "net."
+                                                    ),
+                                                ),
+                                            ):
                                                 RESULT = __import__("app.main", fromlist=["main"]).main()
 
             self.assertEqual(RESULT, 4)
@@ -781,13 +795,18 @@ class TestMainEntrypoint(unittest.TestCase):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
-                                            with patch("app.main.enforce_safety_net", return_value=True):
+                                            with patch("app.worker_runtime.run_one_shot_worker") as RUN_ONE_SHOT:
+                                                RUN_ONE_SHOT.return_value = SimpleNamespace(
+                                                    exit_code=0,
+                                                    stop_status="Run completed and container exited.",
+                                                )
                                                 with patch("app.main.run_backup") as RUN_BACKUP:
                                                     with patch("app.main.notify") as NOTIFY:
                                                         RESULT = __import__("app.main", fromlist=["main"]).main()
 
             self.assertEqual(RESULT, 0)
-            RUN_BACKUP.assert_called_once()
+            RUN_ONE_SHOT.assert_called_once()
+            RUN_BACKUP.assert_not_called()
             self.assertGreaterEqual(NOTIFY.call_count, 2)
             self.assertIn("*🟢 PCD Drive - Container started*", NOTIFY.call_args_list[0].args[1])
             self.assertIn("Worker started for Apple ID alice@example.com.", NOTIFY.call_args_list[0].args[1])
@@ -812,11 +831,17 @@ class TestMainEntrypoint(unittest.TestCase):
                                     with patch("app.main.load_auth_state", return_value=INITIAL_STATE):
                                         with patch("app.main.attempt_auth", return_value=(INITIAL_STATE, False, "mfa")):
                                             with patch(
-                                                "app.main.wait_for_one_shot_auth",
+                                                "app.worker_runtime.wait_for_one_shot_auth",
                                                 return_value=(READY_STATE, True),
                                             ) as WAIT_AUTH:
-                                                with patch("app.main.enforce_safety_net", return_value=True):
-                                                    with patch("app.main.run_backup") as RUN_BACKUP:
+                                                with patch("app.main.run_backup") as RUN_BACKUP:
+                                                    with patch(
+                                                        "app.worker_runtime.run_one_shot_worker",
+                                                        wraps=__import__(
+                                                            "app.worker_runtime",
+                                                            fromlist=["run_one_shot_worker"],
+                                                        ).run_one_shot_worker,
+                                                    ):
                                                         RESULT = __import__("app.main", fromlist=["main"]).main()
 
             self.assertEqual(RESULT, 0)
@@ -839,7 +864,10 @@ class TestMainEntrypoint(unittest.TestCase):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, False, "mfa")):
-                                            with patch("app.main.wait_for_one_shot_auth", return_value=(STATE, False)):
+                                            with patch(
+                                                "app.worker_runtime.wait_for_one_shot_auth",
+                                                return_value=(STATE, False),
+                                            ):
                                                 with patch("app.main.notify"):
                                                     with patch("app.main.log_line") as LOG_LINE:
                                                         __import__("app.main", fromlist=["main"]).main()
@@ -867,10 +895,19 @@ class TestMainEntrypoint(unittest.TestCase):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
                                             with patch("app.main.get_next_run_epoch", return_value=200):
-                                                with patch("app.main.time.time", side_effect=[100, 100]):
-                                                    with patch("app.main.process_reauth_reminders", return_value=STATE):
+                                                with patch(
+                                                    "app.worker_runtime.time.time",
+                                                    side_effect=[100, 100],
+                                                ):
+                                                    with patch(
+                                                        "app.main.process_reauth_reminders",
+                                                        return_value=STATE,
+                                                    ):
                                                         with patch("app.main.process_commands", return_value=([], None)):
-                                                            with patch("app.main.time.sleep", side_effect=SystemExit):
+                                                            with patch(
+                                                                "app.worker_runtime.time.sleep",
+                                                                side_effect=SystemExit,
+                                                            ):
                                                                 with self.assertRaises(SystemExit):
                                                                     __import__("app.main", fromlist=["main"]).main()
 
@@ -890,11 +927,14 @@ class TestMainEntrypoint(unittest.TestCase):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, False, "fail")):
-                                            with patch("app.main.time.time", side_effect=[100, 100]):
+                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100]):
                                                 with patch("app.main.process_reauth_reminders", return_value=STATE):
                                                     with patch("app.main.process_commands", return_value=([], None)):
                                                         with patch("app.main.get_next_run_epoch", return_value=160):
-                                                            with patch("app.main.time.sleep", side_effect=SystemExit):
+                                                            with patch(
+                                                                "app.worker_runtime.time.sleep",
+                                                                side_effect=SystemExit,
+                                                            ):
                                                                 with self.assertRaises(SystemExit):
                                                                     __import__("app.main", fromlist=["main"]).main()
 
@@ -914,11 +954,14 @@ class TestMainEntrypoint(unittest.TestCase):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
-                                            with patch("app.main.time.time", side_effect=[100, 100]):
+                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100]):
                                                 with patch("app.main.process_reauth_reminders", return_value=STATE):
                                                     with patch("app.main.process_commands", return_value=([], None)):
                                                         with patch("app.main.get_next_run_epoch", return_value=160):
-                                                            with patch("app.main.time.sleep", side_effect=SystemExit):
+                                                            with patch(
+                                                                "app.worker_runtime.time.sleep",
+                                                                side_effect=SystemExit,
+                                                            ):
                                                                 with self.assertRaises(SystemExit):
                                                                     __import__("app.main", fromlist=["main"]).main()
 
@@ -938,12 +981,15 @@ class TestMainEntrypoint(unittest.TestCase):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
-                                            with patch("app.main.time.time", side_effect=[100, 100]):
+                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100]):
                                                 with patch("app.main.process_reauth_reminders", return_value=STATE):
                                                     with patch("app.main.process_commands", return_value=([], None)):
                                                         with patch("app.main.get_next_run_epoch", return_value=160):
                                                             with patch("app.main.enforce_safety_net", return_value=False):
-                                                                with patch("app.main.time.sleep", side_effect=SystemExit):
+                                                                with patch(
+                                                                    "app.worker_runtime.time.sleep",
+                                                                    side_effect=SystemExit,
+                                                                ):
                                                                     with self.assertRaises(SystemExit):
                                                                         __import__("app.main", fromlist=["main"]).main()
 
@@ -963,13 +1009,16 @@ class TestMainEntrypoint(unittest.TestCase):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
-                                            with patch("app.main.time.time", side_effect=[100, 100]):
+                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100]):
                                                 with patch("app.main.process_reauth_reminders", return_value=STATE):
                                                     with patch("app.main.process_commands", return_value=([], None)):
                                                         with patch("app.main.get_next_run_epoch", return_value=160):
                                                             with patch("app.main.enforce_safety_net", return_value=True):
                                                                 with patch("app.main.run_backup") as RUN_BACKUP:
-                                                                    with patch("app.main.time.sleep", side_effect=SystemExit):
+                                                                    with patch(
+                                                                        "app.worker_runtime.time.sleep",
+                                                                        side_effect=SystemExit,
+                                                                    ):
                                                                         with self.assertRaises(SystemExit):
                                                                             __import__("app.main", fromlist=["main"]).main()
 

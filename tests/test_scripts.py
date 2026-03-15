@@ -27,6 +27,7 @@ class TestScripts(unittest.TestCase):
     def test_scripts_have_valid_shell_syntax(self) -> None:
         REPO_ROOT = get_repo_root()
         SCRIPT_PATHS = [
+            REPO_ROOT / "check-traversal-workers.sh",
             REPO_ROOT / "scripts" / "entrypoint.sh",
             REPO_ROOT / "scripts" / "start.sh",
             REPO_ROOT / "scripts" / "healthcheck.sh",
@@ -105,6 +106,64 @@ class TestScripts(unittest.TestCase):
             )
 
             self.assertNotEqual(RESULT.returncode, 0)
+
+# --------------------------------------------------------------------------
+# This test confirms traversal-worker helper bounds output to the supported
+# maximum when CPU count exceeds the configured cap.
+# --------------------------------------------------------------------------
+    def test_check_traversal_workers_caps_recommendation_at_eight(self) -> None:
+        REPO_ROOT = get_repo_root()
+        SCRIPT_PATH = REPO_ROOT / "check-traversal-workers.sh"
+
+        RESULT = subprocess.run(
+            ["sh", str(SCRIPT_PATH), "12"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(RESULT.returncode, 0, msg=RESULT.stderr)
+        self.assertEqual(
+            RESULT.stdout,
+            "Detected CPU count: 12\nRecommended SYNC_TRAVERSAL_WORKERS=8\n",
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms traversal-worker helper preserves valid in-range input.
+# --------------------------------------------------------------------------
+    def test_check_traversal_workers_uses_in_range_override(self) -> None:
+        REPO_ROOT = get_repo_root()
+        SCRIPT_PATH = REPO_ROOT / "check-traversal-workers.sh"
+
+        RESULT = subprocess.run(
+            ["sh", str(SCRIPT_PATH), "4"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(RESULT.returncode, 0, msg=RESULT.stderr)
+        self.assertEqual(
+            RESULT.stdout,
+            "Detected CPU count: 4\nRecommended SYNC_TRAVERSAL_WORKERS=4\n",
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms traversal-worker helper rejects non-numeric overrides.
+# --------------------------------------------------------------------------
+    def test_check_traversal_workers_rejects_invalid_override(self) -> None:
+        REPO_ROOT = get_repo_root()
+        SCRIPT_PATH = REPO_ROOT / "check-traversal-workers.sh"
+
+        RESULT = subprocess.run(
+            ["sh", str(SCRIPT_PATH), "abc"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertNotEqual(RESULT.returncode, 0)
+        self.assertEqual(RESULT.stderr, "CPU count must be a positive integer.\n")
 
 
 if __name__ == "__main__":

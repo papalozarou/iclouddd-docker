@@ -55,7 +55,7 @@ jobs:
       # Upload the XML report so coverage output remains available after runs.
       # ------------------------------------------------------------------------
       - name: Upload coverage artefact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage.xml

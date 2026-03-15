@@ -22,12 +22,14 @@ It started as an experiment to see whether Claude Code or Codex produced better 
 
 ## Example usage
 
-The example `compose.yml` and `.env` files run two isolated containers out of the box, Alice and Bob, each with separate config, output, and logs. These examples give you a flavour of what PyiCloDoc Drive can do, and enough information to configure it to your needs. Complete documentation is linked at the end of this README.
+The example Compose and `.env` files run two isolated containers out of the box, Alice and Bob, each with separate config, output, and logs. These examples give you a flavour of what PyiCloDoc Drive can do, and enough information to configure it to your needs. Complete documentation is linked at the end of this README.
 
 ### Quick start
 
-1. Copy `compose.yml.example` to `compose.yml`.
-2. Copy `.env.example` to `.env`.
+1. Copy `.env.example` to `.env`.
+2. Choose one Compose example:
+   - normal released-image use: copy `compose.yml.example` to `compose.yml`
+   - local source build use: copy `compose.build.yml.example` to `compose.yml`
 3. Set host and service values in `.env`.
 4. Create secret files under `${H_DKR_SECRETS}` (default
    `/var/lib/docker/secrets`):
@@ -35,6 +37,12 @@ The example `compose.yml` and `.env` files run two isolated containers out of th
    `alice_icloud_password.txt`, `bob_icloud_email.txt`,
    `bob_icloud_password.txt`.
 5. Start containers:
+
+```bash
+docker compose up -d
+```
+
+If you chose `compose.build.yml.example`, build locally instead:
 
 ```bash
 docker compose up -d --build

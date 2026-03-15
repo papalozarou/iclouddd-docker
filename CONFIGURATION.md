@@ -15,7 +15,8 @@ which values you can mostly leave alone.
 ## Service environment variables
 
 These are the env names used under `services.*.environment` in
-[compose.yml.example](compose.yml.example).
+[compose.yml.example](compose.yml.example) and
+[compose.build.yml.example](compose.build.yml.example).
 
 | Variable name | Possible values | `.env.example` |
 | --- | --- | --- |
@@ -101,8 +102,8 @@ These are usually left as-is unless you have a specific reason to change them.
 
 ## Build variables
 
-- `IMG_NAME`: image repository/name used for service image tags, with
-  `:alpine-${ALP_VER}` appended in Compose.
+- `IMG_NAME`: image repository/name used by both Compose examples.
+- `IMG_TAG`: published release tag used by `compose.yml.example`.
 - `ALP_VER`: Alpine base image version used during Docker build.
 - `MCK_VER`: Microcheck image version used during Docker build.
 

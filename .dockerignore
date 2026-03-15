@@ -60,6 +60,7 @@ node_modules/
 # Runtime and compose files.
 # ------------------------------------------------------------------------------
 compose.yml
+compose.build.yml
 config/
 data/
 docker-compose.yml

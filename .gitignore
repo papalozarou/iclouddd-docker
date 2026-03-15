@@ -69,6 +69,7 @@ node_modules/
 *.sqlite3
 *.tmp
 compose.yml
+compose.build.yml
 config/
 docker-compose.yml
 logs/

@@ -1,9 +1,9 @@
 # ------------------------------------------------------------------------------
-# This Compose example defines two isolated PyiCloDoc Drive workers using the
-# published container image.
+# This Compose example defines two isolated PyiCloDoc Drive workers built from
+# local source.
 #
 # The file demonstrates service-level separation, secret-file wiring,
-# release-image usage, and host/container environment variable mapping via
+# build-from-source usage, and host/container environment variable mapping via
 # ".env.example".
 # ------------------------------------------------------------------------------
 name: pyiclodoc-drive
@@ -70,13 +70,19 @@ services:
 # ------------------------------------------------------------------------------
 # Service "icloud_drive_alice" runs the worker with isolated Alice state
 # paths.
-# 
-# This service reads Alice-specific env values from ".env.example", pulls the
-# published image tag, and stores runtime state under "${ALICE_*}" host paths.
+#
+# This service reads Alice-specific env values from ".env.example", builds the
+# image locally from the checked-out source tree, and stores runtime state under
+# "${ALICE_*}" host paths.
 # ------------------------------------------------------------------------------
   icloud_drive_alice:
-    image: "${IMG_NAME}:${IMG_TAG}"
+    image: "${IMG_NAME}:local"
     container_name: icloud_alice
+    build:
+      context: .
+      args:
+        ALP_VER: "${ALP_VER}"
+        MCK_VER: "${MCK_VER}"
     init: true
     secrets:
       - telegram_bot_token
@@ -109,13 +115,18 @@ services:
 
 # ------------------------------------------------------------------------------
 # Service "icloud_drive_bob" runs the worker with isolated Bob state paths.
-# 
+#
 # This service mirrors the Alice example so the project can run more than one
-# isolated worker in the same Compose project from the same published release.
+# isolated worker in the same Compose project from the same local build.
 # ------------------------------------------------------------------------------
   icloud_drive_bob:
-    image: "${IMG_NAME}:${IMG_TAG}"
+    image: "${IMG_NAME}:local"
     container_name: icloud_bob
+    build:
+      context: .
+      args:
+        ALP_VER: "${ALP_VER}"
+        MCK_VER: "${MCK_VER}"
     init: true
     secrets:
       - telegram_bot_token

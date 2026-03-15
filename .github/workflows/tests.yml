@@ -23,7 +23,7 @@ jobs:
       # Fetch the repository contents for test execution.
       # ------------------------------------------------------------------------
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # ------------------------------------------------------------------------
       # Install the supported Python runtime for the worker and tests.

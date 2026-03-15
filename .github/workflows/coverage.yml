@@ -2,7 +2,9 @@
 # This workflow runs the full test suite with coverage reporting.
 #
 # Coverage runs separately from the main test workflow so ordinary push and pull
-# request feedback stays simple while coverage policy remains explicit.
+# request feedback stays simple while coverage policy remains explicit. The test
+# suite uses local stubs for optional runtime dependencies, so CI installs only
+# the coverage tool itself.
 # ------------------------------------------------------------------------------
 
 name: Coverage
@@ -34,12 +36,12 @@ jobs:
           python-version: "3.12"
 
       # ------------------------------------------------------------------------
-      # Install runtime and coverage dependencies used by the workflow.
+      # Install the coverage tool used by the workflow.
       # ------------------------------------------------------------------------
       - name: Install dependencies
         run: |
           set -eu
-          python3 -m pip install -r requirements.txt coverage
+          python3 -m pip install coverage
 
       # ------------------------------------------------------------------------
       # Run the full test suite and enforce the current coverage floor.

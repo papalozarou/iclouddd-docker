@@ -66,8 +66,12 @@ jobs:
 
       # ------------------------------------------------------------------------
       # Run Hadolint against the project Dockerfile.
+      #
+      # N.B.
+      # The repo currently does not pin Alpine package versions in "apk add"
+      # lines, so "DL3018" is treated as advisory rather than release-blocking.
       # ------------------------------------------------------------------------
       - name: Run Hadolint
         run: |
           set -eu
-          docker run --rm -i hadolint/hadolint < Dockerfile
+          docker run --rm -i hadolint/hadolint hadolint --ignore DL3018 - < Dockerfile

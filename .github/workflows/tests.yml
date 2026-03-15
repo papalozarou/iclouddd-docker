@@ -1,8 +1,9 @@
 # ------------------------------------------------------------------------------
 # This workflow runs the unit test suite for pushes and pull requests.
 #
-# The workflow keeps CI simple on purpose: install runtime requirements, then
-# run the existing unittest entrypoint in a clean runner environment.
+# The unit suite uses repository-local test stubs for optional runtime
+# dependencies, so CI does not need to install the full runtime requirement set
+# before executing "unittest".
 # ------------------------------------------------------------------------------
 
 name: Tests
@@ -32,12 +33,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      # ------------------------------------------------------------------------
-      # Install runtime dependencies used by the worker modules.
-      # ------------------------------------------------------------------------
-      - name: Install dependencies
-        run: python3 -m pip install -r requirements.txt
 
       # ------------------------------------------------------------------------
       # Run the full unittest suite exactly as used in local verification.

@@ -108,10 +108,10 @@ class TestScripts(unittest.TestCase):
             self.assertNotEqual(RESULT.returncode, 0)
 
 # --------------------------------------------------------------------------
-# This test confirms traversal-worker helper bounds output to the supported
-# recommendation policy when CPU count exceeds the configured cap.
+# This test confirms traversal-worker helper caps recommendations at the
+# highest supported traversal-worker tier.
 # --------------------------------------------------------------------------
-    def test_check_traversal_workers_caps_recommendation_at_eight(self) -> None:
+    def test_check_traversal_workers_caps_recommendation_at_four(self) -> None:
         REPO_ROOT = get_repo_root()
         SCRIPT_PATH = REPO_ROOT / "check-traversal-workers.sh"
 
@@ -126,6 +126,27 @@ class TestScripts(unittest.TestCase):
         self.assertEqual(
             RESULT.stdout,
             "Detected CPU count: 12\nRecommended SYNC_TRAVERSAL_WORKERS=4\n",
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms traversal-worker helper moves to the four-worker tier
+# at the first capped boundary.
+# --------------------------------------------------------------------------
+    def test_check_traversal_workers_uses_four_worker_boundary_at_seven_cpu(self) -> None:
+        REPO_ROOT = get_repo_root()
+        SCRIPT_PATH = REPO_ROOT / "check-traversal-workers.sh"
+
+        RESULT = subprocess.run(
+            ["sh", str(SCRIPT_PATH), "7"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(RESULT.returncode, 0, msg=RESULT.stderr)
+        self.assertEqual(
+            RESULT.stdout,
+            "Detected CPU count: 7\nRecommended SYNC_TRAVERSAL_WORKERS=4\n",
         )
 
 # --------------------------------------------------------------------------

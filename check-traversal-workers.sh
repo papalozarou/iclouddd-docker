@@ -23,7 +23,7 @@ getCpuCount() {
 
   if [ -n "$RAW_COUNT" ]; then
     case "$RAW_COUNT" in
-      ''|*[!0-9]*)
+      *[!0-9]*)
         echo "CPU count must be a positive integer." >&2
         exit 1
         ;;

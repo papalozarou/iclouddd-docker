@@ -61,8 +61,6 @@ the service-environment table above.
 
 ## Host variables (`H_`)
 
-Start here first.
-
 - `H_UID`: host user ID mapped into containers.
 - `H_GID`: host group ID mapped into containers.
 - `H_TZ`: timezone for worker behaviour and schedule calculations.

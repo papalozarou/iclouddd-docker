@@ -6,12 +6,91 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib import metadata as importlib_metadata
+from pathlib import Path
 import os
 import time
-from typing import Callable
-
-from app.syncer import get_transfer_worker_count, perform_incremental_sync
+from typing import Any, Protocol
+from app.config import AppConfig
+from app.icloud_client import ICloudDriveClient
+from app.syncer import SyncResult, get_transfer_worker_count, perform_incremental_sync
+from app.telegram_bot import TelegramConfig
 from app.telegram_messages import build_backup_complete_message, build_backup_started_message
+
+ManifestDict = dict[str, dict[str, Any]]
+BuildDetail = dict[str, str]
+
+
+# ------------------------------------------------------------------------------
+# This protocol loads manifest state from disk for backup execution.
+# ------------------------------------------------------------------------------
+class LoadManifestFn(Protocol):
+    def __call__(self, PATH: Path) -> ManifestDict:
+        ...
+
+
+# ------------------------------------------------------------------------------
+# This protocol saves manifest state to disk after a successful run.
+# ------------------------------------------------------------------------------
+class SaveManifestFn(Protocol):
+    def __call__(self, PATH: Path, MANIFEST: ManifestDict) -> None:
+        ...
+
+
+# ------------------------------------------------------------------------------
+# This protocol writes worker log lines during backup execution.
+# ------------------------------------------------------------------------------
+class LogLineFn(Protocol):
+    def __call__(self, PATH: Path, LEVEL: str, MESSAGE: str) -> None:
+        ...
+
+
+# ------------------------------------------------------------------------------
+# This protocol sends operator notifications through Telegram.
+# ------------------------------------------------------------------------------
+class NotifyFn(Protocol):
+    def __call__(self, TELEGRAM: TelegramConfig, MESSAGE: str) -> None:
+        ...
+
+
+# ------------------------------------------------------------------------------
+# This protocol returns runtime build metadata for diagnostics logging.
+# ------------------------------------------------------------------------------
+class GetBuildDetailFn(Protocol):
+    def __call__(self) -> BuildDetail:
+        ...
+
+
+# ------------------------------------------------------------------------------
+# This protocol formats elapsed duration for completion reporting.
+# ------------------------------------------------------------------------------
+class FormatDurationFn(Protocol):
+    def __call__(self, TOTAL_SECONDS: int) -> str:
+        ...
+
+
+# ------------------------------------------------------------------------------
+# This protocol formats transfer speed for completion reporting.
+# ------------------------------------------------------------------------------
+class FormatSpeedFn(Protocol):
+    def __call__(self, TRANSFERRED_BYTES: int, DURATION_SECONDS: int) -> str:
+        ...
+
+
+# ------------------------------------------------------------------------------
+# This protocol performs the incremental sync and returns summary plus manifest.
+# ------------------------------------------------------------------------------
+class PerformSyncFn(Protocol):
+    def __call__(
+        self,
+        CLIENT: ICloudDriveClient,
+        OUTPUT_DIR: Path,
+        MANIFEST: ManifestDict,
+        SYNC_WORKERS: int,
+        LOG_FILE: Path,
+        *,
+        BACKUP_DELETE_REMOVED: bool,
+    ) -> tuple[SyncResult, ManifestDict]:
+        ...
 
 
 # ------------------------------------------------------------------------------
@@ -68,14 +147,14 @@ def get_build_detail() -> dict[str, str]:
 # ------------------------------------------------------------------------------
 @dataclass(frozen=True)
 class BackupRuntimeDeps:
-    load_manifest_fn: Callable
-    save_manifest_fn: Callable
-    log_line_fn: Callable
-    notify_fn: Callable
-    get_build_detail_fn: Callable[[], dict[str, str]] = get_build_detail
-    format_duration_fn: Callable[[int], str] = format_duration_clock
-    format_speed_fn: Callable[[int, int], str] = format_average_speed
-    perform_sync_fn: Callable = perform_incremental_sync
+    load_manifest_fn: LoadManifestFn
+    save_manifest_fn: SaveManifestFn
+    log_line_fn: LogLineFn
+    notify_fn: NotifyFn
+    get_build_detail_fn: GetBuildDetailFn = get_build_detail
+    format_duration_fn: FormatDurationFn = format_duration_clock
+    format_speed_fn: FormatSpeedFn = format_average_speed
+    perform_sync_fn: PerformSyncFn = perform_incremental_sync
 
 
 # ------------------------------------------------------------------------------
@@ -89,10 +168,10 @@ class BackupRuntimeDeps:
 # Returns: None.
 # ------------------------------------------------------------------------------
 def log_effective_backup_settings(
-    CONFIG,
-    LOG_FILE,
-    LOG_LINE_FN,
-    GET_BUILD_DETAIL_FN=get_build_detail,
+    CONFIG: AppConfig,
+    LOG_FILE: Path,
+    LOG_LINE_FN: LogLineFn,
+    GET_BUILD_DETAIL_FN: GetBuildDetailFn = get_build_detail,
 ) -> None:
     SYNC_WORKERS_LABEL = "auto" if CONFIG.sync_workers == 0 else str(CONFIG.sync_workers)
     EFFECTIVE_WORKERS = get_transfer_worker_count(CONFIG.sync_workers)
@@ -136,10 +215,10 @@ def log_effective_backup_settings(
 # Returns: None.
 # ------------------------------------------------------------------------------
 def run_backup(
-    CLIENT,
-    CONFIG,
-    TELEGRAM,
-    LOG_FILE,
+    CLIENT: ICloudDriveClient,
+    CONFIG: AppConfig,
+    TELEGRAM: TelegramConfig,
+    LOG_FILE: Path,
     APPLE_ID_LABEL: str,
     SCHEDULE_LINE: str,
     DEPS: BackupRuntimeDeps,

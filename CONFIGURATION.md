@@ -101,7 +101,8 @@ These are usually left as-is unless you have a specific reason to change them.
 ## Build variables
 
 - `IMG_NAME`: image repository/name used by both Compose examples.
-- `IMG_TAG`: published release tag used by `compose.yml.example`.
+- `IMG_TAG`: published image tag used by `compose.yml.example`, for example
+  `latest`.
 - `ALP_VER`: Alpine base image version used during Docker build.
 - `MCK_VER`: Microcheck image version used during Docker build.
 

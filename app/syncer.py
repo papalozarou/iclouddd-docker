@@ -158,7 +158,6 @@ def collect_local_files(OUTPUT_DIR: Path, SAMPLE_SIZE: int) -> list[Path]:
 
 
 # ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
 # This function returns sampled files with non-matching ownership.
 #
 # 1. "FILES" is the sampled file list.

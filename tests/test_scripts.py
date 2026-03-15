@@ -165,6 +165,111 @@ class TestScripts(unittest.TestCase):
         self.assertNotEqual(RESULT.returncode, 0)
         self.assertEqual(RESULT.stderr, "CPU count must be a positive integer.\n")
 
+# --------------------------------------------------------------------------
+# This test confirms traversal-worker helper prefers Linux "nproc" output
+# when it is available.
+# --------------------------------------------------------------------------
+    def test_check_traversal_workers_prefers_nproc_detection(self) -> None:
+        REPO_ROOT = get_repo_root()
+        SCRIPT_PATH = REPO_ROOT / "check-traversal-workers.sh"
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            BIN_DIR = Path(TMPDIR) / "bin"
+            BIN_DIR.mkdir(parents=True, exist_ok=True)
+            NPROC_PATH = BIN_DIR / "nproc"
+            NPROC_PATH.write_text("#!/bin/sh\nprintf '6\\n'\n", encoding="utf-8")
+            NPROC_PATH.chmod(NPROC_PATH.stat().st_mode | stat.S_IXUSR)
+
+            ENV = os.environ.copy()
+            ENV["PATH"] = f"{BIN_DIR}{os.pathsep}{ENV.get('PATH', '')}"
+
+            RESULT = subprocess.run(
+                ["/bin/sh", str(SCRIPT_PATH)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=ENV,
+            )
+
+        self.assertEqual(RESULT.returncode, 0, msg=RESULT.stderr)
+        self.assertEqual(
+            RESULT.stdout,
+            "Detected CPU count: 6\nRecommended SYNC_TRAVERSAL_WORKERS=6\n",
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms traversal-worker helper falls back to "getconf" when
+# "nproc" is unavailable.
+# --------------------------------------------------------------------------
+    def test_check_traversal_workers_falls_back_to_getconf(self) -> None:
+        REPO_ROOT = get_repo_root()
+        SCRIPT_PATH = REPO_ROOT / "check-traversal-workers.sh"
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            BIN_DIR = Path(TMPDIR) / "bin"
+            BIN_DIR.mkdir(parents=True, exist_ok=True)
+            GETCONF_PATH = BIN_DIR / "getconf"
+            GETCONF_PATH.write_text("#!/bin/sh\nprintf '2\\n'\n", encoding="utf-8")
+            GETCONF_PATH.chmod(GETCONF_PATH.stat().st_mode | stat.S_IXUSR)
+
+            ENV = {"PATH": f"{BIN_DIR}{os.pathsep}/usr/bin{os.pathsep}/bin"}
+
+            RESULT = subprocess.run(
+                ["/bin/sh", str(SCRIPT_PATH)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=ENV,
+            )
+
+        self.assertEqual(RESULT.returncode, 0, msg=RESULT.stderr)
+        self.assertEqual(
+            RESULT.stdout,
+            "Detected CPU count: 2\nRecommended SYNC_TRAVERSAL_WORKERS=2\n",
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms traversal-worker helper falls back to "/proc/cpuinfo"
+# style parsing when command-based detection is unavailable.
+# --------------------------------------------------------------------------
+    def test_check_traversal_workers_falls_back_to_proc_cpuinfo(self) -> None:
+        REPO_ROOT = get_repo_root()
+        SCRIPT_PATH = REPO_ROOT / "check-traversal-workers.sh"
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            BIN_DIR = Path(TMPDIR) / "bin"
+            BIN_DIR.mkdir(parents=True, exist_ok=True)
+            CPUINFO_PATH = Path(TMPDIR) / "cpuinfo"
+            NPROC_PATH = BIN_DIR / "nproc"
+            GETCONF_PATH = BIN_DIR / "getconf"
+            NPROC_PATH.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            GETCONF_PATH.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            NPROC_PATH.chmod(NPROC_PATH.stat().st_mode | stat.S_IXUSR)
+            GETCONF_PATH.chmod(GETCONF_PATH.stat().st_mode | stat.S_IXUSR)
+            CPUINFO_PATH.write_text(
+                "processor\t: 0\nprocessor\t: 1\nprocessor\t: 2\n",
+                encoding="utf-8",
+            )
+
+            ENV = {
+                "PATH": f"{BIN_DIR}{os.pathsep}/usr/bin{os.pathsep}/bin",
+                "PROC_CPUINFO_PATH": str(CPUINFO_PATH),
+            }
+
+            RESULT = subprocess.run(
+                ["/bin/sh", str(SCRIPT_PATH)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=ENV,
+            )
+
+        self.assertEqual(RESULT.returncode, 0, msg=RESULT.stderr)
+        self.assertEqual(
+            RESULT.stdout,
+            "Detected CPU count: 3\nRecommended SYNC_TRAVERSAL_WORKERS=3\n",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

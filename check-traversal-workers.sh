@@ -5,6 +5,8 @@
 
 set -eu
 
+PROC_CPUINFO_PATH="${PROC_CPUINFO_PATH:-/proc/cpuinfo}"
+
 # ------------------------------------------------------------------------------
 # This function reads CPU count from an optional argument or the host.
 #
@@ -36,23 +38,50 @@ getCpuCount() {
     return 0
   fi
 
-  if command -v getconf >/dev/null 2>&1; then
-    DETECTED_COUNT="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
-  else
-    DETECTED_COUNT=""
+  if command -v nproc >/dev/null 2>&1; then
+    DETECTED_COUNT="$(nproc 2>/dev/null || true)"
+    if isPositiveInteger "$DETECTED_COUNT"; then
+      printf '%s\n' "$DETECTED_COUNT"
+      return 0
+    fi
   fi
 
-  case "$DETECTED_COUNT" in
+  if command -v getconf >/dev/null 2>&1; then
+    DETECTED_COUNT="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+    if isPositiveInteger "$DETECTED_COUNT"; then
+      printf '%s\n' "$DETECTED_COUNT"
+      return 0
+    fi
+  fi
+
+  if [ -r "$PROC_CPUINFO_PATH" ]; then
+    DETECTED_COUNT="$(grep -c '^processor[[:space:]]*:' "$PROC_CPUINFO_PATH" 2>/dev/null || true)"
+    if isPositiveInteger "$DETECTED_COUNT"; then
+      printf '%s\n' "$DETECTED_COUNT"
+      return 0
+    fi
+  fi
+
+  printf '1\n'
+}
+
+# ------------------------------------------------------------------------------
+# This function checks whether a value is a positive integer.
+#
+# 1. "${1:-}" is the value to validate.
+#
+# Returns: Zero when the value is a positive integer; otherwise non-zero.
+# ------------------------------------------------------------------------------
+isPositiveInteger() {
+  VALUE="${1:-}"
+
+  case "$VALUE" in
     ''|*[!0-9]*)
-      DETECTED_COUNT=1
+      return 1
       ;;
   esac
 
-  if [ "$DETECTED_COUNT" -lt 1 ]; then
-    DETECTED_COUNT=1
-  fi
-
-  printf '%s\n' "$DETECTED_COUNT"
+  [ "$VALUE" -ge 1 ]
 }
 
 # ------------------------------------------------------------------------------

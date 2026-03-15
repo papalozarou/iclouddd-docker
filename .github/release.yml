@@ -1,0 +1,32 @@
+# ------------------------------------------------------------------------------
+# This configuration shapes GitHub-generated release notes.
+#
+# The repository already creates releases automatically from version tags. This
+# file improves the generated notes by grouping recognised change labels into
+# clearer sections.
+# ------------------------------------------------------------------------------
+
+changelog:
+  categories:
+    - title: "Features"
+      labels:
+        - "feature"
+        - "enhancement"
+
+    - title: "Fixes"
+      labels:
+        - "bug"
+        - "fix"
+
+    - title: "Documentation"
+      labels:
+        - "documentation"
+        - "docs"
+
+    - title: "Dependencies"
+      labels:
+        - "dependencies"
+
+  exclude:
+    labels:
+      - "skip-changelog"

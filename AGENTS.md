@@ -146,7 +146,8 @@ Examples:
 ## Language-specific rules
 - MUST: Language-specific rules override global naming rules when conflicts occur
 - MUST: For Python, use snake_case for functions and methods unless external interfaces require otherwise
-- MUST: For Python, use UPPER_SNAKE_CASE for variables, constants, and configuration identifiers
+- MUST: For Python, use snake_case for local variables and parameters unless external interfaces require otherwise
+- MUST: For Python, reserve UPPER_SNAKE_CASE for constants and configuration identifiers
 - MUST: For shell and Bash, use camelCase for function names following verbValue or verbObject patterns
 - MUST: For shell and Bash, use UPPER_SNAKE_CASE for variables
 - MUST: For shell and Bash, keep scripts POSIX-compliant unless Bash is explicitly required

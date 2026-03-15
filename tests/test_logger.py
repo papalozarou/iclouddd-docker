@@ -238,6 +238,92 @@ class TestLogger(unittest.TestCase):
             self.assertEqual(logger.get_log_rotate_keep_days(), 14)
 
 # --------------------------------------------------------------------------
+# This test confirms size-based rotation is disabled when the configured
+# threshold is non-positive.
+# --------------------------------------------------------------------------
+    def test_should_rotate_for_size_returns_false_for_non_positive_threshold(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            LOG_FILE.write_text("x", encoding="utf-8")
+
+            RESULT = logger.should_rotate_for_size(
+                LOG_FILE,
+                logger.LoggerConfig(
+                    level="info",
+                    rotate_max_bytes=0,
+                    rotate_daily=True,
+                    rotate_keep_days=14,
+                ),
+            )
+
+        self.assertFalse(RESULT)
+
+# --------------------------------------------------------------------------
+# This test confirms size-based rotation falls back safely when file stat
+# access fails.
+# --------------------------------------------------------------------------
+    def test_should_rotate_for_size_returns_false_when_stat_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            LOG_FILE.write_text("x", encoding="utf-8")
+
+            with patch.object(Path, "stat", side_effect=OSError("stat failed")):
+                RESULT = logger.should_rotate_for_size(
+                    LOG_FILE,
+                    logger.LoggerConfig(
+                        level="info",
+                        rotate_max_bytes=1,
+                        rotate_daily=True,
+                        rotate_keep_days=14,
+                    ),
+                )
+
+        self.assertFalse(RESULT)
+
+# --------------------------------------------------------------------------
+# This test confirms daily rollover returns false when the feature is
+# disabled in config.
+# --------------------------------------------------------------------------
+    def test_should_rotate_for_daily_rollover_returns_false_when_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            LOG_FILE.write_text("x", encoding="utf-8")
+
+            RESULT = logger.should_rotate_for_daily_rollover(
+                LOG_FILE,
+                logger.LoggerConfig(
+                    level="info",
+                    rotate_max_bytes=1,
+                    rotate_daily=False,
+                    rotate_keep_days=14,
+                ),
+            )
+
+        self.assertFalse(RESULT)
+
+# --------------------------------------------------------------------------
+# This test confirms daily rollover falls back safely when file stat access
+# fails.
+# --------------------------------------------------------------------------
+    def test_should_rotate_for_daily_rollover_returns_false_when_stat_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            LOG_FILE.write_text("x", encoding="utf-8")
+
+            with patch.object(Path, "stat", side_effect=OSError("stat failed")):
+                RESULT = logger.should_rotate_for_daily_rollover(
+                    LOG_FILE,
+                    logger.LoggerConfig(
+                        level="info",
+                        rotate_max_bytes=1,
+                        rotate_daily=True,
+                        rotate_keep_days=14,
+                    ),
+                )
+
+        self.assertFalse(RESULT)
+
+# --------------------------------------------------------------------------
 # This test confirms log_line rotates oversized logs, writes new entries,
 # and leaves a compressed archive.
 # --------------------------------------------------------------------------
@@ -270,6 +356,32 @@ class TestLogger(unittest.TestCase):
             self.assertEqual(len(ARCHIVES), 1)
             with gzip.open(ARCHIVES[0], "rt", encoding="utf-8") as HANDLE:
                 self.assertEqual(HANDLE.read().strip(), "old")
+
+# --------------------------------------------------------------------------
+# This test confirms rotation checks exit quietly when no rotation trigger
+# is active.
+# --------------------------------------------------------------------------
+    def test_rotate_log_if_needed_returns_when_rotation_not_required(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            LOG_FILE.write_text("old\n", encoding="utf-8")
+
+            with patch.object(logger, "should_rotate_for_size", return_value=False):
+                with patch.object(logger, "should_rotate_for_daily_rollover", return_value=False):
+                    with patch.object(logger, "rotate_log_file") as ROTATE:
+                        with patch.object(logger, "prune_rotated_logs") as PRUNE:
+                            logger.rotate_log_if_needed(
+                                LOG_FILE,
+                                logger.LoggerConfig(
+                                    level="info",
+                                    rotate_max_bytes=100,
+                                    rotate_daily=True,
+                                    rotate_keep_days=14,
+                                ),
+                            )
+
+            ROTATE.assert_not_called()
+            PRUNE.assert_not_called()
 
 # --------------------------------------------------------------------------
 # This test confirms daily rollover rotates logs from a previous local date.
@@ -331,6 +443,75 @@ class TestLogger(unittest.TestCase):
             self.assertEqual(list(Path(TMPDIR).glob("pyiclodoc-drive-worker.*.log.gz")), [])
 
 # --------------------------------------------------------------------------
+# This test confirms compression-failure cleanup tolerates unlink failure
+# for the rotated raw file.
+# --------------------------------------------------------------------------
+    def test_rotate_log_file_tolerates_unlink_failure_during_failed_compression(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            LOG_FILE.write_text("old\n", encoding="utf-8")
+
+            ORIGINAL_UNLINK = Path.unlink
+
+            def unlink_side_effect(PATH_OBJ: Path) -> None:
+                if PATH_OBJ.suffix == ".log":
+                    raise OSError("unlink failed")
+                return ORIGINAL_UNLINK(PATH_OBJ)
+
+            with patch.object(
+                logger,
+                "now_local",
+                return_value=datetime(2026, 3, 9, 10, 0, 0, tzinfo=timezone.utc),
+            ):
+                with patch.object(logger.gzip, "open", side_effect=OSError("gzip failed")):
+                    with patch.object(Path, "unlink", autospec=True, side_effect=unlink_side_effect):
+                        logger.rotate_log_file(LOG_FILE)
+
+            self.assertFalse(LOG_FILE.exists())
+
+# --------------------------------------------------------------------------
+# This test confirms failed log-file replacement exits quietly without
+# creating rotated artefacts.
+# --------------------------------------------------------------------------
+    def test_rotate_log_file_returns_when_replace_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            LOG_FILE.write_text("old\n", encoding="utf-8")
+
+            with patch.object(Path, "replace", side_effect=OSError("replace failed")):
+                logger.rotate_log_file(LOG_FILE)
+
+            self.assertTrue(LOG_FILE.exists())
+            self.assertEqual(list(Path(TMPDIR).glob("pyiclodoc-drive-worker.*.log.gz")), [])
+
+# --------------------------------------------------------------------------
+# This test confirms cleanup tolerates unlink failure for the rotated raw
+# file after compression succeeds.
+# --------------------------------------------------------------------------
+    def test_rotate_log_file_tolerates_rotated_unlink_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            LOG_FILE.write_text("old\n", encoding="utf-8")
+
+            ORIGINAL_UNLINK = Path.unlink
+
+            def unlink_side_effect(PATH_OBJ: Path) -> None:
+                if PATH_OBJ.suffix == ".log":
+                    raise OSError("unlink failed")
+                return ORIGINAL_UNLINK(PATH_OBJ)
+
+            with patch.object(
+                logger,
+                "now_local",
+                return_value=datetime(2026, 3, 9, 10, 0, 0, tzinfo=timezone.utc),
+            ):
+                with patch.object(Path, "unlink", autospec=True, side_effect=unlink_side_effect):
+                    logger.rotate_log_file(LOG_FILE)
+
+            self.assertEqual(len(list(Path(TMPDIR).glob("pyiclodoc-drive-worker.*.log.gz"))), 1)
+            self.assertEqual(len(list(Path(TMPDIR).glob("pyiclodoc-drive-worker.*.log"))), 1)
+
+# --------------------------------------------------------------------------
 # This test confirms old rotated archives are removed by retention policy.
 # --------------------------------------------------------------------------
     def test_prune_rotated_logs_removes_expired_archives(self) -> None:
@@ -353,6 +534,81 @@ class TestLogger(unittest.TestCase):
 
             self.assertFalse(OLD_ARCHIVE.exists())
             self.assertTrue(NEW_ARCHIVE.exists())
+
+# --------------------------------------------------------------------------
+# This test confirms pruning exits quietly when retention is disabled.
+# --------------------------------------------------------------------------
+    def test_prune_rotated_logs_returns_when_keep_days_is_non_positive(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            OLD_ARCHIVE = Path(TMPDIR) / "pyiclodoc-drive-worker.20200101-000000.log.gz"
+            OLD_ARCHIVE.write_bytes(b"x")
+
+            logger.prune_rotated_logs(
+                LOG_FILE,
+                logger.LoggerConfig(
+                    level="info",
+                    rotate_max_bytes=1,
+                    rotate_daily=True,
+                    rotate_keep_days=0,
+                ),
+            )
+
+            self.assertTrue(OLD_ARCHIVE.exists())
+
+# --------------------------------------------------------------------------
+# This test confirms pruning skips archives whose metadata cannot be read.
+# --------------------------------------------------------------------------
+    def test_prune_rotated_logs_skips_archive_when_stat_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            OLD_ARCHIVE = Path(TMPDIR) / "pyiclodoc-drive-worker.20200101-000000.log.gz"
+            OLD_ARCHIVE.write_bytes(b"x")
+
+            ORIGINAL_STAT = Path.stat
+
+            def stat_side_effect(PATH_OBJ: Path):
+                if PATH_OBJ == OLD_ARCHIVE:
+                    raise OSError("stat failed")
+                return ORIGINAL_STAT(PATH_OBJ)
+
+            with patch.object(Path, "stat", autospec=True, side_effect=stat_side_effect):
+                logger.prune_rotated_logs(
+                    LOG_FILE,
+                    logger.LoggerConfig(
+                        level="info",
+                        rotate_max_bytes=1,
+                        rotate_daily=True,
+                        rotate_keep_days=14,
+                    ),
+                )
+
+            self.assertTrue(OLD_ARCHIVE.exists())
+
+# --------------------------------------------------------------------------
+# This test confirms pruning skips expired archives when unlink fails.
+# --------------------------------------------------------------------------
+    def test_prune_rotated_logs_skips_unlink_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            OLD_ARCHIVE = Path(TMPDIR) / "pyiclodoc-drive-worker.20200101-000000.log.gz"
+            OLD_ARCHIVE.write_bytes(b"x")
+            OLD_EPOCH = datetime(2026, 2, 1, 12, 0, 0, tzinfo=timezone.utc).timestamp()
+            os.utime(OLD_ARCHIVE, (OLD_EPOCH, OLD_EPOCH))
+
+            with patch.object(logger, "now_local", return_value=datetime(2026, 3, 9, 12, 0, 0, tzinfo=timezone.utc)):
+                with patch.object(Path, "unlink", autospec=True, side_effect=OSError("unlink failed")):
+                    logger.prune_rotated_logs(
+                        LOG_FILE,
+                        logger.LoggerConfig(
+                            level="info",
+                            rotate_max_bytes=1,
+                            rotate_daily=True,
+                            rotate_keep_days=14,
+                        ),
+                    )
+
+            self.assertTrue(OLD_ARCHIVE.exists())
 
 
 if __name__ == "__main__":

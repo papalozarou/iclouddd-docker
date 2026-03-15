@@ -1,0 +1,82 @@
+# ------------------------------------------------------------------------------
+# This workflow builds and publishes the container image for GitHub releases.
+#
+# Release publication and image publication are kept separate so a failed image
+# push does not block GitHub Release creation, while still tying image pushes to
+# a deliberate published release event.
+# ------------------------------------------------------------------------------
+
+name: Publish image
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ------------------------------------------------------------------------
+      # Fetch the repository contents for the image build context.
+      # ------------------------------------------------------------------------
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------------
+      # Enable Docker Buildx for reproducible image builds.
+      # ------------------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ------------------------------------------------------------------------
+      # Read pinned build arguments from ".env.example" and derive image names.
+      # ------------------------------------------------------------------------
+      - name: Resolve image metadata
+        id: image-meta
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          set -eu
+
+          ALP_VER="$(awk -F= '/^ALP_VER=/{print $2}' .env.example)"
+          MCK_VER="$(awk -F= '/^MCK_VER=/{print $2}' .env.example)"
+          IMAGE_NAME="ghcr.io/$(printf '%s' "${REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+
+          echo "alp_ver=${ALP_VER}" >> "${GITHUB_OUTPUT}"
+          echo "mck_ver=${MCK_VER}" >> "${GITHUB_OUTPUT}"
+          echo "image_name=${IMAGE_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "tag_name=${TAG_NAME}" >> "${GITHUB_OUTPUT}"
+
+      # ------------------------------------------------------------------------
+      # Authenticate to GitHub Container Registry with the workflow token.
+      # ------------------------------------------------------------------------
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          set -eu
+          printf '%s' "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+
+      # ------------------------------------------------------------------------
+      # Build and publish the release-tagged image and a moving "latest" tag.
+      # ------------------------------------------------------------------------
+      - name: Build and push image
+        run: |
+          set -eu
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg "ALP_VER=${{ steps.image-meta.outputs.alp_ver }}" \
+            --build-arg "MCK_VER=${{ steps.image-meta.outputs.mck_ver }}" \
+            --tag "${{ steps.image-meta.outputs.image_name }}:${{ steps.image-meta.outputs.tag_name }}" \
+            --tag "${{ steps.image-meta.outputs.image_name }}:latest" \
+            --push \
+            .

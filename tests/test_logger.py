@@ -310,6 +310,27 @@ class TestLogger(unittest.TestCase):
                 self.assertEqual(HANDLE.read().strip(), "old-day")
 
 # --------------------------------------------------------------------------
+# This test confirms failed log compression removes the rotated raw file
+# instead of leaving an orphaned archive candidate behind.
+# --------------------------------------------------------------------------
+    def test_rotate_log_file_removes_raw_rotated_file_when_compression_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            LOG_FILE.write_text("old\n", encoding="utf-8")
+
+            with patch.object(
+                logger,
+                "now_local",
+                return_value=datetime(2026, 3, 9, 10, 0, 0, tzinfo=timezone.utc),
+            ):
+                with patch.object(logger.gzip, "open", side_effect=OSError("gzip failed")):
+                    logger.rotate_log_file(LOG_FILE)
+
+            self.assertFalse(LOG_FILE.exists())
+            self.assertEqual(list(Path(TMPDIR).glob("pyiclodoc-drive-worker.*.log")), [])
+            self.assertEqual(list(Path(TMPDIR).glob("pyiclodoc-drive-worker.*.log.gz")), [])
+
+# --------------------------------------------------------------------------
 # This test confirms old rotated archives are removed by retention policy.
 # --------------------------------------------------------------------------
     def test_prune_rotated_logs_removes_expired_archives(self) -> None:

@@ -290,6 +290,8 @@ def run_backup(
 
     DURATION_SECONDS = int(time.time()) - RUN_START_EPOCH
     AVERAGE_SPEED = DEPS.format_speed_fn(SUMMARY.transferred_bytes, DURATION_SECONDS)
+    DELETE_ERRORS = max(int(getattr(SUMMARY, "delete_errors", 0)), 0)
+    TOTAL_ERRORS = max(int(SUMMARY.error_files), 0) + DELETE_ERRORS
     STATUS_LINES: list[str] = []
 
     if not TRAVERSAL_COMPLETE:
@@ -312,10 +314,13 @@ def run_backup(
                 getattr(SUMMARY, "deleted_directories", 0),
             ),
             f"Skipped: {SUMMARY.skipped_files}",
-            f"Errors: {SUMMARY.error_files}",
+            f"Errors: {TOTAL_ERRORS}",
             f"Duration: {DEPS.format_duration_fn(DURATION_SECONDS)}",
         ]
     )
+
+    if DELETE_ERRORS > 0:
+        STATUS_LINES.append(f"Delete errors: {DELETE_ERRORS}")
 
     if SUMMARY.transferred_files > 0:
         STATUS_LINES.append(f"Average speed: {AVERAGE_SPEED}")
@@ -329,7 +334,7 @@ def run_backup(
     COMPLETION_LOG_MESSAGE = (
         f"{COMPLETION_LOG_PREFIX} "
         f"Transferred {SUMMARY.transferred_files}/{SUMMARY.total_files}, "
-        f"skipped {SUMMARY.skipped_files}, errors {SUMMARY.error_files}."
+        f"skipped {SUMMARY.skipped_files}, errors {TOTAL_ERRORS}."
     )
     DEPS.notify_fn(TELEGRAM, COMPLETION_MESSAGE)
     DEPS.log_line_fn(

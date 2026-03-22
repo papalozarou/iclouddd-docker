@@ -558,6 +558,9 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             SUMMARY = SimpleNamespace(
                 transferred_files=2,
                 transferred_bytes=2097152,
+                deleted_files=0,
+                deleted_directories=0,
+                delete_errors=0,
                 total_files=3,
                 skipped_files=1,
                 error_files=0,
@@ -650,6 +653,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 transferred_bytes=1024,
                 deleted_files=0,
                 deleted_directories=0,
+                delete_errors=0,
                 total_files=3,
                 skipped_files=1,
                 error_files=1,
@@ -702,6 +706,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 transferred_bytes=2048,
                 deleted_files=3,
                 deleted_directories=1,
+                delete_errors=0,
                 total_files=3,
                 skipped_files=1,
                 error_files=0,
@@ -718,6 +723,41 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertIn("Transferred: 2/3", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Deleted: 3 files, 1 directory", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Skipped: 1", NOTIFY.call_args_list[1].args[1])
+
+# --------------------------------------------------------------------------
+# This test confirms backup completion includes delete-phase failures in the
+# total error count and surfaces the delete-error detail explicitly.
+# --------------------------------------------------------------------------
+    def test_run_backup_reports_delete_phase_errors_in_completion_message(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_runtime(TMPDIR)
+            TELEGRAM = TelegramConfig("token", "12345")
+            LOG_FILE = CONFIG.logs_dir / "pyiclodoc-drive-worker.log"
+            CLIENT = Mock()
+            SUMMARY = SimpleNamespace(
+                transferred_files=1,
+                transferred_bytes=1024,
+                deleted_files=2,
+                deleted_directories=0,
+                delete_errors=3,
+                total_files=3,
+                skipped_files=1,
+                error_files=1,
+            )
+
+            with patch("app.main.load_manifest", return_value={"/a": {"etag": "1"}}):
+                with patch("app.main.perform_incremental_sync", return_value=(SUMMARY, {"/a": {"etag": "1"}})):
+                    with patch("app.main.save_manifest"):
+                        with patch("app.main.notify") as NOTIFY:
+                            with patch("app.main.log_line") as LOG_LINE:
+                                run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE, "scheduled")
+
+            self.assertIn("Errors: 4", NOTIFY.call_args_list[1].args[1])
+            self.assertIn("Delete errors: 3", NOTIFY.call_args_list[1].args[1])
+            self.assertEqual(
+                LOG_LINE.call_args_list[-1].args[2],
+                "Backup complete. Transferred 1/3, skipped 1, errors 4.",
+            )
 
 # --------------------------------------------------------------------------
 # This test confirms two-day reauth reminder sends a required action prompt.

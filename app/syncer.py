@@ -77,6 +77,7 @@ class SyncResult:
     transferred_bytes: int
     deleted_files: int
     deleted_directories: int
+    delete_errors: int
     skipped_files: int
     error_files: int
     traversal_complete: bool = True
@@ -628,6 +629,7 @@ def perform_incremental_sync(
         TRANSFERRED_BYTES,
         DELETED_FILES,
         DELETED_DIRS,
+        DELETE_ERRORS,
         SKIPPED,
         ERRORS,
         traversal_complete=TRAVERSAL_COMPLETE,

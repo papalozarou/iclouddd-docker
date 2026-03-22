@@ -69,7 +69,8 @@ Backup completion messages include:
 
 - `Transferred: <done>/<total>`
 - `Skipped: <count>`
-- `Errors: <count>`
+- `Errors: <count>` where the count includes both transfer and delete-phase errors
+- `Delete errors: <count>` when mirror-delete encountered cleanup failures
 - `Duration: <hh:mm:ss>`
 - `Average speed: <value> MiB/s` (only when files were downloaded)
 

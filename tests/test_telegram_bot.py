@@ -14,7 +14,13 @@ from tests._stubs import install_dependency_stubs
 install_dependency_stubs()
 
 from app import telegram_bot
-from app.telegram_bot import TelegramConfig, get_endpoint, parse_command, response_is_ok
+from app.telegram_bot import (
+    TelegramConfig,
+    get_endpoint,
+    parse_command,
+    response_is_ok,
+    send_message_result,
+)
 
 
 # ------------------------------------------------------------------------------
@@ -130,6 +136,21 @@ class TestTelegramApiHelpers(unittest.TestCase):
         )
 
 # --------------------------------------------------------------------------
+# This test confirms send_message_result returns success with no failure
+# detail for an accepted Telegram API request.
+# --------------------------------------------------------------------------
+    def test_send_message_result_success(self) -> None:
+        CONFIG = TelegramConfig("token", "12345")
+        RESPONSE = Mock(ok=True)
+        RESPONSE.json.return_value = {"ok": True}
+
+        with patch("app.telegram_bot.requests.post", return_value=RESPONSE):
+            RESULT = send_message_result(CONFIG, "hello")
+
+        self.assertTrue(RESULT.success)
+        self.assertEqual(RESULT.failure_detail, "")
+
+# --------------------------------------------------------------------------
 # This test confirms send_message returns False when Telegram rejects the
 # request in a JSON payload despite HTTP success.
 # --------------------------------------------------------------------------
@@ -144,6 +165,23 @@ class TestTelegramApiHelpers(unittest.TestCase):
         self.assertFalse(RESULT)
 
 # --------------------------------------------------------------------------
+# This test confirms send_message_result exposes Telegram API failure detail.
+# --------------------------------------------------------------------------
+    def test_send_message_result_returns_api_failure_detail(self) -> None:
+        CONFIG = TelegramConfig("token", "12345")
+        RESPONSE = Mock(ok=True)
+        RESPONSE.json.return_value = {
+            "ok": False,
+            "description": "Bad Request: unsupported characters",
+        }
+
+        with patch("app.telegram_bot.requests.post", return_value=RESPONSE):
+            RESULT = send_message_result(CONFIG, "hello")
+
+        self.assertFalse(RESULT.success)
+        self.assertIn("Bad Request", RESULT.failure_detail)
+
+# --------------------------------------------------------------------------
 # This test confirms request exceptions in send_message return False.
 # --------------------------------------------------------------------------
     def test_send_message_request_exception(self) -> None:
@@ -156,6 +194,22 @@ class TestTelegramApiHelpers(unittest.TestCase):
             RESULT = telegram_bot.send_message(CONFIG, "hello")
 
         self.assertFalse(RESULT)
+
+# --------------------------------------------------------------------------
+# This test confirms send_message_result exposes transport failure detail.
+# --------------------------------------------------------------------------
+    def test_send_message_result_returns_request_failure_detail(self) -> None:
+        CONFIG = TelegramConfig("token", "12345")
+
+        with patch(
+            "app.telegram_bot.requests.post",
+            side_effect=telegram_bot.requests.RequestException("boom"),
+        ):
+            RESULT = send_message_result(CONFIG, "hello")
+
+        self.assertFalse(RESULT.success)
+        self.assertIn("Telegram request failed", RESULT.failure_detail)
+        self.assertIn("boom", RESULT.failure_detail)
 
 # --------------------------------------------------------------------------
 # This test confirms fetch_updates returns empty when token is missing.

@@ -10,6 +10,8 @@
 - On startup, the worker drains any older queued Telegram updates before it
   starts active command polling. This prevents stale `backup`, `auth`, and
   `reauth` commands from replaying after a restart.
+- If Telegram rejects a notification or the request fails, the worker logs the
+  failure detail so the dropped alert is visible in container output.
 - Entrypoint starts as root only to read Docker secret files, then drops to
   `PUID:PGID` before launching the worker process.
 - Services keep `cap_drop: ALL` and add only `SETUID` and `SETGID` so

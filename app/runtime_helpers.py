@@ -4,7 +4,8 @@
 
 from __future__ import annotations
 
-from app.telegram_bot import TelegramConfig, send_message
+from app.logger import get_timestamp
+from app.telegram_bot import TelegramConfig, send_message_result
 
 
 # ------------------------------------------------------------------------------
@@ -16,7 +17,16 @@ from app.telegram_bot import TelegramConfig, send_message
 # Returns: None.
 # ------------------------------------------------------------------------------
 def notify(TELEGRAM: TelegramConfig, MESSAGE: str) -> None:
-    send_message(TELEGRAM, MESSAGE)
+    RESULT = send_message_result(TELEGRAM, MESSAGE)
+
+    if RESULT.success:
+        return
+
+    print(
+        f"[{get_timestamp()}] [ERROR] Telegram notification failed: "
+        f"{RESULT.failure_detail}",
+        flush=True,
+    )
 
 
 # ------------------------------------------------------------------------------

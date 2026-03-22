@@ -30,6 +30,19 @@ class CommandEvent:
 
 
 # ------------------------------------------------------------------------------
+# This data class captures the outcome of a Telegram send attempt.
+#
+# N.B.
+# This keeps transport success, API-level success, and failure detail together
+# so runtime callers can log the exact failure without re-parsing responses.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class SendMessageResult:
+    success: bool
+    failure_detail: str = ""
+
+
+# ------------------------------------------------------------------------------
 # This function builds a Bot API endpoint from a token and method name.
 #
 # 1. "TOKEN" is the bot token.
@@ -61,23 +74,54 @@ def response_is_ok(RESPONSE: Any) -> bool:
 
 
 # ------------------------------------------------------------------------------
-# This function sends a Telegram message and returns success state.
+# This function extracts a Telegram API failure description from a response.
+#
+# 1. "RESPONSE" is the HTTP response returned by the Bot API call.
+#
+# Returns: Human-readable API failure detail.
+# ------------------------------------------------------------------------------
+def get_failure_detail(RESPONSE: Any) -> str:
+    try:
+        PAYLOAD = RESPONSE.json()
+    except ValueError:
+        return "Telegram API returned invalid JSON."
+
+    DESCRIPTION = str(PAYLOAD.get("description", "")).strip()
+
+    if DESCRIPTION:
+        return f"Telegram API rejected the request: {DESCRIPTION}"
+
+    return "Telegram API rejected the request without a description."
+
+
+# ------------------------------------------------------------------------------
+# This function sends a Telegram message and returns a structured result.
 #
 # 1. "CONFIG" carries token and chat configuration.
 # 2. "TEXT" is message body.
 # 3. "TIMEOUT" is request timeout in seconds.
 #
-# Returns: True on successful HTTP/API response, otherwise False.
+# Returns: Structured send outcome including failure detail.
 #
 # Notes: Telegram Bot API reference:
 # https://core.telegram.org/bots/api#sendmessage
 # ------------------------------------------------------------------------------
-def send_message(CONFIG: TelegramConfig, TEXT: str, TIMEOUT: int = 20) -> bool:
+def send_message_result(
+    CONFIG: TelegramConfig,
+    TEXT: str,
+    TIMEOUT: int = 20,
+) -> SendMessageResult:
     if not CONFIG.bot_token:
-        return False
+        return SendMessageResult(
+            success=False,
+            failure_detail="Telegram bot token is not configured.",
+        )
 
     if not CONFIG.chat_id:
-        return False
+        return SendMessageResult(
+            success=False,
+            failure_detail="Telegram chat ID is not configured.",
+        )
 
     PAYLOAD = {
         "chat_id": CONFIG.chat_id,
@@ -90,9 +134,35 @@ def send_message(CONFIG: TelegramConfig, TEXT: str, TIMEOUT: int = 20) -> bool:
             json=PAYLOAD,
             timeout=TIMEOUT,
         )
-        return response_is_ok(RESPONSE)
-    except requests.RequestException:
-        return False
+    except requests.RequestException as ERROR:
+        return SendMessageResult(
+            success=False,
+            failure_detail=(
+                "Telegram request failed: "
+                f"{type(ERROR).__name__}: {ERROR}"
+            ),
+        )
+
+    if response_is_ok(RESPONSE):
+        return SendMessageResult(success=True)
+
+    return SendMessageResult(
+        success=False,
+        failure_detail=get_failure_detail(RESPONSE),
+    )
+
+
+# ------------------------------------------------------------------------------
+# This function sends a Telegram message and returns success state.
+#
+# 1. "CONFIG" carries token and chat configuration.
+# 2. "TEXT" is message body.
+# 3. "TIMEOUT" is request timeout in seconds.
+#
+# Returns: True on successful HTTP/API response, otherwise False.
+# ------------------------------------------------------------------------------
+def send_message(CONFIG: TelegramConfig, TEXT: str, TIMEOUT: int = 20) -> bool:
+    return send_message_result(CONFIG, TEXT, TIMEOUT).success
 
 
 # ------------------------------------------------------------------------------

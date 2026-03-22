@@ -194,13 +194,32 @@ class TestMainRuntimeHelpers(unittest.TestCase):
         self.assertTrue(RESULT_AUTH)
 
 # --------------------------------------------------------------------------
-# This test confirms notify delegates to send_message.
+# This test confirms notify delegates to send_message_result.
 # --------------------------------------------------------------------------
     def test_notify_delegates_to_send_message(self) -> None:
         TELEGRAM = TelegramConfig("token", "12345")
-        with patch("app.runtime_helpers.send_message") as SEND:
+        with patch("app.runtime_helpers.send_message_result") as SEND:
+            SEND.return_value = SimpleNamespace(success=True, failure_detail="")
             notify(TELEGRAM, "hello")
         SEND.assert_called_once_with(TELEGRAM, "hello")
+
+# --------------------------------------------------------------------------
+# This test confirms notify logs Telegram failure detail when delivery fails.
+# --------------------------------------------------------------------------
+    def test_notify_logs_telegram_failure_detail(self) -> None:
+        TELEGRAM = TelegramConfig("token", "12345")
+
+        with patch("app.runtime_helpers.send_message_result") as SEND:
+            with patch("app.runtime_helpers.print") as PRINT:
+                SEND.return_value = SimpleNamespace(
+                    success=False,
+                    failure_detail="Telegram API rejected the request: Bad Request",
+                )
+                notify(TELEGRAM, "hello")
+
+        PRINT.assert_called_once()
+        self.assertIn("Telegram notification failed", PRINT.call_args[0][0])
+        self.assertIn("Bad Request", PRINT.call_args[0][0])
 
 # --------------------------------------------------------------------------
 # This test confirms attempt_auth success resets auth flags and notifies.

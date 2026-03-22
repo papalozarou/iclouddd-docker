@@ -394,6 +394,20 @@ class TestICloudClientTraversal(unittest.TestCase):
             self.assertEqual(FAILURE_SAMPLES[0]["status"], "retryable_error")
             self.assertIn("RuntimeError", FAILURE_SAMPLES[0]["reason"])
 
+    def test_traversal_stats_snapshot_detaches_mutable_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            CLIENT._record_directory_read("docs", 6.2, False, "ok")
+
+            SNAPSHOT = CLIENT.get_traversal_stats_snapshot()
+            SNAPSHOT["slow_dirs"].append({"path": "extra", "duration_seconds": 99.0})
+
+            SECOND_SNAPSHOT = CLIENT.get_traversal_stats_snapshot()
+
+        self.assertEqual(len(SECOND_SNAPSHOT["slow_dirs"]), 1)
+        self.assertEqual(SECOND_SNAPSHOT["slow_dirs"][0]["path"], "docs")
+
     def test_node_dir_does_not_retry_non_retryable_errors(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_icloud(TMPDIR)

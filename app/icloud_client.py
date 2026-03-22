@@ -8,7 +8,7 @@ from __future__ import annotations
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Any
+from typing import Callable, Any, TypedDict
 import shutil
 import threading
 import time
@@ -37,6 +37,42 @@ class RemoteEntry:
 
 
 # ------------------------------------------------------------------------------
+# This typed dictionary stores one slow-directory traversal sample.
+# ------------------------------------------------------------------------------
+class SlowDirectorySample(TypedDict):
+    path: str
+    duration_seconds: float
+
+
+# ------------------------------------------------------------------------------
+# This typed dictionary stores one traversal failure sample.
+# ------------------------------------------------------------------------------
+class TraversalFailureSample(TypedDict):
+    path: str
+    status: str
+    reason: str
+
+
+# ------------------------------------------------------------------------------
+# This typed dictionary stores traversal telemetry returned to callers.
+# ------------------------------------------------------------------------------
+class TraversalStatsSnapshot(TypedDict):
+    directories_completed: int
+    directories_pending: int
+    workers_active: int
+    entries_discovered: int
+    files_discovered: int
+    directories_discovered: int
+    dir_reads: int
+    dir_retries: int
+    dir_non_directory: int
+    dir_retryable_errors: int
+    dir_hard_failures: int
+    dir_failure_samples: list[TraversalFailureSample]
+    slow_dirs: list[SlowDirectorySample]
+
+
+# ------------------------------------------------------------------------------
 # This class encapsulates iCloud auth, traversal, and download operations.
 # ------------------------------------------------------------------------------
 class ICloudDriveClient:
@@ -59,7 +95,7 @@ class ICloudDriveClient:
 #
 # Returns: Empty traversal statistics dictionary.
 # --------------------------------------------------------------------------
-    def _build_empty_traversal_stats(self) -> dict[str, Any]:
+    def _build_empty_traversal_stats(self) -> TraversalStatsSnapshot:
         return {
             "directories_completed": 0,
             "directories_pending": 0,
@@ -90,12 +126,26 @@ class ICloudDriveClient:
 #
 # Returns: Traversal statistics snapshot dictionary.
 # --------------------------------------------------------------------------
-    def get_traversal_stats_snapshot(self) -> dict[str, Any]:
+    def get_traversal_stats_snapshot(self) -> TraversalStatsSnapshot:
         with self._stats_lock:
-            SLOW_DIRS = list(self._traversal_stats.get("slow_dirs", []))
-            RESULT = dict(self._traversal_stats)
-            RESULT["slow_dirs"] = SLOW_DIRS
-            return RESULT
+            return self._copy_traversal_stats(self._traversal_stats)
+
+# --------------------------------------------------------------------------
+# This function copies traversal stats with detached list payloads.
+#
+# 1. "STATS" is the traversal stats dictionary to copy.
+#
+# Returns: Snapshot safe for callers to read and mutate locally.
+# --------------------------------------------------------------------------
+    def _copy_traversal_stats(
+        self,
+        STATS: TraversalStatsSnapshot,
+    ) -> TraversalStatsSnapshot:
+        return {
+            **STATS,
+            "dir_failure_samples": list(STATS["dir_failure_samples"]),
+            "slow_dirs": list(STATS["slow_dirs"]),
+        }
 
 # --------------------------------------------------------------------------
 # This function records discovered entry counters for traversal telemetry.
@@ -197,15 +247,33 @@ class ICloudDriveClient:
             if DURATION_SECONDS < TRAVERSAL_SLOW_DIR_SECONDS:
                 return
 
-            SLOW_DIRS = list(self._traversal_stats.get("slow_dirs", []))
-            SLOW_DIRS.append(
-                {
-                    "path": CURRENT_PATH or "/",
-                    "duration_seconds": round(DURATION_SECONDS, 3),
-                }
-            )
-            SLOW_DIRS.sort(key=lambda ITEM: float(ITEM.get("duration_seconds", 0.0)), reverse=True)
-            self._traversal_stats["slow_dirs"] = SLOW_DIRS[:TRAVERSAL_SLOW_DIR_LIMIT]
+            self._record_slow_directory(CURRENT_PATH, DURATION_SECONDS)
+
+# --------------------------------------------------------------------------
+# This function records one slow-directory traversal sample.
+#
+# 1. "CURRENT_PATH" is current remote path being listed.
+# 2. "DURATION_SECONDS" is directory read duration.
+#
+# Returns: None.
+# --------------------------------------------------------------------------
+    def _record_slow_directory(
+        self,
+        CURRENT_PATH: str,
+        DURATION_SECONDS: float,
+    ) -> None:
+        SLOW_DIRS = list(self._traversal_stats["slow_dirs"])
+        SLOW_DIRS.append(
+            {
+                "path": CURRENT_PATH or "/",
+                "duration_seconds": round(DURATION_SECONDS, 3),
+            }
+        )
+        SLOW_DIRS.sort(
+            key=lambda ITEM: ITEM["duration_seconds"],
+            reverse=True,
+        )
+        self._traversal_stats["slow_dirs"] = SLOW_DIRS[:TRAVERSAL_SLOW_DIR_LIMIT]
 
 # --------------------------------------------------------------------------
 # This function stores a bounded set of directory read failure samples.
@@ -222,7 +290,7 @@ class ICloudDriveClient:
         STATUS: str,
         FAILURE_REASON: str,
     ) -> None:
-        FAILURE_SAMPLES = list(self._traversal_stats.get("dir_failure_samples", []))
+        FAILURE_SAMPLES = list(self._traversal_stats["dir_failure_samples"])
 
         if len(FAILURE_SAMPLES) >= TRAVERSAL_FAILURE_SAMPLE_LIMIT:
             return

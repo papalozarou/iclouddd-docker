@@ -7,6 +7,9 @@
 - A background heartbeat updater refreshes `/logs/pyiclodoc-drive-heartbeat.txt` every 30
   seconds in both recurring and one-shot execution paths.
 - Telegram commands are ignored unless they come from `H_TGM_CHAT_ID`.
+- On startup, the worker drains any older queued Telegram updates before it
+  starts active command polling. This prevents stale `backup`, `auth`, and
+  `reauth` commands from replaying after a restart.
 - Entrypoint starts as root only to read Docker secret files, then drops to
   `PUID:PGID` before launching the worker process.
 - Services keep `cap_drop: ALL` and add only `SETUID` and `SETGID` so
@@ -66,6 +69,9 @@ validation rules, see [SCHEDULING.md](SCHEDULING.md).
 - On first run with an empty manifest, worker reconciles existing local files
   under `/output` against remote metadata (size and modified time) and seeds
   manifest entries without re-downloading matched files.
+- If a remote path changes between file and directory across runs, worker
+  replaces the conflicting local path and continues the sync instead of
+  getting stuck behind the old type.
 - Directory traversal can run in bounded parallel mode with
   `SYNC_TRAVERSAL_WORKERS`.
 - Changed-file downloads run in parallel automatically based on host CPU.
@@ -79,6 +85,8 @@ validation rules, see [SCHEDULING.md](SCHEDULING.md).
 - Optional mirror-delete behaviour can be enabled with
   `BACKUP_DELETE_REMOVED=true`, which prunes local files and empty directories
   under `/output` when they no longer exist in iCloud.
+- During mirror-delete cleanup, non-empty directories remain a benign skip.
+  Other directory deletion failures are counted and logged as real errors.
 - Transient transfer exceptions (for example iCloud throttling and 5xx errors)
   are retried with bounded backoff before being marked as failed.
 - Directory traversal applies bounded retry/backoff for transient iCloud API
@@ -92,3 +100,12 @@ UID and GID for consistency against the container runtime user.
 If mismatches are found, backup is blocked. Details are written to worker logs
 and sent via Telegram. This is intended to avoid destructive rewrites over
 existing backup trees with mixed ownership.
+
+## State and credential persistence
+
+- Worker JSON state writes use a temporary file and atomic replace.
+- If a state write fails, the worker logs a warning and removes any leftover
+  temporary state file where possible.
+- Stored keyring credentials are updated only after a successful iCloud login.
+  Failed startup or reauth attempts do not overwrite the last known good
+  credentials.

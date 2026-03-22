@@ -25,9 +25,12 @@ N.B.
    complete the current pending challenge.
 4. `auth <code>` and `reauth <code>` do not start a fresh login attempt; they
    only validate against the active pending session.
-5. If a worker restart clears in-memory auth session state, send `auth` or
+5. On worker startup, the container drains any older queued Telegram updates
+   before active polling starts. This stops stale `backup`, `auth`, and
+   `reauth` commands from being replayed after a restart.
+6. If a worker restart clears in-memory auth session state, send `auth` or
    `reauth` without a code first to trigger a new challenge prompt.
-6. If successful, pending auth state is cleared and normal backup flow resumes.
+7. If successful, pending auth state is cleared and normal backup flow resumes.
 
 ## Password file behaviour
 
@@ -41,26 +44,26 @@ follows Apple account policy.
 
 ## Outbound Telegram messages
 
-Messages use this compact structure:
+Messages use this compact plain-text structure:
 
-- Bold emoji header in sentence case.
+- Emoji header in sentence case.
 - One-line action summary including Apple ID.
 - Optional compact status lines.
 
 Current message templates include:
 
-- `*🟢 PCD Drive - Container started*`
-- `*🛑 PCD Drive - Container stopped*`
-- `*🔑 PCD Drive - Authentication required*`
-- `*🔑 PCD Drive - Reauthentication required*`
-- `*🔒 PCD Drive - Authentication complete*`
-- `*❌ PCD Drive - Authentication failed*`
-- `*📥 PCD Drive - Backup requested*`
-- `*⬇️ PCD Drive - Backup started*`
-- `*📦 PCD Drive - Backup complete*`
-- `*⏭️ PCD Drive - Backup skipped*`
-- `*⚠️ PCD Drive - Safety net blocked*`
-- `*📣 PCD Drive - Reauth reminder*`
+- `🟢 PCD Drive - Container started`
+- `🛑 PCD Drive - Container stopped`
+- `🔑 PCD Drive - Authentication required`
+- `🔑 PCD Drive - Reauthentication required`
+- `🔒 PCD Drive - Authentication complete`
+- `❌ PCD Drive - Authentication failed`
+- `📥 PCD Drive - Backup requested`
+- `⬇️ PCD Drive - Backup started`
+- `📦 PCD Drive - Backup complete`
+- `⏭️ PCD Drive - Backup skipped`
+- `⚠️ PCD Drive - Safety net blocked`
+- `📣 PCD Drive - Reauth reminder`
 
 Backup completion messages include:
 

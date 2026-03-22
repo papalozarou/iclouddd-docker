@@ -142,3 +142,9 @@ Runtime layout:
 - `pyiclodoc-drive-safety_net_blocked.flag` is created when first-run safety checks block
   backup.
 - `icloudpd/cookies` and `icloudpd/session` are compatibility symlinks.
+- `keyring/keyring_pass.cfg` stores the worker keyring backend data. Saved
+  iCloud credentials are only updated after a successful login, so a failed
+  startup attempt does not overwrite the last known good stored credentials.
+- JSON state files are written via a temporary file and atomic replace. If a
+  write fails, the worker logs the problem and cleans up the temporary file
+  where possible.

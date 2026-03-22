@@ -1168,6 +1168,7 @@ class TestSyncerHelpers(unittest.TestCase):
             )
 
             self.assertEqual(SUMMARY.error_files, 0)
+            self.assertEqual(SUMMARY.delete_errors, 0)
             self.assertEqual(SUMMARY.deleted_files, 2)
             self.assertEqual(SUMMARY.deleted_directories, 1)
             self.assertTrue((ROOT_DIR / "docs" / "keep.txt").exists())
@@ -1208,6 +1209,40 @@ class TestSyncerHelpers(unittest.TestCase):
             )
 
             self.assertTrue((ROOT_DIR / "docs" / "stale.txt").exists())
+
+# --------------------------------------------------------------------------
+# This test confirms delete-phase errors are returned in the sync summary.
+# --------------------------------------------------------------------------
+    def test_perform_incremental_sync_reports_delete_phase_errors(self) -> None:
+        ENTRIES = [
+            RemoteEntry("docs", True, 0, "2026-03-11T00:00:00Z"),
+            RemoteEntry("docs/keep.txt", False, 4, "2026-03-11T00:00:00Z"),
+        ]
+        MANIFEST = {
+            "docs/keep.txt": {
+                "is_dir": False,
+                "size": 4,
+                "modified": "2026-03-11T00:00:00Z",
+            }
+        }
+        CLIENT = FakeClient(ENTRIES, {})
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            (ROOT_DIR / "docs").mkdir(parents=True, exist_ok=True)
+            (ROOT_DIR / "docs" / "keep.txt").write_text("keep", encoding="utf-8")
+            (ROOT_DIR / "docs" / "stale.txt").write_text("stale", encoding="utf-8")
+
+            with patch("app.syncer.delete_removed_local_paths", return_value=(1, 0, 2)):
+                SUMMARY, _ = perform_incremental_sync(
+                    CLIENT,
+                    ROOT_DIR,
+                    MANIFEST,
+                    BACKUP_DELETE_REMOVED=True,
+                )
+
+        self.assertEqual(SUMMARY.error_files, 0)
+        self.assertEqual(SUMMARY.delete_errors, 2)
 
 # --------------------------------------------------------------------------
 # This test confirms non-empty directory delete errors are treated as benign.

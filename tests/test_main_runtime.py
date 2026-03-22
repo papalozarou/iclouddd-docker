@@ -232,7 +232,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertFalse(NEW_STATE.reauth_pending)
             CLIENT.complete_authentication.assert_called_once_with("123456")
             self.assertIn("Authentication complete", NOTIFY.call_args[0][1])
-            self.assertIn("*🔒 PCD Drive - Authentication complete*", NOTIFY.call_args[0][1])
+            self.assertIn("🔒 PCD Drive - Authentication complete", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms attempt_auth MFA-required branch sets auth pending.
@@ -262,8 +262,8 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertFalse(NEW_STATE.reauth_pending)
             CLIENT.start_authentication.assert_called_once()
             self.assertIn("Authentication required", NOTIFY.call_args[0][1])
-            self.assertIn("Send `alice auth 123456`", NOTIFY.call_args[0][1])
-            self.assertIn("Or `alice reauth 123456`", NOTIFY.call_args[0][1])
+            self.assertIn('Send "alice auth 123456"', NOTIFY.call_args[0][1])
+            self.assertIn('Or "alice reauth 123456"', NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms attempt_auth generic failure sends failure message.
@@ -422,12 +422,12 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertTrue(any("Effective backup settings detail:" in LINE for LINE in DEBUG_LINES))
             self.assertTrue(any("Loaded manifest entries:" in LINE for LINE in DEBUG_LINES))
             self.assertTrue(any("Sync summary detail:" in LINE for LINE in DEBUG_LINES))
-            self.assertIn("*⬇️ PCD Drive - Backup started*", NOTIFY.call_args_list[0].args[1])
+            self.assertIn("⬇️ PCD Drive - Backup started", NOTIFY.call_args_list[0].args[1])
             self.assertIn("Files downloading for Apple ID alice@example.com.", NOTIFY.call_args_list[0].args[1])
             self.assertIn("Scheduled every 60 minutes.", NOTIFY.call_args_list[0].args[1])
             self.assertNotIn("Mode:", NOTIFY.call_args_list[0].args[1])
             self.assertNotIn("Trigger:", NOTIFY.call_args_list[0].args[1])
-            self.assertIn("*📦 PCD Drive - Backup complete*", NOTIFY.call_args_list[1].args[1])
+            self.assertIn("📦 PCD Drive - Backup complete", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Backup finished for Apple ID alice@example.com.", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Transferred: 2/3", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Deleted: 0 files, 0 directories", NOTIFY.call_args_list[1].args[1])
@@ -577,8 +577,8 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertTrue(NEW_STATE.reauth_pending)
             self.assertIn("Reauthentication required", NOTIFY.call_args[0][1])
             self.assertIn("Reauthentication is due within two days.", NOTIFY.call_args[0][1])
-            self.assertIn("Send `alice auth 123456`", NOTIFY.call_args[0][1])
-            self.assertIn("Or `alice reauth 123456`", NOTIFY.call_args[0][1])
+            self.assertIn('Send "alice auth 123456"', NOTIFY.call_args[0][1])
+            self.assertIn('Or "alice reauth 123456"', NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms five-day reminder sends a reauth reminder message.
@@ -603,8 +603,8 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertFalse(NEW_STATE.reauth_pending)
             self.assertIn("Reauth reminder", NOTIFY.call_args[0][1])
             self.assertIn("Reauthentication will be required within five days.", NOTIFY.call_args[0][1])
-            self.assertIn("Send `alice auth 123456`", NOTIFY.call_args[0][1])
-            self.assertIn("Or `alice reauth 123456`", NOTIFY.call_args[0][1])
+            self.assertIn('Send "alice auth 123456"', NOTIFY.call_args[0][1])
+            self.assertIn('Or "alice reauth 123456"', NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms steady-state reminder processing does not rewrite auth
@@ -681,8 +681,8 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertTrue(NEW_STATE.auth_pending)
             self.assertFalse(REQUESTED)
             SAVE.assert_called_once()
-            self.assertIn("Send `alice auth 123456`", NOTIFY.call_args[0][1])
-            self.assertIn("Or `alice reauth 123456`", NOTIFY.call_args[0][1])
+            self.assertIn('Send "alice auth 123456"', NOTIFY.call_args[0][1])
+            self.assertIn('Or "alice reauth 123456"', NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms handle_command reauth prompt path persists pending state.
@@ -708,8 +708,8 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertTrue(NEW_STATE.reauth_pending)
             self.assertFalse(REQUESTED)
             SAVE.assert_called_once()
-            self.assertIn("Send `alice auth 123456`", NOTIFY.call_args[0][1])
-            self.assertIn("Or `alice reauth 123456`", NOTIFY.call_args[0][1])
+            self.assertIn('Send "alice auth 123456"', NOTIFY.call_args[0][1])
+            self.assertIn('Or "alice reauth 123456"', NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms handle_command auth flow delegates to attempt_auth.
@@ -874,9 +874,9 @@ class TestMainEntrypoint(unittest.TestCase):
             RUN_ONE_SHOT.assert_called_once()
             RUN_BACKUP.assert_not_called()
             self.assertGreaterEqual(NOTIFY.call_count, 2)
-            self.assertIn("*🟢 PCD Drive - Container started*", NOTIFY.call_args_list[0].args[1])
+            self.assertIn("🟢 PCD Drive - Container started", NOTIFY.call_args_list[0].args[1])
             self.assertIn("Worker started for Apple ID alice@example.com.", NOTIFY.call_args_list[0].args[1])
-            self.assertIn("*🛑 PCD Drive - Container stopped*", NOTIFY.call_args_list[-1].args[1])
+            self.assertIn("🛑 PCD Drive - Container stopped", NOTIFY.call_args_list[-1].args[1])
             self.assertIn("Run completed and container exited.", NOTIFY.call_args_list[-1].args[1])
 
 # --------------------------------------------------------------------------

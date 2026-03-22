@@ -116,8 +116,8 @@ class TestMainReminderLogic(unittest.TestCase):
 
             self.assertEqual(UPDATED.reminder_stage, "alert5")
             self.assertFalse(UPDATED.reauth_pending)
-            self.assertIn("Send `alice auth 123456`", NOTIFY.call_args[0][1])
-            self.assertIn("Or `alice reauth 123456`", NOTIFY.call_args[0][1])
+            self.assertIn('Send "alice auth 123456"', NOTIFY.call_args[0][1])
+            self.assertIn('Or "alice reauth 123456"', NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms the two-day prompt stage enables reauthentication
@@ -139,8 +139,8 @@ class TestMainReminderLogic(unittest.TestCase):
 
             self.assertEqual(UPDATED.reminder_stage, "prompt2")
             self.assertTrue(UPDATED.reauth_pending)
-            self.assertIn("Send `alice auth 123456`", NOTIFY.call_args[0][1])
-            self.assertIn("Or `alice reauth 123456`", NOTIFY.call_args[0][1])
+            self.assertIn('Send "alice auth 123456"', NOTIFY.call_args[0][1])
+            self.assertIn('Or "alice reauth 123456"', NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms steady-state reminder processing returns unchanged

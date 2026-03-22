@@ -42,6 +42,25 @@ def get_endpoint(TOKEN: str, METHOD: str) -> str:
 
 
 # ------------------------------------------------------------------------------
+# This function validates Telegram API success from the HTTP response body.
+#
+# 1. "RESPONSE" is the HTTP response returned by the Bot API call.
+#
+# Returns: True only when the Bot API confirms success.
+# ------------------------------------------------------------------------------
+def response_is_ok(RESPONSE: Any) -> bool:
+    if not RESPONSE.ok:
+        return False
+
+    try:
+        PAYLOAD = RESPONSE.json()
+    except ValueError:
+        return False
+
+    return bool(PAYLOAD.get("ok"))
+
+
+# ------------------------------------------------------------------------------
 # This function sends a Telegram message and returns success state.
 #
 # 1. "CONFIG" carries token and chat configuration.
@@ -63,7 +82,6 @@ def send_message(CONFIG: TelegramConfig, TEXT: str, TIMEOUT: int = 20) -> bool:
     PAYLOAD = {
         "chat_id": CONFIG.chat_id,
         "text": TEXT,
-        "parse_mode": "Markdown",
     }
 
     try:
@@ -72,7 +90,7 @@ def send_message(CONFIG: TelegramConfig, TEXT: str, TIMEOUT: int = 20) -> bool:
             json=PAYLOAD,
             timeout=TIMEOUT,
         )
-        return RESPONSE.ok
+        return response_is_ok(RESPONSE)
     except requests.RequestException:
         return False
 
@@ -111,14 +129,10 @@ def fetch_updates(
     except requests.RequestException:
         return []
 
-    if not RESPONSE.ok:
+    if not response_is_ok(RESPONSE):
         return []
 
     PAYLOAD = RESPONSE.json()
-
-    if not PAYLOAD.get("ok"):
-        return []
-
     RESULT = PAYLOAD.get("result", [])
     return RESULT if isinstance(RESULT, list) else []
 

@@ -14,7 +14,7 @@ from tests._stubs import install_dependency_stubs
 install_dependency_stubs()
 
 from app import telegram_bot
-from app.telegram_bot import TelegramConfig, get_endpoint, parse_command
+from app.telegram_bot import TelegramConfig, get_endpoint, parse_command, response_is_ok
 
 
 # ------------------------------------------------------------------------------
@@ -117,6 +117,7 @@ class TestTelegramApiHelpers(unittest.TestCase):
     def test_send_message_success(self) -> None:
         CONFIG = TelegramConfig("token", "12345")
         RESPONSE = Mock(ok=True)
+        RESPONSE.json.return_value = {"ok": True}
 
         with patch("app.telegram_bot.requests.post", return_value=RESPONSE) as POST:
             RESULT = telegram_bot.send_message(CONFIG, "hello", TIMEOUT=10)
@@ -124,9 +125,23 @@ class TestTelegramApiHelpers(unittest.TestCase):
         self.assertTrue(RESULT)
         POST.assert_called_once_with(
             "https://api.telegram.org/bottoken/sendMessage",
-            json={"chat_id": "12345", "text": "hello", "parse_mode": "Markdown"},
+            json={"chat_id": "12345", "text": "hello"},
             timeout=10,
         )
+
+# --------------------------------------------------------------------------
+# This test confirms send_message returns False when Telegram rejects the
+# request in a JSON payload despite HTTP success.
+# --------------------------------------------------------------------------
+    def test_send_message_rejects_http_ok_with_api_failure(self) -> None:
+        CONFIG = TelegramConfig("token", "12345")
+        RESPONSE = Mock(ok=True)
+        RESPONSE.json.return_value = {"ok": False, "description": "Bad Request"}
+
+        with patch("app.telegram_bot.requests.post", return_value=RESPONSE):
+            RESULT = telegram_bot.send_message(CONFIG, "hello")
+
+        self.assertFalse(RESULT)
 
 # --------------------------------------------------------------------------
 # This test confirms request exceptions in send_message return False.
@@ -188,6 +203,11 @@ class TestTelegramApiHelpers(unittest.TestCase):
         with patch("app.telegram_bot.requests.get", return_value=RESPONSE):
             self.assertEqual(telegram_bot.fetch_updates(CONFIG, OFFSET=None), [])
 
+        RESPONSE.json.side_effect = ValueError("bad json")
+
+        with patch("app.telegram_bot.requests.get", return_value=RESPONSE):
+            self.assertEqual(telegram_bot.fetch_updates(CONFIG, OFFSET=None), [])
+
 # --------------------------------------------------------------------------
 # This test confirms request exceptions in fetch_updates return empty list.
 # --------------------------------------------------------------------------
@@ -237,6 +257,27 @@ class TestTelegramParseCommandEdges(unittest.TestCase):
         self.assertIsNotNone(EVENT)
         self.assertEqual(EVENT.command, "reauth")
         self.assertEqual(EVENT.args, "123456")
+
+
+# ------------------------------------------------------------------------------
+# These tests cover Telegram response validation behaviour.
+# ------------------------------------------------------------------------------
+class TestTelegramResponseValidation(unittest.TestCase):
+# --------------------------------------------------------------------------
+# This test confirms HTTP success alone is not treated as Telegram API success.
+# --------------------------------------------------------------------------
+    def test_response_is_ok_requires_json_ok(self) -> None:
+        RESPONSE = Mock(ok=True)
+        RESPONSE.json.return_value = {"ok": False}
+        self.assertFalse(response_is_ok(RESPONSE))
+
+# --------------------------------------------------------------------------
+# This test confirms malformed JSON is treated as an API failure.
+# --------------------------------------------------------------------------
+    def test_response_is_ok_rejects_invalid_json(self) -> None:
+        RESPONSE = Mock(ok=True)
+        RESPONSE.json.side_effect = ValueError("bad json")
+        self.assertFalse(response_is_ok(RESPONSE))
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ def format_telegram_event(
     SUMMARY_LINE: str,
     DETAIL_LINES: list[str] | None = None,
 ) -> str:
-    LINES = [f"*{ICON} PCD Drive - {TITLE}*", "", SUMMARY_LINE]
+    LINES = [f"{ICON} PCD Drive - {TITLE}", "", SUMMARY_LINE]
 
     if DETAIL_LINES:
         LINES.extend([""] + DETAIL_LINES)
@@ -38,8 +38,8 @@ def format_telegram_event(
 # ------------------------------------------------------------------------------
 def get_auth_command_lines(USERNAME: str) -> list[str]:
     return [
-        f"Send `{USERNAME} auth 123456`",
-        f"Or `{USERNAME} reauth 123456`",
+        f'Send "{USERNAME} auth 123456"',
+        f'Or "{USERNAME} reauth 123456"',
     ]
 
 

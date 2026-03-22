@@ -823,7 +823,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertIn("Manual backup requested for Apple ID alice@example.com.", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
-# This test confirms handle_command auth prompt path persists pending state.
+# This test confirms handle_command auth prompt path starts a fresh challenge.
 # --------------------------------------------------------------------------
     def test_handle_command_auth_prompt_path(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
@@ -831,9 +831,16 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             TELEGRAM = TelegramConfig("token", "12345")
             AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
 
-            with patch("app.main.save_auth_state") as SAVE:
-                with patch("app.main.notify") as NOTIFY:
-                    NEW_STATE, _, REQUESTED = handle_command(
+            EXPECTED_STATE = AuthState(
+                "1970-01-01T00:00:00+00:00",
+                True,
+                False,
+                "none",
+            )
+
+            with patch("app.main.attempt_auth", return_value=(EXPECTED_STATE, False, "mfa")) as ATTEMPT:
+                with patch("app.main.log_line") as LOG:
+                    NEW_STATE, IS_AUTHENTICATED, REQUESTED = handle_command(
                         "auth",
                         "",
                         CONFIG,
@@ -844,13 +851,16 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                     )
 
             self.assertTrue(NEW_STATE.auth_pending)
+            self.assertFalse(IS_AUTHENTICATED)
             self.assertFalse(REQUESTED)
-            SAVE.assert_called_once()
-            self.assertIn('Send "alice auth 123456"', NOTIFY.call_args[0][1])
-            self.assertIn('Or "alice reauth 123456"', NOTIFY.call_args[0][1])
+            ATTEMPT.assert_called_once()
+            self.assertEqual(ATTEMPT.call_args[0][1], AUTH_STATE)
+            self.assertEqual(ATTEMPT.call_args[0][6], "")
+            LOG.assert_called_once()
 
 # --------------------------------------------------------------------------
-# This test confirms handle_command reauth prompt path persists pending state.
+# This test confirms handle_command reauth prompt path starts a fresh
+# challenge while preserving reauth state.
 # --------------------------------------------------------------------------
     def test_handle_command_reauth_prompt_path(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
@@ -858,9 +868,16 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             TELEGRAM = TelegramConfig("token", "12345")
             AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
 
-            with patch("app.main.save_auth_state") as SAVE:
-                with patch("app.main.notify") as NOTIFY:
-                    NEW_STATE, _, REQUESTED = handle_command(
+            EXPECTED_STATE = AuthState(
+                "1970-01-01T00:00:00+00:00",
+                True,
+                True,
+                "none",
+            )
+
+            with patch("app.main.attempt_auth", return_value=(EXPECTED_STATE, False, "mfa")) as ATTEMPT:
+                with patch("app.main.log_line") as LOG:
+                    NEW_STATE, IS_AUTHENTICATED, REQUESTED = handle_command(
                         "reauth",
                         "",
                         CONFIG,
@@ -871,10 +888,12 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                     )
 
             self.assertTrue(NEW_STATE.reauth_pending)
+            self.assertFalse(IS_AUTHENTICATED)
             self.assertFalse(REQUESTED)
-            SAVE.assert_called_once()
-            self.assertIn('Send "alice auth 123456"', NOTIFY.call_args[0][1])
-            self.assertIn('Or "alice reauth 123456"', NOTIFY.call_args[0][1])
+            ATTEMPT.assert_called_once()
+            self.assertTrue(ATTEMPT.call_args[0][1].reauth_pending)
+            self.assertEqual(ATTEMPT.call_args[0][6], "")
+            LOG.assert_called_once()
 
 # --------------------------------------------------------------------------
 # This test confirms handle_command auth flow delegates to attempt_auth.

@@ -11,9 +11,7 @@ from typing import Callable, Protocol
 from app.state import AuthState, save_auth_state
 from app.telegram_bot import TelegramConfig, fetch_updates, parse_command
 from app.telegram_messages import (
-    build_authentication_required_message,
     build_backup_requested_message,
-    build_reauthentication_required_for_apple_id_message,
 )
 
 
@@ -125,26 +123,45 @@ def handle_command(
         return AUTH_STATE, IS_AUTHENTICATED, True
 
     if COMMAND == "auth" and not ARGS:
-        NEW_STATE = replace(AUTH_STATE, auth_pending=True)
-        DEPS.save_auth_state_fn(CONFIG.auth_state_path, NEW_STATE)
-        DEPS.notify_fn(
+        NEW_STATE, NEW_AUTH, DETAILS = DEPS.attempt_auth_fn(
+            CLIENT,
+            AUTH_STATE,
+            CONFIG.auth_state_path,
             TELEGRAM,
-            build_authentication_required_message(
-                APPLE_ID_LABEL, CONFIG.container_username
-            ),
+            CONFIG.container_username,
+            CONFIG.icloud_email,
+            "",
         )
-        return NEW_STATE, IS_AUTHENTICATED, False
+
+        if DEPS.log_line_fn is not None and DEPS.log_file_path is not None:
+            DEPS.log_line_fn(
+                DEPS.log_file_path,
+                "info",
+                f"Auth command result: {DETAILS}",
+            )
+
+        return NEW_STATE, NEW_AUTH, False
 
     if COMMAND == "reauth" and not ARGS:
-        NEW_STATE = replace(AUTH_STATE, reauth_pending=True)
-        DEPS.save_auth_state_fn(CONFIG.auth_state_path, NEW_STATE)
-        DEPS.notify_fn(
+        REAUTH_STATE = replace(AUTH_STATE, reauth_pending=True)
+        NEW_STATE, NEW_AUTH, DETAILS = DEPS.attempt_auth_fn(
+            CLIENT,
+            REAUTH_STATE,
+            CONFIG.auth_state_path,
             TELEGRAM,
-            build_reauthentication_required_for_apple_id_message(
-                APPLE_ID_LABEL, CONFIG.container_username
-            ),
+            CONFIG.container_username,
+            CONFIG.icloud_email,
+            "",
         )
-        return NEW_STATE, IS_AUTHENTICATED, False
+
+        if DEPS.log_line_fn is not None and DEPS.log_file_path is not None:
+            DEPS.log_line_fn(
+                DEPS.log_file_path,
+                "info",
+                f"Auth command result: {DETAILS}",
+            )
+
+        return NEW_STATE, NEW_AUTH, False
 
     NEW_STATE, NEW_AUTH, DETAILS = DEPS.attempt_auth_fn(
         CLIENT,

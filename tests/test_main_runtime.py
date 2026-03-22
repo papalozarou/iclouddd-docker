@@ -214,6 +214,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             with patch("app.runtime_helpers.print") as PRINT:
                 SEND.return_value = SimpleNamespace(
                     success=False,
+                    disabled=False,
                     failure_detail="Telegram API rejected the request: Bad Request",
                 )
                 notify(TELEGRAM, "hello")
@@ -221,6 +222,23 @@ class TestMainRuntimeHelpers(unittest.TestCase):
         PRINT.assert_called_once()
         self.assertIn("Telegram notification failed", PRINT.call_args[0][0])
         self.assertIn("Bad Request", PRINT.call_args[0][0])
+
+# --------------------------------------------------------------------------
+# This test confirms notify stays quiet when Telegram integration is disabled.
+# --------------------------------------------------------------------------
+    def test_notify_is_quiet_when_telegram_is_disabled(self) -> None:
+        TELEGRAM = TelegramConfig("", "12345")
+
+        with patch("app.runtime_helpers.send_message_result") as SEND:
+            with patch("app.runtime_helpers.print") as PRINT:
+                SEND.return_value = SimpleNamespace(
+                    success=False,
+                    disabled=True,
+                    failure_detail="Telegram bot token is not configured.",
+                )
+                notify(TELEGRAM, "hello")
+
+        PRINT.assert_not_called()
 
 # --------------------------------------------------------------------------
 # This test confirms stop notifications use the standard stopped template.

@@ -39,6 +39,7 @@ class CommandEvent:
 @dataclass(frozen=True)
 class SendMessageResult:
     success: bool
+    disabled: bool = False
     failure_detail: str = ""
 
 
@@ -114,12 +115,14 @@ def send_message_result(
     if not CONFIG.bot_token:
         return SendMessageResult(
             success=False,
+            disabled=True,
             failure_detail="Telegram bot token is not configured.",
         )
 
     if not CONFIG.chat_id:
         return SendMessageResult(
             success=False,
+            disabled=True,
             failure_detail="Telegram chat ID is not configured.",
         )
 

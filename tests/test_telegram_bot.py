@@ -148,7 +148,18 @@ class TestTelegramApiHelpers(unittest.TestCase):
             RESULT = send_message_result(CONFIG, "hello")
 
         self.assertTrue(RESULT.success)
+        self.assertFalse(RESULT.disabled)
         self.assertEqual(RESULT.failure_detail, "")
+
+# --------------------------------------------------------------------------
+# This test confirms missing Telegram config is treated as disabled
+# integration rather than a delivery failure.
+# --------------------------------------------------------------------------
+    def test_send_message_result_marks_missing_config_as_disabled(self) -> None:
+        RESULT = send_message_result(TelegramConfig("", "12345"), "hello")
+        self.assertFalse(RESULT.success)
+        self.assertTrue(RESULT.disabled)
+        self.assertIn("not configured", RESULT.failure_detail)
 
 # --------------------------------------------------------------------------
 # This test confirms send_message returns False when Telegram rejects the
@@ -179,6 +190,7 @@ class TestTelegramApiHelpers(unittest.TestCase):
             RESULT = send_message_result(CONFIG, "hello")
 
         self.assertFalse(RESULT.success)
+        self.assertFalse(RESULT.disabled)
         self.assertIn("Bad Request", RESULT.failure_detail)
 
 # --------------------------------------------------------------------------
@@ -208,6 +220,7 @@ class TestTelegramApiHelpers(unittest.TestCase):
             RESULT = send_message_result(CONFIG, "hello")
 
         self.assertFalse(RESULT.success)
+        self.assertFalse(RESULT.disabled)
         self.assertIn("Telegram request failed", RESULT.failure_detail)
         self.assertIn("boom", RESULT.failure_detail)
 

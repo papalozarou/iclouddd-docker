@@ -19,7 +19,7 @@ from app.telegram_bot import TelegramConfig, send_message_result
 def notify(TELEGRAM: TelegramConfig, MESSAGE: str) -> None:
     RESULT = send_message_result(TELEGRAM, MESSAGE)
 
-    if RESULT.success:
+    if RESULT.success or RESULT.disabled:
         return
 
     print(

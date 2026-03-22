@@ -212,18 +212,24 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", True, True, "prompt2")
             CLIENT = Mock()
             CLIENT.complete_authentication.return_value = (True, "ok")
+            CLIENT.config = SimpleNamespace(
+                keychain_service_name="pyiclodoc-drive",
+                icloud_email="alice@example.com",
+                icloud_password="password",
+            )
 
             with patch("app.main.now_iso", return_value="2026-03-10T10:00:00+00:00"):
                 with patch("app.main.notify") as NOTIFY:
-                    NEW_STATE, IS_AUTHENTICATED, DETAILS = attempt_auth(
-                        CLIENT,
-                        AUTH_STATE,
-                        AUTH_STATE_PATH,
-                        TELEGRAM,
-                        "alice",
-                        "alice@example.com",
-                        " 123456 ",
-                    )
+                    with patch("app.main.save_credentials") as SAVE_CREDENTIALS:
+                        NEW_STATE, IS_AUTHENTICATED, DETAILS = attempt_auth(
+                            CLIENT,
+                            AUTH_STATE,
+                            AUTH_STATE_PATH,
+                            TELEGRAM,
+                            "alice",
+                            "alice@example.com",
+                            " 123456 ",
+                        )
 
             self.assertTrue(IS_AUTHENTICATED)
             self.assertEqual(DETAILS, "ok")
@@ -231,6 +237,12 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertFalse(NEW_STATE.auth_pending)
             self.assertFalse(NEW_STATE.reauth_pending)
             CLIENT.complete_authentication.assert_called_once_with("123456")
+            SAVE_CREDENTIALS.assert_called_once_with(
+                "pyiclodoc-drive",
+                "alice",
+                "alice@example.com",
+                "password",
+            )
             self.assertIn("Authentication complete", NOTIFY.call_args[0][1])
             self.assertIn("🔒 PCD Drive - Authentication complete", NOTIFY.call_args[0][1])
 
@@ -244,23 +256,30 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
             CLIENT = Mock()
             CLIENT.start_authentication.return_value = (False, "Two-factor code is required")
+            CLIENT.config = SimpleNamespace(
+                keychain_service_name="pyiclodoc-drive",
+                icloud_email="alice@example.com",
+                icloud_password="password",
+            )
 
             with patch("app.main.notify") as NOTIFY:
-                NEW_STATE, IS_AUTHENTICATED, DETAILS = attempt_auth(
-                    CLIENT,
-                    AUTH_STATE,
-                    AUTH_STATE_PATH,
-                    TELEGRAM,
-                    "alice",
-                    "alice@example.com",
-                    "",
-                )
+                with patch("app.main.save_credentials") as SAVE_CREDENTIALS:
+                    NEW_STATE, IS_AUTHENTICATED, DETAILS = attempt_auth(
+                        CLIENT,
+                        AUTH_STATE,
+                        AUTH_STATE_PATH,
+                        TELEGRAM,
+                        "alice",
+                        "alice@example.com",
+                        "",
+                    )
 
             self.assertFalse(IS_AUTHENTICATED)
             self.assertIn("Two-factor code is required", DETAILS)
             self.assertTrue(NEW_STATE.auth_pending)
             self.assertFalse(NEW_STATE.reauth_pending)
             CLIENT.start_authentication.assert_called_once()
+            SAVE_CREDENTIALS.assert_not_called()
             self.assertIn("Authentication required", NOTIFY.call_args[0][1])
             self.assertIn('Send "alice auth 123456"', NOTIFY.call_args[0][1])
             self.assertIn('Or "alice reauth 123456"', NOTIFY.call_args[0][1])
@@ -275,24 +294,133 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
             CLIENT = Mock()
             CLIENT.start_authentication.return_value = (False, "Bad credentials")
+            CLIENT.config = SimpleNamespace(
+                keychain_service_name="pyiclodoc-drive",
+                icloud_email="alice@example.com",
+                icloud_password="wrong-password",
+            )
 
             with patch("app.main.notify") as NOTIFY:
-                NEW_STATE, IS_AUTHENTICATED, _ = attempt_auth(
-                    CLIENT,
-                    AUTH_STATE,
-                    AUTH_STATE_PATH,
-                    TELEGRAM,
-                    "alice",
-                    "alice@example.com",
-                    "",
-                )
+                with patch("app.main.save_credentials") as SAVE_CREDENTIALS:
+                    NEW_STATE, IS_AUTHENTICATED, _ = attempt_auth(
+                        CLIENT,
+                        AUTH_STATE,
+                        AUTH_STATE_PATH,
+                        TELEGRAM,
+                        "alice",
+                        "alice@example.com",
+                        "",
+                    )
 
             self.assertFalse(IS_AUTHENTICATED)
             self.assertTrue(NEW_STATE.auth_pending)
             CLIENT.start_authentication.assert_called_once()
+            SAVE_CREDENTIALS.assert_not_called()
             self.assertIn("Authentication failed", NOTIFY.call_args[0][1])
             self.assertIn("Bad credentials", NOTIFY.call_args[0][1])
             self.assertNotIn("Reason:", NOTIFY.call_args[0][1])
+
+# --------------------------------------------------------------------------
+# This test confirms failed startup auth does not overwrite stored credentials.
+# --------------------------------------------------------------------------
+    def test_main_does_not_save_unverified_env_credentials_on_failed_startup_auth(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_runtime(TMPDIR)
+            CONFIG = AppConfig(
+                **(
+                    CONFIG.__dict__
+                    | {
+                        "run_once": True,
+                        "icloud_email": "env@example.com",
+                        "icloud_password": "wrong-password",
+                    }
+                )
+            )
+            STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
+
+            with patch("app.main.load_config", return_value=CONFIG):
+                with patch("app.main.configure_keyring"):
+                    with patch(
+                        "app.main.load_credentials",
+                        return_value=("stored@example.com", "stored-password"),
+                    ):
+                        with patch("app.main.validate_config", return_value=[]):
+                            with patch("app.main.save_credentials") as SAVE_CREDENTIALS:
+                                with patch("app.main.ICloudDriveClient", return_value=Mock()):
+                                    with patch("app.main.load_auth_state", return_value=STATE):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            return_value=(STATE, False, "Bad credentials"),
+                                        ):
+                                            with patch(
+                                                "app.worker_runtime.wait_for_one_shot_auth",
+                                                return_value=(STATE, False),
+                                            ):
+                                                RESULT = __import__(
+                                                    "app.main", fromlist=["main"]
+                                                ).main()
+
+            self.assertEqual(RESULT, 2)
+            SAVE_CREDENTIALS.assert_not_called()
+
+# --------------------------------------------------------------------------
+# This test confirms verified env credentials are persisted after startup auth.
+# --------------------------------------------------------------------------
+    def test_main_saves_verified_env_credentials_after_successful_startup_auth(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_runtime(TMPDIR)
+            CONFIG = AppConfig(
+                **(
+                    CONFIG.__dict__
+                    | {
+                        "run_once": True,
+                        "icloud_email": "env@example.com",
+                        "icloud_password": "verified-password",
+                    }
+                )
+            )
+            STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
+
+            with patch("app.main.load_config", return_value=CONFIG):
+                with patch("app.main.configure_keyring"):
+                    with patch(
+                        "app.main.load_credentials",
+                        return_value=("stored@example.com", "stored-password"),
+                    ):
+                        with patch("app.main.validate_config", return_value=[]):
+                            with patch("app.main.save_credentials") as SAVE_CREDENTIALS:
+                                with patch("app.main.ICloudDriveClient", return_value=Mock()):
+                                    with patch("app.main.load_auth_state", return_value=STATE):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            side_effect=lambda *_ARGS, **_KWARGS: (
+                                                SAVE_CREDENTIALS(
+                                                    "pyiclodoc-drive",
+                                                    "alice",
+                                                    "env@example.com",
+                                                    "verified-password",
+                                                ),
+                                                STATE,
+                                                True,
+                                                "ok",
+                                            )[1:],
+                                        ):
+                                            with patch("app.worker_runtime.run_one_shot_worker") as RUN_ONE_SHOT:
+                                                RUN_ONE_SHOT.return_value = SimpleNamespace(
+                                                    exit_code=0,
+                                                    stop_status="Run completed and container exited.",
+                                                )
+                                                RESULT = __import__(
+                                                    "app.main", fromlist=["main"]
+                                                ).main()
+
+            self.assertEqual(RESULT, 0)
+            SAVE_CREDENTIALS.assert_called_once_with(
+                "pyiclodoc-drive",
+                "alice",
+                "env@example.com",
+                "verified-password",
+            )
 
 # --------------------------------------------------------------------------
 # This test confirms a done marker short-circuits safety-net checks.

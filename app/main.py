@@ -125,7 +125,7 @@ def attempt_auth(
     APPLE_ID: str,
     PROVIDED_CODE: str,
 ) -> tuple[AuthState, bool, str]:
-    return auth_runtime.attempt_auth(
+    NEW_STATE, IS_AUTHENTICATED, DETAILS = auth_runtime.attempt_auth(
         CLIENT,
         AUTH_STATE,
         AUTH_STATE_PATH,
@@ -139,6 +139,14 @@ def attempt_auth(
             notify_fn=notify,
         ),
     )
+    if IS_AUTHENTICATED:
+        save_credentials(
+            CLIENT.config.keychain_service_name,
+            USERNAME,
+            CLIENT.config.icloud_email,
+            CLIENT.config.icloud_password,
+        )
+    return NEW_STATE, IS_AUTHENTICATED, DETAILS
 
 
 # ------------------------------------------------------------------------------
@@ -413,12 +421,6 @@ def main() -> int:
 
         HEARTBEAT_STOP_EVENT = start_heartbeat_updater(CONFIG.heartbeat_path)
 
-        save_credentials(
-            CONFIG.keychain_service_name,
-            CONFIG.container_username,
-            CONFIG.icloud_email,
-            CONFIG.icloud_password,
-        )
         notify(
             RUNTIME_CONTEXT.TELEGRAM,
             build_container_started_message(RUNTIME_CONTEXT.APPLE_ID_LABEL),

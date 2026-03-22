@@ -3,6 +3,7 @@
 ## Command format
 
 Commands are only accepted from the chat ID configured in `H_TGM_CHAT_ID`.
+If `H_TGM_CHAT_ID` is unset, Telegram command handling is disabled.
 
 Supported command forms:
 

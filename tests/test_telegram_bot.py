@@ -82,6 +82,22 @@ class TestTelegramCommandParsing(unittest.TestCase):
         self.assertIsNone(EVENT)
 
 # --------------------------------------------------------------------------
+# This test confirms commands are ignored when no chat ID is configured.
+# --------------------------------------------------------------------------
+    def test_ignore_commands_when_expected_chat_is_not_configured(self) -> None:
+        UPDATE = {
+            "update_id": 103,
+            "message": {
+                "chat": {"id": 12345},
+                "text": "alice backup",
+            },
+        }
+
+        EVENT = parse_command(UPDATE, "alice", "")
+
+        self.assertIsNone(EVENT)
+
+# --------------------------------------------------------------------------
 # This test confirms messages without the username prefix are not
 # treated as commands.
 # --------------------------------------------------------------------------
@@ -160,6 +176,16 @@ class TestTelegramApiHelpers(unittest.TestCase):
         self.assertFalse(RESULT.success)
         self.assertTrue(RESULT.disabled)
         self.assertIn("not configured", RESULT.failure_detail)
+
+# --------------------------------------------------------------------------
+# This test confirms update polling is disabled when the chat ID is missing.
+# --------------------------------------------------------------------------
+    def test_fetch_updates_returns_empty_when_chat_id_is_missing(self) -> None:
+        with patch("app.telegram_bot.requests.get") as GET:
+            RESULT = telegram_bot.fetch_updates(TelegramConfig("token", ""), None)
+
+        self.assertEqual(RESULT, [])
+        GET.assert_not_called()
 
 # --------------------------------------------------------------------------
 # This test confirms send_message returns False when Telegram rejects the

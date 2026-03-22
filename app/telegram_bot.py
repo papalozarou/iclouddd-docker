@@ -185,7 +185,7 @@ def fetch_updates(
     OFFSET: int | None,
     TIMEOUT: int = 30,
 ) -> list[dict[str, Any]]:
-    if not CONFIG.bot_token:
+    if not CONFIG.bot_token or not CONFIG.chat_id:
         return []
 
     PARAMS: dict[str, Any] = {"timeout": TIMEOUT}
@@ -227,6 +227,9 @@ def parse_command(
     USERNAME: str,
     EXPECTED_CHAT_ID: str,
 ) -> CommandEvent | None:
+    if not EXPECTED_CHAT_ID:
+        return None
+
     UPDATE_ID = int(UPDATE.get("update_id", 0))
     MESSAGE = UPDATE.get("message")
 

@@ -65,7 +65,8 @@ the service-environment table above.
 - `H_UID`: host user ID mapped into containers.
 - `H_GID`: host group ID mapped into containers.
 - `H_TZ`: timezone for worker behaviour and schedule calculations.
-- `H_TGM_CHAT_ID`: only this Telegram chat is accepted for commands.
+- `H_TGM_CHAT_ID`: only this Telegram chat is accepted for commands. If it is
+  unset, Telegram command handling is disabled.
 - `H_DKR_SECRETS`: host path containing source secret files.
 - `H_DATA_PATH`: base host path for service data directories.
 

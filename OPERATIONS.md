@@ -7,6 +7,7 @@
 - A background heartbeat updater refreshes `/logs/pyiclodoc-drive-heartbeat.txt` every 30
   seconds in both recurring and one-shot execution paths.
 - Telegram commands are ignored unless they come from `H_TGM_CHAT_ID`.
+- If `H_TGM_CHAT_ID` is unset, Telegram command polling stays disabled.
 - On startup, the worker drains any older queued Telegram updates before it
   starts active command polling. This prevents stale `backup`, `auth`, and
   `reauth` commands from replaying after a restart.

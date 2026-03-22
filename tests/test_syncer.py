@@ -24,12 +24,14 @@ install_dependency_stubs()
 from app.syncer import (
     apply_remote_modified_time,
     build_local_file_index,
+    build_empty_traversal_stats_snapshot,
     change_conflicting_local_path,
     collect_local_files,
     collect_mismatches,
     delete_removed_local_paths,
     ensure_directories,
     entry_metadata,
+    format_slow_directory_summary,
     get_transfer_failure_reason,
     get_traversal_hard_failure_count,
     get_auto_worker_count,
@@ -571,6 +573,22 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertTrue(is_known_package_path("docs/archive.bundle"))
         self.assertTrue(is_known_package_path("Swift Playground/My Playground.playgroundbook"))
         self.assertFalse(is_known_package_path("docs/file.txt"))
+
+# --------------------------------------------------------------------------
+# This test confirms slow-directory summaries use the top three entries only.
+# --------------------------------------------------------------------------
+    def test_format_slow_directory_summary_limits_output_to_top_three(self) -> None:
+        STATS = build_empty_traversal_stats_snapshot()
+        STATS["slow_dirs"] = [
+            {"path": "a", "duration_seconds": 9.1},
+            {"path": "b", "duration_seconds": 8.2},
+            {"path": "c", "duration_seconds": 7.3},
+            {"path": "d", "duration_seconds": 6.4},
+        ]
+
+        RESULT = format_slow_directory_summary(STATS)
+
+        self.assertEqual(RESULT, "a: 9.1s, b: 8.2s, c: 7.3s")
 
 # --------------------------------------------------------------------------
 # This test confirms transfer fallback keeps the initial file failure reason

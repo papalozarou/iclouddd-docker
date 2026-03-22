@@ -15,7 +15,7 @@ import os
 import shutil
 import time
 
-from app.icloud_client import ICloudDriveClient, RemoteEntry
+from app.icloud_client import ICloudDriveClient, RemoteEntry, TraversalStatsSnapshot
 from app.logger import log_line
 
 TRANSFER_PROGRESS_LOG_INTERVAL_SECONDS = 30.0
@@ -644,14 +644,65 @@ def perform_incremental_sync(
 # Returns: Count of hard traversal failures recorded by the client.
 # ------------------------------------------------------------------------------
 def get_traversal_hard_failure_count(CLIENT: ICloudDriveClient) -> int:
+    STATS = get_traversal_stats_snapshot(CLIENT)
+    return max(int(STATS.get("dir_hard_failures", 0)), 0)
+
+
+# ------------------------------------------------------------------------------
+# This function returns a traversal-stats snapshot for clients that support it.
+#
+# 1. "CLIENT" is the active iCloud API wrapper.
+#
+# Returns: Traversal stats snapshot, or an empty default snapshot.
+# ------------------------------------------------------------------------------
+def get_traversal_stats_snapshot(CLIENT: ICloudDriveClient) -> TraversalStatsSnapshot:
     if not hasattr(CLIENT, "get_traversal_stats_snapshot"):
-        return 0
+        return build_empty_traversal_stats_snapshot()
 
     STATS = CLIENT.get_traversal_stats_snapshot()
     if not isinstance(STATS, dict):
-        return 0
+        return build_empty_traversal_stats_snapshot()
 
-    return max(int(STATS.get("dir_hard_failures", 0)), 0)
+    return STATS
+
+
+# ------------------------------------------------------------------------------
+# This function returns an empty traversal-stats snapshot shape.
+#
+# Returns: Empty traversal stats snapshot with zeroed counters.
+# ------------------------------------------------------------------------------
+def build_empty_traversal_stats_snapshot() -> TraversalStatsSnapshot:
+    return {
+        "directories_completed": 0,
+        "directories_pending": 0,
+        "workers_active": 0,
+        "entries_discovered": 0,
+        "files_discovered": 0,
+        "directories_discovered": 0,
+        "dir_reads": 0,
+        "dir_retries": 0,
+        "dir_non_directory": 0,
+        "dir_retryable_errors": 0,
+        "dir_hard_failures": 0,
+        "dir_failure_samples": [],
+        "slow_dirs": [],
+    }
+
+
+# ------------------------------------------------------------------------------
+# This function formats the top slow-directory samples for traversal logs.
+#
+# 1. "STATS" is the traversal stats snapshot.
+#
+# Returns: Comma-separated slow-directory summary, or an empty string.
+# ------------------------------------------------------------------------------
+def format_slow_directory_summary(STATS: TraversalStatsSnapshot) -> str:
+    TOP_PATHS = [
+        f"{ITEM.get('path', '/')}: {ITEM.get('duration_seconds', 0)}s"
+        for ITEM in STATS.get("slow_dirs", [])[:3]
+        if isinstance(ITEM, dict)
+    ]
+    return ", ".join(TOP_PATHS)
 
 
 # ------------------------------------------------------------------------------
@@ -684,20 +735,8 @@ def list_entries_with_progress(
             try:
                 RESULT = FUTURE.result(timeout=TIMEOUT_SECONDS)
                 if LOG_FILE is not None:
-                    STATS = (
-                        CLIENT.get_traversal_stats_snapshot()
-                        if hasattr(CLIENT, "get_traversal_stats_snapshot")
-                        else {}
-                    )
-                    SLOW_DIRS = STATS.get("slow_dirs", []) if isinstance(STATS, dict) else []
-                    SLOW_TOP = ""
-                    if isinstance(SLOW_DIRS, list) and SLOW_DIRS:
-                        TOP_PATHS = [
-                            f"{ITEM.get('path', '/')}: {ITEM.get('duration_seconds', 0)}s"
-                            for ITEM in SLOW_DIRS[:3]
-                            if isinstance(ITEM, dict)
-                        ]
-                        SLOW_TOP = ", ".join(TOP_PATHS)
+                    STATS = get_traversal_stats_snapshot(CLIENT)
+                    SLOW_TOP = format_slow_directory_summary(STATS)
 
                     log_line(
                         LOG_FILE,
@@ -717,19 +756,17 @@ def list_entries_with_progress(
                         f"retryable_errors={STATS.get('dir_retryable_errors', 0)}, "
                         f"hard_failures={STATS.get('dir_hard_failures', 0)}",
                     )
-                    FAILURE_SAMPLES = STATS.get("dir_failure_samples", [])
-                    if isinstance(FAILURE_SAMPLES, list):
-                        for SAMPLE in FAILURE_SAMPLES:
-                            if not isinstance(SAMPLE, dict):
-                                continue
-                            log_line(
-                                LOG_FILE,
-                                "debug",
-                                "Traversal failure sample: "
-                                f"status={SAMPLE.get('status', 'unknown')}, "
-                                f"path={SAMPLE.get('path', '/')}, "
-                                f"reason={SAMPLE.get('reason', '<none>')}",
-                            )
+                    for SAMPLE in STATS.get("dir_failure_samples", []):
+                        if not isinstance(SAMPLE, dict):
+                            continue
+                        log_line(
+                            LOG_FILE,
+                            "debug",
+                            "Traversal failure sample: "
+                            f"status={SAMPLE.get('status', 'unknown')}, "
+                            f"path={SAMPLE.get('path', '/')}, "
+                            f"reason={SAMPLE.get('reason', '<none>')}",
+                        )
                     if SLOW_TOP:
                         log_line(
                             LOG_FILE,
@@ -744,11 +781,7 @@ def list_entries_with_progress(
                 ELAPSED_SECONDS = time.monotonic() - STARTED_EPOCH
                 NOW_EPOCH = time.monotonic()
                 WINDOW_SECONDS = max(NOW_EPOCH - PREVIOUS_LOG_EPOCH, 0.001)
-                STATS = (
-                    CLIENT.get_traversal_stats_snapshot()
-                    if hasattr(CLIENT, "get_traversal_stats_snapshot")
-                    else {}
-                )
+                STATS = get_traversal_stats_snapshot(CLIENT)
                 CURRENT_ENTRIES = int(STATS.get("entries_discovered", 0))
                 CURRENT_FILES = int(STATS.get("files_discovered", 0))
                 CURRENT_DIRECTORIES = int(STATS.get("directories_discovered", 0))
@@ -760,15 +793,7 @@ def list_entries_with_progress(
                 )
                 ENTRIES_PER_SECOND = ENTRY_DELTA / WINDOW_SECONDS
                 DIRS_PER_SECOND = DIR_DELTA / WINDOW_SECONDS
-                SLOW_DIRS = STATS.get("slow_dirs", []) if isinstance(STATS, dict) else []
-                SLOW_TOP = ""
-                if isinstance(SLOW_DIRS, list) and SLOW_DIRS:
-                    TOP_PATHS = [
-                        f"{ITEM.get('path', '/')}: {ITEM.get('duration_seconds', 0)}s"
-                        for ITEM in SLOW_DIRS[:3]
-                        if isinstance(ITEM, dict)
-                    ]
-                    SLOW_TOP = ", ".join(TOP_PATHS)
+                SLOW_TOP = format_slow_directory_summary(STATS)
                 log_line(
                     LOG_FILE,
                     "debug",

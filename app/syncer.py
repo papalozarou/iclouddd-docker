@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import errno
 import os
 import shutil
 import time
@@ -933,8 +934,18 @@ def delete_removed_local_paths(
             DELETED_DIRS += 1
             if LOG_FILE is not None:
                 log_line(LOG_FILE, "debug", f"Directory deleted removed: {RELATIVE_PATH}")
-        except OSError:
-            continue
+        except OSError as ERROR:
+            if is_non_empty_directory_error(ERROR):
+                continue
+
+            ERRORS += 1
+            if LOG_FILE is not None:
+                log_line(
+                    LOG_FILE,
+                    "debug",
+                    f"Directory delete error: {RELATIVE_PATH} "
+                    f"({type(ERROR).__name__}: {ERROR})",
+                )
         except Exception as ERROR:
             ERRORS += 1
             if LOG_FILE is not None:
@@ -946,6 +957,17 @@ def delete_removed_local_paths(
                 )
 
     return DELETED_FILES, DELETED_DIRS, ERRORS
+
+
+# ------------------------------------------------------------------------------
+# This function identifies the expected non-empty-directory delete error.
+#
+# 1. "ERROR" is the exception raised by "rmdir()".
+#
+# Returns: True only for the benign non-empty-directory case.
+# ------------------------------------------------------------------------------
+def is_non_empty_directory_error(ERROR: OSError) -> bool:
+    return ERROR.errno in {errno.ENOTEMPTY, errno.EEXIST}
 
 
 # ------------------------------------------------------------------------------

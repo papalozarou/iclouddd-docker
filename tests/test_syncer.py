@@ -7,6 +7,7 @@
 # ------------------------------------------------------------------------------
 
 from pathlib import Path
+import errno
 import os
 import tempfile
 import time
@@ -26,6 +27,7 @@ from app.syncer import (
     change_conflicting_local_path,
     collect_local_files,
     collect_mismatches,
+    delete_removed_local_paths,
     ensure_directories,
     entry_metadata,
     get_transfer_failure_reason,
@@ -1188,6 +1190,56 @@ class TestSyncerHelpers(unittest.TestCase):
             )
 
             self.assertTrue((ROOT_DIR / "docs" / "stale.txt").exists())
+
+# --------------------------------------------------------------------------
+# This test confirms non-empty directory delete errors are treated as benign.
+# --------------------------------------------------------------------------
+    def test_delete_removed_local_paths_ignores_non_empty_directory_error(self) -> None:
+        FILES: list[RemoteEntry] = []
+        DIRECTORIES: list[RemoteEntry] = []
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            STALE_DIR = ROOT_DIR / "docs"
+            STALE_DIR.mkdir(parents=True, exist_ok=True)
+            (STALE_DIR / "keep.txt").write_text("keep", encoding="utf-8")
+
+            with patch.object(Path, "rmdir", side_effect=OSError(errno.ENOTEMPTY, "not empty")):
+                DELETED_FILES, DELETED_DIRS, ERRORS = delete_removed_local_paths(
+                    ROOT_DIR,
+                    FILES,
+                    DIRECTORIES,
+                )
+
+        self.assertEqual(DELETED_FILES, 1)
+        self.assertEqual(DELETED_DIRS, 0)
+        self.assertEqual(ERRORS, 0)
+
+# --------------------------------------------------------------------------
+# This test confirms unexpected directory delete errors are counted and logged.
+# --------------------------------------------------------------------------
+    def test_delete_removed_local_paths_counts_unexpected_directory_error(self) -> None:
+        FILES: list[RemoteEntry] = []
+        DIRECTORIES: list[RemoteEntry] = []
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            STALE_DIR = ROOT_DIR / "docs"
+            STALE_DIR.mkdir(parents=True, exist_ok=True)
+
+            with patch.object(Path, "rmdir", side_effect=PermissionError(errno.EACCES, "denied")):
+                with patch("app.syncer.log_line") as LOG_LINE:
+                    DELETED_FILES, DELETED_DIRS, ERRORS = delete_removed_local_paths(
+                        ROOT_DIR,
+                        FILES,
+                        DIRECTORIES,
+                        ROOT_DIR / "worker.log",
+                    )
+
+        self.assertEqual(DELETED_FILES, 0)
+        self.assertEqual(DELETED_DIRS, 0)
+        self.assertEqual(ERRORS, 1)
+        self.assertTrue(any("Directory delete error:" in CALL.args[2] for CALL in LOG_LINE.call_args_list))
 
 # --------------------------------------------------------------------------
 # This test confirms reconciled package entries persist package metadata in

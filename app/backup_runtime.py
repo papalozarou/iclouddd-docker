@@ -264,6 +264,8 @@ def run_backup(
         LOG_FILE,
         BACKUP_DELETE_REMOVED=CONFIG.backup_delete_removed,
     )
+    DELETE_ERRORS = max(int(getattr(SUMMARY, "delete_errors", 0)), 0)
+    TOTAL_ERRORS = max(int(SUMMARY.error_files), 0) + DELETE_ERRORS
     DEPS.log_line_fn(
         LOG_FILE,
         "debug",
@@ -272,7 +274,9 @@ def run_backup(
         f"transferred={SUMMARY.transferred_files}, "
         f"bytes={SUMMARY.transferred_bytes}, "
         f"skipped={SUMMARY.skipped_files}, "
-        f"errors={SUMMARY.error_files}, "
+        f"transfer_errors={SUMMARY.error_files}, "
+        f"delete_errors={DELETE_ERRORS}, "
+        f"total_errors={TOTAL_ERRORS}, "
         f"manifest_entries={len(NEW_MANIFEST)}",
     )
     TRAVERSAL_COMPLETE = bool(getattr(SUMMARY, "traversal_complete", True))
@@ -290,8 +294,6 @@ def run_backup(
 
     DURATION_SECONDS = int(time.time()) - RUN_START_EPOCH
     AVERAGE_SPEED = DEPS.format_speed_fn(SUMMARY.transferred_bytes, DURATION_SECONDS)
-    DELETE_ERRORS = max(int(getattr(SUMMARY, "delete_errors", 0)), 0)
-    TOTAL_ERRORS = max(int(SUMMARY.error_files), 0) + DELETE_ERRORS
     STATUS_LINES: list[str] = []
 
     if not TRAVERSAL_COMPLETE:

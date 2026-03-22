@@ -608,6 +608,12 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertTrue(any("Effective backup settings detail:" in LINE for LINE in DEBUG_LINES))
             self.assertTrue(any("Loaded manifest entries:" in LINE for LINE in DEBUG_LINES))
             self.assertTrue(any("Sync summary detail:" in LINE for LINE in DEBUG_LINES))
+            self.assertTrue(
+                any(
+                    "transfer_errors=0, delete_errors=0, total_errors=0" in LINE
+                    for LINE in DEBUG_LINES
+                )
+            )
             self.assertIn("⬇️ PCD Drive - Backup started", NOTIFY.call_args_list[0].args[1])
             self.assertIn("Files downloading for Apple ID alice@example.com.", NOTIFY.call_args_list[0].args[1])
             self.assertIn("Scheduled every 60 minutes.", NOTIFY.call_args_list[0].args[1])
@@ -772,6 +778,13 @@ class TestMainRuntimeHelpers(unittest.TestCase):
 
             self.assertIn("Errors: 4", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Delete errors: 3", NOTIFY.call_args_list[1].args[1])
+            DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
+            self.assertTrue(
+                any(
+                    "transfer_errors=1, delete_errors=3, total_errors=4" in LINE
+                    for LINE in DEBUG_LINES
+                )
+            )
             self.assertEqual(
                 LOG_LINE.call_args_list[-1].args[2],
                 "Backup complete. Transferred 1/3, skipped 1, errors 4.",

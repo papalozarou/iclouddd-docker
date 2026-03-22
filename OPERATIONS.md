@@ -24,6 +24,8 @@
   privilege drop works.
 - Set `LOG_LEVEL=debug` in Compose `default-env` for verbose runtime
   diagnostics.
+- Backup debug summaries include transfer errors, delete errors, and the
+  combined total so debug output matches the completion summary.
 - At `LOG_LEVEL=info`, worker logs include stage boundary markers for
   traversal and transfer start/finish so run progress is still visible.
 - Traversal can take a long time for large iCloud libraries, and transfer can

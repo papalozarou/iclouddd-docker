@@ -27,6 +27,12 @@ This file defines various coding standards for agents to adhere to.
 - MUST: If you propose implementing on a specific branch, perform the work on that branch first and only merge to main after user confirmation
 - MUST: After each block of suggested and user-approved changes is applied, explicitly suggest a commit (with a clear commit message) before moving to the next change block
 
+## Regression prevention
+- MUST: For any bug fix, define the user-visible behaviour contract before editing
+- MUST: For any fix to runtime, auth, sync, state, or Telegram logic, add or update regression tests that exercise the full behaviour boundary, not just the modified function
+- MUST: Before merge, perform an explicit regression review covering adjacent flows, documentation alignment, and restart, retry, and backlog behaviour where relevant
+- MUST NOT: Describe a fix as complete or regression-safe unless the behavioural contract has been rechecked against code, tests, and documentation
+
 ## Documentation
 - MUST: Use UK English, not US
 - MUST: Ensure a README.md exists

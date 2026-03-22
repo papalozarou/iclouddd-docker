@@ -22,6 +22,7 @@ from app.main import (
     get_next_run_epoch,
     handle_command,
     notify,
+    notify_container_stopped,
     parse_iso,
     process_reauth_reminders,
     process_commands,
@@ -220,6 +221,23 @@ class TestMainRuntimeHelpers(unittest.TestCase):
         PRINT.assert_called_once()
         self.assertIn("Telegram notification failed", PRINT.call_args[0][0])
         self.assertIn("Bad Request", PRINT.call_args[0][0])
+
+# --------------------------------------------------------------------------
+# This test confirms stop notifications use the standard stopped template.
+# --------------------------------------------------------------------------
+    def test_notify_container_stopped_uses_standard_template(self) -> None:
+        TELEGRAM = TelegramConfig("token", "12345")
+
+        with patch("app.main.notify") as NOTIFY:
+            notify_container_stopped(
+                TELEGRAM,
+                "alice@example.com",
+                "Worker process exited.",
+            )
+
+        NOTIFY.assert_called_once()
+        self.assertIn("🛑 PCD Drive - Container stopped", NOTIFY.call_args[0][1])
+        self.assertIn("Worker process exited.", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms attempt_auth success resets auth flags and notifies.

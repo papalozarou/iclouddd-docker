@@ -568,6 +568,22 @@ class TestICloudClientTraversal(unittest.TestCase):
         self.assertEqual(len(SECOND_SNAPSHOT["slow_dirs"]), 1)
         self.assertEqual(SECOND_SNAPSHOT["slow_dirs"][0]["path"], "docs")
 
+    def test_build_child_entry_uses_child_metadata_for_files(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            CHILD = SimpleNamespace(
+                date_modified="2026-03-22T10:00:00Z",
+                size=42,
+            )
+
+            ENTRY = CLIENT._build_child_entry("docs/file.txt", CHILD, False)
+
+        self.assertEqual(ENTRY.path, "docs/file.txt")
+        self.assertFalse(ENTRY.is_dir)
+        self.assertEqual(ENTRY.size, 42)
+        self.assertEqual(ENTRY.modified, "2026-03-22T10:00:00Z")
+
     def test_node_dir_does_not_retry_non_retryable_errors(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_icloud(TMPDIR)

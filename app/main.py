@@ -381,6 +381,26 @@ def handle_command(
 
 
 # ------------------------------------------------------------------------------
+# This function sends the standard container-stopped notification.
+#
+# 1. "TELEGRAM" is Telegram integration configuration.
+# 2. "APPLE_ID_LABEL" is the formatted Apple ID label.
+# 3. "STOP_STATUS" is the final worker stop summary.
+#
+# Returns: None.
+# ------------------------------------------------------------------------------
+def notify_container_stopped(
+    TELEGRAM: TelegramConfig,
+    APPLE_ID_LABEL: str,
+    STOP_STATUS: str,
+) -> None:
+    notify(
+        TELEGRAM,
+        build_container_stopped_message(APPLE_ID_LABEL, STOP_STATUS),
+    )
+
+
+# ------------------------------------------------------------------------------
 # This function is the worker entrypoint used by the container launcher.
 #
 # Returns: Non-zero on startup validation/runtime failure.
@@ -460,13 +480,12 @@ def main() -> int:
     finally:
         if RUNTIME_CONTEXT is None:
             APPLE_ID_LABEL = format_apple_id_label(CONFIG.icloud_email)
-            notify(TELEGRAM, build_container_stopped_message(APPLE_ID_LABEL, STOP_STATUS))
+            notify_container_stopped(TELEGRAM, APPLE_ID_LABEL, STOP_STATUS)
         else:
-            notify(
+            notify_container_stopped(
                 RUNTIME_CONTEXT.TELEGRAM,
-                build_container_stopped_message(
-                    RUNTIME_CONTEXT.APPLE_ID_LABEL, STOP_STATUS
-                ),
+                RUNTIME_CONTEXT.APPLE_ID_LABEL,
+                STOP_STATUS,
             )
         if HEARTBEAT_STOP_EVENT is not None:
             HEARTBEAT_STOP_EVENT.set()

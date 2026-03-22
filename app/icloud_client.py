@@ -565,26 +565,12 @@ class ICloudDriveClient:
 
             if IS_DIR:
                 self._record_traversal_entry(True)
-                ENTRIES.append(
-                    RemoteEntry(
-                        path=RELATIVE_PATH,
-                        is_dir=True,
-                        size=0,
-                        modified=self._child_modified(CHILD),
-                    )
-                )
+                ENTRIES.append(self._build_child_entry(RELATIVE_PATH, CHILD, True))
                 CHILD_DIRECTORIES.append((RELATIVE_PATH, CHILD))
                 continue
 
             self._record_traversal_entry(False)
-            ENTRIES.append(
-                RemoteEntry(
-                    path=RELATIVE_PATH,
-                    is_dir=False,
-                    size=self._child_size(CHILD),
-                    modified=self._child_modified(CHILD),
-                )
-            )
+            ENTRIES.append(self._build_child_entry(RELATIVE_PATH, CHILD, False))
 
         return ENTRIES, CHILD_DIRECTORIES
 
@@ -616,14 +602,7 @@ class ICloudDriveClient:
 
             RELATIVE_PATH = f"{CURRENT_PATH}/{NAME}".strip("/")
             self._record_traversal_entry(True)
-            ENTRIES.append(
-                RemoteEntry(
-                    path=RELATIVE_PATH,
-                    is_dir=True,
-                    size=0,
-                    modified=self._item_modified(ITEM),
-                )
-            )
+            ENTRIES.append(self._build_directory_item_entry(RELATIVE_PATH, ITEM))
 
             CHILD = self._child_node(NODE, NAME)
 
@@ -852,28 +831,64 @@ class ICloudDriveClient:
 
             if IS_DIR:
                 self._record_traversal_entry(True)
-                RESULT.append(
-                    RemoteEntry(
-                        path=RELATIVE_PATH,
-                        is_dir=True,
-                        size=0,
-                        modified=self._child_modified(CHILD),
-                    )
-                )
+                RESULT.append(self._build_child_entry(RELATIVE_PATH, CHILD, True))
                 RESULT.extend(self._walk_node(CHILD, RELATIVE_PATH))
                 continue
 
             self._record_traversal_entry(False)
-            RESULT.append(
-                RemoteEntry(
-                    path=RELATIVE_PATH,
-                    is_dir=False,
-                    size=self._child_size(CHILD),
-                    modified=self._child_modified(CHILD),
-                )
-            )
+            RESULT.append(self._build_child_entry(RELATIVE_PATH, CHILD, False))
 
         return RESULT
+
+# --------------------------------------------------------------------------
+# This function builds a remote entry from a child node probe result.
+#
+# 1. "RELATIVE_PATH" is the discovered remote path.
+# 2. "CHILD" is the pyicloud child node.
+# 3. "IS_DIR" indicates whether the child is a directory.
+#
+# Returns: Normalised remote entry for traversal results.
+# --------------------------------------------------------------------------
+    def _build_child_entry(
+        self,
+        RELATIVE_PATH: str,
+        CHILD: Any,
+        IS_DIR: bool,
+    ) -> RemoteEntry:
+        if IS_DIR:
+            return RemoteEntry(
+                path=RELATIVE_PATH,
+                is_dir=True,
+                size=0,
+                modified=self._child_modified(CHILD),
+            )
+
+        return RemoteEntry(
+            path=RELATIVE_PATH,
+            is_dir=False,
+            size=self._child_size(CHILD),
+            modified=self._child_modified(CHILD),
+        )
+
+# --------------------------------------------------------------------------
+# This function builds a directory remote entry from item metadata payload.
+#
+# 1. "RELATIVE_PATH" is the discovered remote path.
+# 2. "ITEM" is the normalised directory metadata item.
+#
+# Returns: Directory remote entry for traversal results.
+# --------------------------------------------------------------------------
+    def _build_directory_item_entry(
+        self,
+        RELATIVE_PATH: str,
+        ITEM: Any,
+    ) -> RemoteEntry:
+        return RemoteEntry(
+            path=RELATIVE_PATH,
+            is_dir=True,
+            size=0,
+            modified=self._item_modified(ITEM),
+        )
 
 # --------------------------------------------------------------------------
 # This function infers whether a child node is a directory.

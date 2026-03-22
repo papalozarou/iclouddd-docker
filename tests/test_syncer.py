@@ -23,6 +23,7 @@ install_dependency_stubs()
 from app.syncer import (
     apply_remote_modified_time,
     build_local_file_index,
+    change_conflicting_local_path,
     collect_local_files,
     collect_mismatches,
     ensure_directories,
@@ -322,6 +323,39 @@ class TestSyncerHelpers(unittest.TestCase):
             self.assertTrue(any("Directory ensured: docs/nested" in CALL.args[2] for CALL in LOG_LINE.call_args_list))
 
 # --------------------------------------------------------------------------
+# This test confirms ensure_directories replaces a conflicting file when the
+# remote path is now a directory.
+# --------------------------------------------------------------------------
+    def test_ensure_directories_replaces_conflicting_file(self) -> None:
+        DIRECTORIES = [RemoteEntry("docs/nested", True, 0, "m1")]
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            CONFLICT_PATH = ROOT_DIR / "docs" / "nested"
+            CONFLICT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            CONFLICT_PATH.write_text("file", encoding="utf-8")
+
+            ensure_directories(ROOT_DIR, DIRECTORIES)
+
+            self.assertTrue(CONFLICT_PATH.exists())
+            self.assertTrue(CONFLICT_PATH.is_dir())
+
+# --------------------------------------------------------------------------
+# This test confirms conflicting local path cleanup removes directories when a
+# file destination is expected.
+# --------------------------------------------------------------------------
+    def test_change_conflicting_local_path_removes_directory_for_file_target(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOCAL_PATH = Path(TMPDIR) / "docs" / "report.txt"
+            LOCAL_PATH.mkdir(parents=True, exist_ok=True)
+            (LOCAL_PATH / "old.txt").write_text("old", encoding="utf-8")
+
+            RESULT = change_conflicting_local_path(LOCAL_PATH, False)
+
+            self.assertTrue(RESULT)
+            self.assertFalse(LOCAL_PATH.exists())
+
+# --------------------------------------------------------------------------
 # This test confirms local file index building skips files whose metadata
 # cannot be read.
 # --------------------------------------------------------------------------
@@ -601,7 +635,7 @@ class TestSyncerHelpers(unittest.TestCase):
 # This test confirms a stray local directory does not cause a normal remote
 # file to be treated as a package reconciliation success.
 # --------------------------------------------------------------------------
-    def test_transfer_if_required_rejects_local_directory_conflict_for_normal_file(self) -> None:
+    def test_transfer_if_required_replaces_local_directory_conflict_for_normal_file(self) -> None:
         ENTRY = RemoteEntry(
             path="docs/report.txt",
             is_dir=False,
@@ -622,11 +656,44 @@ class TestSyncerHelpers(unittest.TestCase):
                 True,
             )
 
-        self.assertFalse(IS_SUCCESS)
+        self.assertTrue(IS_SUCCESS)
         self.assertEqual(ATTEMPT, 1)
-        self.assertEqual(REASON, "local_directory_conflict")
-        self.assertEqual(CLIENT.download_calls, 0)
+        self.assertEqual(REASON, "file")
+        self.assertEqual(CLIENT.download_calls, 1)
         self.assertEqual(CLIENT.package_calls, 0)
+
+# --------------------------------------------------------------------------
+# This test confirms known package paths replace conflicting local files
+# before package export.
+# --------------------------------------------------------------------------
+    def test_transfer_if_required_replaces_local_file_conflict_for_package_path(self) -> None:
+        ENTRY = RemoteEntry(
+            path="docs/archive.bundle",
+            is_dir=False,
+            size=4,
+            modified="2026-03-07T12:00:00Z",
+        )
+        CLIENT = FakeClient([ENTRY], {})
+        CLIENT.package_results["docs/archive.bundle"] = True
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            CONFLICT_FILE = ROOT_DIR / "docs" / "archive.bundle"
+            CONFLICT_FILE.parent.mkdir(parents=True, exist_ok=True)
+            CONFLICT_FILE.write_text("file", encoding="utf-8")
+
+            IS_SUCCESS, ATTEMPT, REASON = transfer_if_required(
+                CLIENT,
+                ROOT_DIR,
+                ENTRY,
+                True,
+            )
+
+            self.assertTrue(IS_SUCCESS)
+            self.assertEqual(ATTEMPT, 1)
+            self.assertEqual(REASON, "package")
+            self.assertEqual(CLIENT.download_calls, 0)
+            self.assertEqual(CLIENT.package_calls, 1)
 
 # --------------------------------------------------------------------------
 # This test confirms known package paths use package-first handling and

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 import os
+import shutil
 import time
 
 from app.icloud_client import ICloudDriveClient, RemoteEntry
@@ -837,6 +838,8 @@ def ensure_directories(
 ) -> None:
     for ENTRY in DIRECTORIES:
         LOCAL_PATH = OUTPUT_DIR / ENTRY.path
+        if not change_conflicting_local_path(LOCAL_PATH, True):
+            continue
         LOCAL_PATH.mkdir(parents=True, exist_ok=True)
         if LOG_FILE is not None:
             log_line(
@@ -844,6 +847,35 @@ def ensure_directories(
                 "debug",
                 f"Directory ensured: {ENTRY.path}",
             )
+
+
+# ------------------------------------------------------------------------------
+# This function reconciles a local path so its type matches the remote entry.
+#
+# 1. "LOCAL_PATH" is the destination path on disk.
+# 2. "EXPECT_DIRECTORY" selects directory or file destination handling.
+#
+# Returns: True when the local path is ready for the expected type.
+# ------------------------------------------------------------------------------
+def change_conflicting_local_path(LOCAL_PATH: Path, EXPECT_DIRECTORY: bool) -> bool:
+    if not LOCAL_PATH.exists():
+        return True
+
+    if EXPECT_DIRECTORY and LOCAL_PATH.is_dir():
+        return True
+
+    if not EXPECT_DIRECTORY and not LOCAL_PATH.is_dir():
+        return True
+
+    try:
+        if LOCAL_PATH.is_dir():
+            shutil.rmtree(LOCAL_PATH)
+            return True
+
+        LOCAL_PATH.unlink()
+        return True
+    except OSError:
+        return False
 
 
 # ------------------------------------------------------------------------------
@@ -1081,16 +1113,15 @@ def transfer_if_required(
         return True, 1, "skipped"
 
     LOCAL_PATH = OUTPUT_DIR / ENTRY.path
-    HAS_LOCAL_DIRECTORY = LOCAL_PATH.exists() and LOCAL_PATH.is_dir()
     IS_KNOWN_PACKAGE_PATH = is_known_package_path(ENTRY.path)
     ATTEMPT = 1
 
     while ATTEMPT <= TRANSFER_RETRY_ATTEMPTS:
         try:
-            if HAS_LOCAL_DIRECTORY:
-                if not IS_KNOWN_PACKAGE_PATH:
-                    return False, ATTEMPT, "local_directory_conflict"
+            if not change_conflicting_local_path(LOCAL_PATH, IS_KNOWN_PACKAGE_PATH):
+                return False, ATTEMPT, "local_type_conflict_cleanup_failed"
 
+            if LOCAL_PATH.exists() and LOCAL_PATH.is_dir():
                 IS_PACKAGE_SUCCESS = CLIENT.download_package_tree(ENTRY.path, LOCAL_PATH)
                 if IS_PACKAGE_SUCCESS:
                     return True, ATTEMPT, "package"

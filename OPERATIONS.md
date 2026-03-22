@@ -8,9 +8,10 @@
   seconds in both recurring and one-shot execution paths.
 - Telegram commands are ignored unless they come from `H_TGM_CHAT_ID`.
 - If `H_TGM_CHAT_ID` is unset, Telegram command polling stays disabled.
-- On startup, the worker drains any older queued Telegram updates before it
+- On startup, the worker drains all older queued Telegram updates before it
   starts active command polling. This prevents stale `backup`, `auth`, and
-  `reauth` commands from replaying after a restart.
+  `reauth` commands from replaying after a restart, even when Telegram
+  returns the backlog across multiple batches.
 - If Telegram is not configured, notifications are skipped quietly rather than
   logged as delivery failures.
 - The same internal update cursor is then reused for active polling, so

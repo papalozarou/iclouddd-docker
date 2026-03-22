@@ -197,7 +197,12 @@ class TestWorkerRuntime(unittest.TestCase):
                 False,
                 "none",
             )
-            PROCESS_COMMANDS = Mock(return_value=([("auth", "123456")], 9))
+            PROCESS_COMMANDS = Mock(
+                side_effect=[
+                    ([], None),
+                    ([("auth", "123456")], 9),
+                ]
+            )
             HANDLE_COMMAND = Mock(return_value=(UPDATED_STATE, True, False))
             DEPS = self.build_deps(
                 PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
@@ -223,13 +228,19 @@ class TestWorkerRuntime(unittest.TestCase):
         DEPS.sleep_fn.assert_called_once()
 
 # --------------------------------------------------------------------------
-# This test confirms startup backlog drain discards historical commands and
-# returns polling state for active command polling.
+# This test confirms startup backlog drain discards all historical command
+# batches and returns the final polling state for active command polling.
 # --------------------------------------------------------------------------
     def test_drain_startup_command_backlog_returns_next_offset(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             RUNTIME_CONTEXT, _TELEGRAM, _AUTH_STATE = self.build_runtime_context(TMPDIR)
-            PROCESS_COMMANDS = Mock(return_value=([("backup", "")], 41))
+            PROCESS_COMMANDS = Mock(
+                side_effect=[
+                    ([("backup", "")], 41),
+                    ([("auth", "123456")], 42),
+                    ([], 42),
+                ]
+            )
             DEPS = self.build_deps(
                 PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
                 HANDLE_COMMAND_FN=Mock(),
@@ -240,8 +251,12 @@ class TestWorkerRuntime(unittest.TestCase):
 
             RESULT = drain_startup_command_backlog(RUNTIME_CONTEXT, DEPS)
 
-        self.assertEqual(RESULT, CommandPollingState(next_update_offset=41))
-        PROCESS_COMMANDS.assert_called_once_with(
+        self.assertEqual(RESULT, CommandPollingState(next_update_offset=42))
+        self.assertEqual(PROCESS_COMMANDS.call_count, 3)
+        self.assertEqual(PROCESS_COMMANDS.call_args_list[0].args[2], None)
+        self.assertEqual(PROCESS_COMMANDS.call_args_list[1].args[2], 41)
+        self.assertEqual(PROCESS_COMMANDS.call_args_list[2].args[2], 42)
+        PROCESS_COMMANDS.assert_any_call(
             RUNTIME_CONTEXT.TELEGRAM,
             RUNTIME_CONTEXT.CONFIG.container_username,
             None,
@@ -302,6 +317,7 @@ class TestWorkerRuntime(unittest.TestCase):
             PROCESS_COMMANDS = Mock(
                 side_effect=[
                     ([("backup", "")], 9),
+                    ([], 9),
                     ([("auth", "123456")], 10),
                 ]
             )
@@ -325,7 +341,7 @@ class TestWorkerRuntime(unittest.TestCase):
 
         self.assertEqual(RESULT_STATE, UPDATED_STATE)
         self.assertTrue(RESULT_AUTH)
-        self.assertEqual(PROCESS_COMMANDS.call_count, 2)
+        self.assertEqual(PROCESS_COMMANDS.call_count, 3)
         HANDLE_COMMAND.assert_called_once_with(
             "auth",
             "123456",
@@ -381,7 +397,7 @@ class TestWorkerRuntime(unittest.TestCase):
         with tempfile.TemporaryDirectory() as TMPDIR:
             RUNTIME_CONTEXT, TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
             NOTIFY = Mock()
-            PROCESS_COMMANDS = Mock(side_effect=[([], 5), ([("backup", "")], 6), ([], 6)])
+            PROCESS_COMMANDS = Mock(side_effect=[([], None), ([("backup", "")], 6), ([], 6)])
             HANDLE_COMMAND = Mock(return_value=(AUTH_STATE, False, True))
             ENFORCE_SAFETY_NET = Mock(return_value=True)
             SLEEP_CALLS = {"count": 0}
@@ -423,7 +439,7 @@ class TestWorkerRuntime(unittest.TestCase):
                 reauth_pending=True,
             )
             NOTIFY = Mock()
-            PROCESS_COMMANDS = Mock(side_effect=[([], 5), ([("backup", "")], 6), ([], 6)])
+            PROCESS_COMMANDS = Mock(side_effect=[([], None), ([("backup", "")], 6), ([], 6)])
             HANDLE_COMMAND = Mock(return_value=(AUTH_STATE, True, True))
             ENFORCE_SAFETY_NET = Mock(return_value=True)
             SLEEP_CALLS = {"count": 0}
@@ -464,6 +480,7 @@ class TestWorkerRuntime(unittest.TestCase):
             PROCESS_COMMANDS = Mock(
                 side_effect=[
                     ([("backup", "")], 9),
+                    ([], 9),
                     ([("backup", "")], 10),
                 ]
             )
@@ -490,6 +507,7 @@ class TestWorkerRuntime(unittest.TestCase):
                     DEPS,
                 )
 
+        self.assertEqual(PROCESS_COMMANDS.call_count, 3)
         HANDLE_COMMAND.assert_called_once()
         DEPS.run_backup_fn.assert_called_once()
 
@@ -501,7 +519,7 @@ class TestWorkerRuntime(unittest.TestCase):
         with tempfile.TemporaryDirectory() as TMPDIR:
             RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
             NOTIFY = Mock()
-            PROCESS_COMMANDS = Mock(side_effect=[([], 5), ([("backup", "")], 6), ([], 6)])
+            PROCESS_COMMANDS = Mock(side_effect=[([], None), ([("backup", "")], 6), ([], 6)])
             HANDLE_COMMAND = Mock(return_value=(AUTH_STATE, True, True))
             ENFORCE_SAFETY_NET = Mock(return_value=False)
             SLEEP_CALLS = {"count": 0}

@@ -103,7 +103,7 @@ def read_command_batch(
 
 
 # ------------------------------------------------------------------------------
-# This function drains queued Telegram commands once at startup.
+# This function drains all queued Telegram commands at startup.
 #
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
 # 2. "DEPS" groups runtime callbacks used by worker orchestration.
@@ -114,13 +114,20 @@ def drain_startup_command_backlog(
     RUNTIME_CONTEXT: WorkerRuntimeContext,
     DEPS: WorkerRuntimeDeps,
 ) -> CommandPollingState:
-    _COMMANDS, POLLING_STATE = read_command_batch(
-        RUNTIME_CONTEXT,
-        CommandPollingState(),
-        DEPS,
-        DRAIN_ONLY=True,
-    )
-    return POLLING_STATE
+    POLLING_STATE = CommandPollingState()
+
+    while True:
+        _COMMANDS, NEXT_STATE = read_command_batch(
+            RUNTIME_CONTEXT,
+            POLLING_STATE,
+            DEPS,
+            DRAIN_ONLY=True,
+        )
+
+        if NEXT_STATE.next_update_offset == POLLING_STATE.next_update_offset:
+            return NEXT_STATE
+
+        POLLING_STATE = NEXT_STATE
 
 
 # ------------------------------------------------------------------------------

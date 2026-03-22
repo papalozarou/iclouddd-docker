@@ -85,6 +85,60 @@ class TestState(unittest.TestCase):
         self.assertEqual(WRITTEN, PAYLOAD)
 
 # --------------------------------------------------------------------------
+# This test confirms write failures warn and leave the destination untouched.
+# --------------------------------------------------------------------------
+    def test_write_json_warns_when_open_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "data.json"
+
+            with patch.object(Path, "open", side_effect=OSError("disk full")):
+                with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                    with patch("builtins.print") as PRINT:
+                        write_json(PATH, {"a": 1})
+
+            self.assertFalse(PATH.exists())
+            self.assertTrue(any("State write failed" in CALL.args[0] for CALL in PRINT.call_args_list))
+
+# --------------------------------------------------------------------------
+# This test confirms replace failures warn and remove the temporary file.
+# --------------------------------------------------------------------------
+    def test_write_json_warns_and_cleans_up_when_replace_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "data.json"
+            TEMP_PATH = Path(TMPDIR) / "data.json.tmp"
+
+            with patch.object(Path, "replace", side_effect=OSError("replace failed")):
+                with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                    with patch("builtins.print") as PRINT:
+                        write_json(PATH, {"a": 1})
+
+            self.assertFalse(PATH.exists())
+            self.assertFalse(TEMP_PATH.exists())
+            self.assertTrue(any("State write failed" in CALL.args[0] for CALL in PRINT.call_args_list))
+
+# --------------------------------------------------------------------------
+# This test confirms temporary cleanup failures are warned and do not raise.
+# --------------------------------------------------------------------------
+    def test_write_json_warns_when_temporary_cleanup_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "data.json"
+
+            ORIGINAL_UNLINK = Path.unlink
+
+            def fake_unlink(TARGET: Path, *ARGS, **KWARGS):
+                if TARGET.name.endswith(".tmp"):
+                    raise OSError("unlink failed")
+                return ORIGINAL_UNLINK(TARGET, *ARGS, **KWARGS)
+
+            with patch.object(Path, "replace", side_effect=OSError("replace failed")):
+                with patch.object(Path, "unlink", new=fake_unlink):
+                    with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                        with patch("builtins.print") as PRINT:
+                            write_json(PATH, {"a": 1})
+
+            self.assertTrue(any("Temporary state cleanup failed" in CALL.args[0] for CALL in PRINT.call_args_list))
+
+# --------------------------------------------------------------------------
 # This test confirms auth-state loading uses safe defaults when missing.
 # --------------------------------------------------------------------------
     def test_load_auth_state_defaults(self) -> None:

@@ -102,10 +102,36 @@ def quarantine_corrupt_json(PATH: Path) -> None:
 def write_json(PATH: Path, PAYLOAD: dict[str, Any]) -> None:
     TEMPORARY_PATH = PATH.with_suffix(PATH.suffix + ".tmp")
 
-    with TEMPORARY_PATH.open("w", encoding="utf-8") as HANDLE:
-        json.dump(PAYLOAD, HANDLE, indent=2, sort_keys=True)
+    try:
+        with TEMPORARY_PATH.open("w", encoding="utf-8") as HANDLE:
+            json.dump(PAYLOAD, HANDLE, indent=2, sort_keys=True)
 
-    TEMPORARY_PATH.replace(PATH)
+        TEMPORARY_PATH.replace(PATH)
+    except OSError as ERROR:
+        warn_state_issue(
+            f"State write failed at {PATH}: {type(ERROR).__name__}: {ERROR}",
+        )
+        cleanup_temporary_state_file(TEMPORARY_PATH)
+
+
+# ------------------------------------------------------------------------------
+# This function removes a temporary state file after a failed write attempt.
+#
+# 1. "PATH" is the temporary file path to remove.
+#
+# Returns: None.
+# ------------------------------------------------------------------------------
+def cleanup_temporary_state_file(PATH: Path) -> None:
+    if not PATH.exists():
+        return
+
+    try:
+        PATH.unlink()
+    except OSError as ERROR:
+        warn_state_issue(
+            f"Temporary state cleanup failed at {PATH}: "
+            f"{type(ERROR).__name__}: {ERROR}",
+        )
 
 
 # ------------------------------------------------------------------------------

@@ -183,7 +183,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 STATE,
                 True,
                 SimpleNamespace(
-                    process_commands_fn=Mock(),
+                    process_commands_fn=Mock(return_value=([], None)),
                     handle_command_fn=Mock(),
                     time_fn=lambda: 0,
                     sleep_fn=Mock(),

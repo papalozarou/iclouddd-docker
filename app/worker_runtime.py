@@ -62,6 +62,26 @@ class WorkerRunResult:
 
 
 # ------------------------------------------------------------------------------
+# This function drains queued Telegram commands once at startup.
+#
+# 1. "RUNTIME_CONTEXT" is shared worker runtime state.
+# 2. "DEPS" groups runtime callbacks used by worker orchestration.
+#
+# Returns: Next update offset to use for active polling.
+# ------------------------------------------------------------------------------
+def drain_startup_command_backlog(
+    RUNTIME_CONTEXT: WorkerRuntimeContext,
+    DEPS: WorkerRuntimeDeps,
+) -> int | None:
+    _COMMANDS, NEXT_UPDATE_OFFSET = DEPS.process_commands_fn(
+        RUNTIME_CONTEXT.TELEGRAM,
+        RUNTIME_CONTEXT.CONFIG.container_username,
+        None,
+    )
+    return NEXT_UPDATE_OFFSET
+
+
+# ------------------------------------------------------------------------------
 # This function waits for one-shot authentication commands before exit.
 #
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
@@ -80,7 +100,7 @@ def wait_for_one_shot_auth(
     DEPS: WorkerRuntimeDeps,
 ) -> tuple[AuthState, bool]:
     START_EPOCH = int(DEPS.time_fn())
-    UPDATE_OFFSET: int | None = None
+    UPDATE_OFFSET = drain_startup_command_backlog(RUNTIME_CONTEXT, DEPS)
 
     while True:
         if IS_AUTHENTICATED and not AUTH_STATE.reauth_pending:
@@ -241,7 +261,7 @@ def run_scheduled_worker_loop(
     DEPS: WorkerRuntimeDeps,
 ) -> None:
     BACKUP_REQUESTED = False
-    NEXT_UPDATE_OFFSET: int | None = None
+    NEXT_UPDATE_OFFSET = drain_startup_command_backlog(RUNTIME_CONTEXT, DEPS)
     INITIAL_EPOCH = int(DEPS.time_fn())
 
     if RUNTIME_CONTEXT.CONFIG.schedule_mode == "interval":

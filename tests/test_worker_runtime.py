@@ -18,6 +18,7 @@ from app.state import AuthState
 from app.telegram_bot import TelegramConfig
 from app.worker_runtime import (
     WorkerRunResult,
+    drain_startup_command_backlog,
     run_one_shot_worker,
     run_scheduled_worker_loop,
     run_worker_runtime,
@@ -173,7 +174,11 @@ class TestWorkerRuntime(unittest.TestCase):
 
         self.assertEqual(RESULT_STATE, AUTH_STATE)
         self.assertFalse(RESULT_AUTH)
-        PROCESS_COMMANDS.assert_not_called()
+        PROCESS_COMMANDS.assert_called_once_with(
+            RUNTIME_CONTEXT.TELEGRAM,
+            RUNTIME_CONTEXT.CONFIG.container_username,
+            None,
+        )
         HANDLE_COMMAND.assert_not_called()
         DEPS.sleep_fn.assert_not_called()
 
@@ -211,9 +216,84 @@ class TestWorkerRuntime(unittest.TestCase):
 
         self.assertEqual(RESULT_STATE, UPDATED_STATE)
         self.assertTrue(RESULT_AUTH)
-        PROCESS_COMMANDS.assert_called_once()
+        self.assertEqual(PROCESS_COMMANDS.call_count, 2)
         HANDLE_COMMAND.assert_called_once()
         DEPS.sleep_fn.assert_called_once()
+
+# --------------------------------------------------------------------------
+# This test confirms startup backlog drain discards historical commands and
+# returns the next update offset for active polling.
+# --------------------------------------------------------------------------
+    def test_drain_startup_command_backlog_returns_next_offset(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, _AUTH_STATE = self.build_runtime_context(TMPDIR)
+            PROCESS_COMMANDS = Mock(return_value=([("backup", "")], 41))
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
+                HANDLE_COMMAND_FN=Mock(),
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=Mock(),
+            )
+
+            RESULT = drain_startup_command_backlog(RUNTIME_CONTEXT, DEPS)
+
+        self.assertEqual(RESULT, 41)
+        PROCESS_COMMANDS.assert_called_once_with(
+            RUNTIME_CONTEXT.TELEGRAM,
+            RUNTIME_CONTEXT.CONFIG.container_username,
+            None,
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms one-shot auth wait ignores startup backlog and only
+# processes new commands after the drained offset.
+# --------------------------------------------------------------------------
+    def test_wait_for_one_shot_auth_ignores_startup_backlog(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
+            UPDATED_STATE = AuthState(
+                "2026-03-15T12:00:00+00:00",
+                False,
+                False,
+                "none",
+            )
+            PROCESS_COMMANDS = Mock(
+                side_effect=[
+                    ([("backup", "")], 9),
+                    ([("auth", "123456")], 10),
+                ]
+            )
+            HANDLE_COMMAND = Mock(return_value=(UPDATED_STATE, True, False))
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
+                HANDLE_COMMAND_FN=HANDLE_COMMAND,
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=Mock(),
+            )
+            DEPS.time_fn = Mock(side_effect=[0, 1, 2])
+
+            RESULT_STATE, RESULT_AUTH = wait_for_one_shot_auth(
+                RUNTIME_CONTEXT,
+                Mock(),
+                AUTH_STATE,
+                False,
+                DEPS,
+            )
+
+        self.assertEqual(RESULT_STATE, UPDATED_STATE)
+        self.assertTrue(RESULT_AUTH)
+        self.assertEqual(PROCESS_COMMANDS.call_count, 2)
+        HANDLE_COMMAND.assert_called_once_with(
+            "auth",
+            "123456",
+            RUNTIME_CONTEXT.CONFIG,
+            unittest.mock.ANY,
+            AUTH_STATE,
+            False,
+            RUNTIME_CONTEXT.TELEGRAM,
+        )
 
 # --------------------------------------------------------------------------
 # This test confirms one-shot worker returns the safety-net blocked exit
@@ -260,7 +340,7 @@ class TestWorkerRuntime(unittest.TestCase):
         with tempfile.TemporaryDirectory() as TMPDIR:
             RUNTIME_CONTEXT, TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
             NOTIFY = Mock()
-            PROCESS_COMMANDS = Mock(side_effect=[([("backup", "")], None), ([], None)])
+            PROCESS_COMMANDS = Mock(side_effect=[([], 5), ([("backup", "")], 6), ([], 6)])
             HANDLE_COMMAND = Mock(return_value=(AUTH_STATE, False, True))
             ENFORCE_SAFETY_NET = Mock(return_value=True)
             SLEEP_CALLS = {"count": 0}
@@ -302,7 +382,7 @@ class TestWorkerRuntime(unittest.TestCase):
                 reauth_pending=True,
             )
             NOTIFY = Mock()
-            PROCESS_COMMANDS = Mock(side_effect=[([("backup", "")], None), ([], None)])
+            PROCESS_COMMANDS = Mock(side_effect=[([], 5), ([("backup", "")], 6), ([], 6)])
             HANDLE_COMMAND = Mock(return_value=(AUTH_STATE, True, True))
             ENFORCE_SAFETY_NET = Mock(return_value=True)
             SLEEP_CALLS = {"count": 0}
@@ -334,6 +414,45 @@ class TestWorkerRuntime(unittest.TestCase):
         DEPS.run_backup_fn.assert_not_called()
 
 # --------------------------------------------------------------------------
+# This test confirms scheduled runtime ignores startup backlog and processes
+# only new commands after the drained offset.
+# --------------------------------------------------------------------------
+    def test_run_scheduled_worker_loop_ignores_startup_backlog(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
+            PROCESS_COMMANDS = Mock(
+                side_effect=[
+                    ([("backup", "")], 9),
+                    ([("backup", "")], 10),
+                ]
+            )
+            HANDLE_COMMAND = Mock(return_value=(AUTH_STATE, True, True))
+
+            def sleep_fn(_SECONDS: float) -> None:
+                raise StopWorkerLoop()
+
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
+                HANDLE_COMMAND_FN=HANDLE_COMMAND,
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=sleep_fn,
+            )
+            DEPS.time_fn = Mock(side_effect=[100, 100])
+
+            with self.assertRaises(StopWorkerLoop):
+                run_scheduled_worker_loop(
+                    RUNTIME_CONTEXT,
+                    Mock(),
+                    AUTH_STATE,
+                    True,
+                    DEPS,
+                )
+
+        HANDLE_COMMAND.assert_called_once()
+        DEPS.run_backup_fn.assert_called_once()
+
+# --------------------------------------------------------------------------
 # This test confirms a skipped manual backup due to a safety-net block is
 # cleared after one blocked run.
 # --------------------------------------------------------------------------
@@ -341,7 +460,7 @@ class TestWorkerRuntime(unittest.TestCase):
         with tempfile.TemporaryDirectory() as TMPDIR:
             RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
             NOTIFY = Mock()
-            PROCESS_COMMANDS = Mock(side_effect=[([("backup", "")], None), ([], None)])
+            PROCESS_COMMANDS = Mock(side_effect=[([], 5), ([("backup", "")], 6), ([], 6)])
             HANDLE_COMMAND = Mock(return_value=(AUTH_STATE, True, True))
             ENFORCE_SAFETY_NET = Mock(return_value=False)
             SLEEP_CALLS = {"count": 0}

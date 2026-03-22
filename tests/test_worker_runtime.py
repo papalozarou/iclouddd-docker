@@ -17,8 +17,10 @@ from app.runtime_context import WorkerRuntimeContext
 from app.state import AuthState
 from app.telegram_bot import TelegramConfig
 from app.worker_runtime import (
+    CommandPollingState,
     WorkerRunResult,
     drain_startup_command_backlog,
+    read_command_batch,
     run_one_shot_worker,
     run_scheduled_worker_loop,
     run_worker_runtime,
@@ -222,7 +224,7 @@ class TestWorkerRuntime(unittest.TestCase):
 
 # --------------------------------------------------------------------------
 # This test confirms startup backlog drain discards historical commands and
-# returns the next update offset for active polling.
+# returns polling state for active command polling.
 # --------------------------------------------------------------------------
     def test_drain_startup_command_backlog_returns_next_offset(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
@@ -238,12 +240,51 @@ class TestWorkerRuntime(unittest.TestCase):
 
             RESULT = drain_startup_command_backlog(RUNTIME_CONTEXT, DEPS)
 
-        self.assertEqual(RESULT, 41)
+        self.assertEqual(RESULT, CommandPollingState(next_update_offset=41))
         PROCESS_COMMANDS.assert_called_once_with(
             RUNTIME_CONTEXT.TELEGRAM,
             RUNTIME_CONTEXT.CONFIG.container_username,
             None,
         )
+
+# --------------------------------------------------------------------------
+# This test confirms command batch reads advance and reuse one polling state.
+# --------------------------------------------------------------------------
+    def test_read_command_batch_reuses_one_polling_state(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, _AUTH_STATE = self.build_runtime_context(TMPDIR)
+            PROCESS_COMMANDS = Mock(
+                side_effect=[
+                    ([("backup", "")], 9),
+                    ([("auth", "123456")], 10),
+                ]
+            )
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
+                HANDLE_COMMAND_FN=Mock(),
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=Mock(),
+            )
+
+            _DRAINED_COMMANDS, FIRST_STATE = read_command_batch(
+                RUNTIME_CONTEXT,
+                CommandPollingState(),
+                DEPS,
+                DRAIN_ONLY=True,
+            )
+            COMMANDS, SECOND_STATE = read_command_batch(
+                RUNTIME_CONTEXT,
+                FIRST_STATE,
+                DEPS,
+            )
+
+        self.assertEqual(FIRST_STATE, CommandPollingState(next_update_offset=9))
+        self.assertEqual(COMMANDS, [("auth", "123456")])
+        self.assertEqual(SECOND_STATE, CommandPollingState(next_update_offset=10))
+        self.assertEqual(PROCESS_COMMANDS.call_count, 2)
+        self.assertEqual(PROCESS_COMMANDS.call_args_list[0].args[2], None)
+        self.assertEqual(PROCESS_COMMANDS.call_args_list[1].args[2], 9)
 
 # --------------------------------------------------------------------------
 # This test confirms one-shot auth wait ignores startup backlog and only

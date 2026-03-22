@@ -62,23 +62,65 @@ class WorkerRunResult:
 
 
 # ------------------------------------------------------------------------------
+# This data class tracks command polling cursor state for a worker run.
+#
+# N.B.
+# Startup backlog drain and active polling share this same state object so
+# update-offset ownership stays in one place inside the runtime loop.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class CommandPollingState:
+    next_update_offset: int | None = None
+
+
+# ------------------------------------------------------------------------------
+# This function reads the next command batch and advances polling state.
+#
+# 1. "RUNTIME_CONTEXT" is shared worker runtime state.
+# 2. "POLLING_STATE" is the current command polling cursor state.
+# 3. "DEPS" groups runtime callbacks used by worker orchestration.
+# 4. "DRAIN_ONLY" discards parsed commands while still advancing the cursor.
+#
+# Returns: Tuple "(commands, polling_state)" for the next loop step.
+# ------------------------------------------------------------------------------
+def read_command_batch(
+    RUNTIME_CONTEXT: WorkerRuntimeContext,
+    POLLING_STATE: CommandPollingState,
+    DEPS: WorkerRuntimeDeps,
+    DRAIN_ONLY: bool = False,
+) -> tuple[list[tuple[str, str]], CommandPollingState]:
+    COMMANDS, NEXT_UPDATE_OFFSET = DEPS.process_commands_fn(
+        RUNTIME_CONTEXT.TELEGRAM,
+        RUNTIME_CONTEXT.CONFIG.container_username,
+        POLLING_STATE.next_update_offset,
+    )
+    NEXT_STATE = CommandPollingState(next_update_offset=NEXT_UPDATE_OFFSET)
+
+    if DRAIN_ONLY:
+        return [], NEXT_STATE
+
+    return COMMANDS, NEXT_STATE
+
+
+# ------------------------------------------------------------------------------
 # This function drains queued Telegram commands once at startup.
 #
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
 # 2. "DEPS" groups runtime callbacks used by worker orchestration.
 #
-# Returns: Next update offset to use for active polling.
+# Returns: Initialised polling state for active command polling.
 # ------------------------------------------------------------------------------
 def drain_startup_command_backlog(
     RUNTIME_CONTEXT: WorkerRuntimeContext,
     DEPS: WorkerRuntimeDeps,
-) -> int | None:
-    _COMMANDS, NEXT_UPDATE_OFFSET = DEPS.process_commands_fn(
-        RUNTIME_CONTEXT.TELEGRAM,
-        RUNTIME_CONTEXT.CONFIG.container_username,
-        None,
+) -> CommandPollingState:
+    _COMMANDS, POLLING_STATE = read_command_batch(
+        RUNTIME_CONTEXT,
+        CommandPollingState(),
+        DEPS,
+        DRAIN_ONLY=True,
     )
-    return NEXT_UPDATE_OFFSET
+    return POLLING_STATE
 
 
 # ------------------------------------------------------------------------------
@@ -100,7 +142,7 @@ def wait_for_one_shot_auth(
     DEPS: WorkerRuntimeDeps,
 ) -> tuple[AuthState, bool]:
     START_EPOCH = int(DEPS.time_fn())
-    UPDATE_OFFSET = drain_startup_command_backlog(RUNTIME_CONTEXT, DEPS)
+    POLLING_STATE = drain_startup_command_backlog(RUNTIME_CONTEXT, DEPS)
 
     while True:
         if IS_AUTHENTICATED and not AUTH_STATE.reauth_pending:
@@ -112,10 +154,10 @@ def wait_for_one_shot_auth(
         if ELAPSED_SECONDS >= RUN_ONCE_AUTH_WAIT_SECONDS:
             return AUTH_STATE, IS_AUTHENTICATED
 
-        COMMANDS, UPDATE_OFFSET = DEPS.process_commands_fn(
-            RUNTIME_CONTEXT.TELEGRAM,
-            RUNTIME_CONTEXT.CONFIG.container_username,
-            UPDATE_OFFSET,
+        COMMANDS, POLLING_STATE = read_command_batch(
+            RUNTIME_CONTEXT,
+            POLLING_STATE,
+            DEPS,
         )
 
         for COMMAND, ARGS in COMMANDS:
@@ -261,7 +303,7 @@ def run_scheduled_worker_loop(
     DEPS: WorkerRuntimeDeps,
 ) -> None:
     BACKUP_REQUESTED = False
-    NEXT_UPDATE_OFFSET = drain_startup_command_backlog(RUNTIME_CONTEXT, DEPS)
+    POLLING_STATE = drain_startup_command_backlog(RUNTIME_CONTEXT, DEPS)
     INITIAL_EPOCH = int(DEPS.time_fn())
 
     if RUNTIME_CONTEXT.CONFIG.schedule_mode == "interval":
@@ -280,10 +322,10 @@ def run_scheduled_worker_loop(
             RUNTIME_CONTEXT.CONFIG.container_username,
             RUNTIME_CONTEXT.CONFIG.reauth_interval_days,
         )
-        COMMANDS, NEXT_UPDATE_OFFSET = DEPS.process_commands_fn(
-            RUNTIME_CONTEXT.TELEGRAM,
-            RUNTIME_CONTEXT.CONFIG.container_username,
-            NEXT_UPDATE_OFFSET,
+        COMMANDS, POLLING_STATE = read_command_batch(
+            RUNTIME_CONTEXT,
+            POLLING_STATE,
+            DEPS,
         )
 
         for COMMAND, ARGS in COMMANDS:

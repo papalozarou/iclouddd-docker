@@ -231,7 +231,7 @@ def load_config() -> AppConfig:
         icloud_password=env_value("ICLOUD_PASSWORD"),
         telegram_bot_token=env_value("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=env_value("TELEGRAM_CHAT_ID"),
-        keychain_service_name=env_value("KEYCHAIN_SERVICE_NAME", "icloud-drive-backup"),
+        keychain_service_name=env_value("KEYCHAIN_SERVICE_NAME", "pyiclodoc-drive"),
         run_once=env_bool("RUN_ONCE", False),
         schedule_mode=env_value("SCHEDULE_MODE", "interval").lower(),
         schedule_backup_time=env_value("SCHEDULE_BACKUP_TIME", "02:00"),

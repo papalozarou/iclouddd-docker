@@ -45,7 +45,7 @@ class TestConfigLoad(unittest.TestCase):
                 CONFIG = load_config()
 
         self.assertEqual(CONFIG.container_username, "icloudbot")
-        self.assertEqual(CONFIG.keychain_service_name, "icloud-drive-backup")
+        self.assertEqual(CONFIG.keychain_service_name, "pyiclodoc-drive")
         self.assertEqual(CONFIG.schedule_mode, "interval")
         self.assertEqual(CONFIG.schedule_backup_time, "02:00")
         self.assertEqual(CONFIG.schedule_weekdays, "monday")

@@ -38,7 +38,7 @@ def build_config_for_icloud(TMPDIR: str) -> AppConfig:
         icloud_password="password",
         telegram_bot_token="token",
         telegram_chat_id="12345",
-        keychain_service_name="icloud-drive-backup",
+        keychain_service_name="pyiclodoc-drive",
         run_once=False,
         schedule_mode="interval",
         schedule_backup_time="02:00",

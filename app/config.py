@@ -3,10 +3,11 @@
 # worker.
 # ------------------------------------------------------------------------------
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from pathlib import Path
 import os
-from typing import Optional
 
 
 # ------------------------------------------------------------------------------
@@ -96,7 +97,7 @@ def env_int(NAME: str, DEFAULT: int) -> int:
 #
 # The function returns the parsed integer and an optional validation message.
 # ------------------------------------------------------------------------------
-def parse_env_int(NAME: str, DEFAULT: int) -> tuple[int, Optional[str]]:
+def parse_env_int(NAME: str, DEFAULT: int) -> tuple[int, str | None]:
     RAW_VALUE = env_value(NAME, str(DEFAULT))
 
     try:
@@ -114,7 +115,7 @@ def parse_env_int(NAME: str, DEFAULT: int) -> tuple[int, Optional[str]]:
 # The function returns 0 for "auto" mode, otherwise a positive integer and an
 # optional validation message.
 # ------------------------------------------------------------------------------
-def parse_env_workers(NAME: str, DEFAULT: int = 0) -> tuple[int, Optional[str]]:
+def parse_env_workers(NAME: str, DEFAULT: int = 0) -> tuple[int, str | None]:
     RAW_VALUE = env_value(NAME, "auto")
     NORMALISED = RAW_VALUE.lower()
 

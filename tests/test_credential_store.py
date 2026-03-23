@@ -20,27 +20,26 @@ from app import credential_store
 # ------------------------------------------------------------------------------
 class TestCredentialStore(unittest.TestCase):
 # --------------------------------------------------------------------------
-# This test confirms keyring setup creates paths and sets env wiring.
+# This test confirms keyring setup creates paths and sets backend wiring.
 # --------------------------------------------------------------------------
     def test_configure_keyring_sets_env_and_backend(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG_DIR = Path(TMPDIR) / "config"
             EXPECTED_FILE = CONFIG_DIR / "keyring" / "keyring_pass.cfg"
-            EXPECTED_XDG_DATA_HOME = CONFIG_DIR / ".local" / "share"
 
-            with patch.object(credential_store.keyring, "set_keyring") as SET_KEYRING:
-                BOOTSTRAP = credential_store.configure_keyring(CONFIG_DIR)
+            with patch.dict(os.environ, {}, clear=False):
+                with patch.object(credential_store.keyring, "set_keyring") as SET_KEYRING:
+                    BOOTSTRAP = credential_store.configure_keyring(CONFIG_DIR)
 
-            self.assertTrue((CONFIG_DIR / "keyring").exists())
-            self.assertEqual(os.environ.get("PYTHON_KEYRING_FILENAME"), str(EXPECTED_FILE))
-            self.assertEqual(os.environ.get("XDG_DATA_HOME"), str(EXPECTED_XDG_DATA_HOME))
-            self.assertEqual(BOOTSTRAP.keyring_file_path, EXPECTED_FILE)
-            self.assertEqual(BOOTSTRAP.xdg_data_home, EXPECTED_XDG_DATA_HOME)
-            self.assertEqual(SET_KEYRING.call_count, 1)
-            self.assertEqual(
-                getattr(SET_KEYRING.call_args.args[0], "file_path", ""),
-                str(EXPECTED_FILE),
-            )
+                self.assertTrue((CONFIG_DIR / "keyring").exists())
+                self.assertEqual(os.environ.get("PYTHON_KEYRING_FILENAME"), str(EXPECTED_FILE))
+                self.assertIsNone(os.environ.get("XDG_DATA_HOME"))
+                self.assertEqual(BOOTSTRAP.keyring_file_path, EXPECTED_FILE)
+                self.assertEqual(SET_KEYRING.call_count, 1)
+                self.assertEqual(
+                    getattr(SET_KEYRING.call_args.args[0], "file_path", ""),
+                    str(EXPECTED_FILE),
+                )
 
 # --------------------------------------------------------------------------
 # This test confirms credential reads return empty-string fallbacks.

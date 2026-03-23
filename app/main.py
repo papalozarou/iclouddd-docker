@@ -42,6 +42,7 @@ from app.telegram_messages import (
     build_safety_net_blocked_message,
 )
 from app.time_utils import now_local
+
 HEARTBEAT_TOUCH_INTERVAL_SECONDS = 30
 
 

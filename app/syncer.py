@@ -9,7 +9,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, TimeoutError
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Iterator, Protocol
 import errno
 import os
 import shutil
@@ -1060,9 +1060,9 @@ def is_non_empty_directory_error(ERROR: OSError) -> bool:
 #
 # 1. "OUTPUT_DIR" is local backup root.
 #
-# Returns: Iterable of local file paths.
+# Returns: Iterator of local file paths.
 # ------------------------------------------------------------------------------
-def iter_local_files(OUTPUT_DIR: Path):
+def iter_local_files(OUTPUT_DIR: Path) -> Iterator[Path]:
     for PATH in OUTPUT_DIR.rglob("*"):
         if PATH.is_file():
             yield PATH
@@ -1073,12 +1073,12 @@ def iter_local_files(OUTPUT_DIR: Path):
 #
 # 1. "OUTPUT_DIR" is local backup root.
 #
-# Returns: Iterable of local directory paths suitable for safe pruning.
+# Returns: Iterator of local directory paths suitable for safe pruning.
 # ------------------------------------------------------------------------------
-def iter_local_directories(OUTPUT_DIR: Path):
+def iter_local_directories(OUTPUT_DIR: Path) -> Iterator[Path]:
     DIRECTORIES = [PATH for PATH in OUTPUT_DIR.rglob("*") if PATH.is_dir()]
     DIRECTORIES.sort(key=lambda ITEM: len(ITEM.parts), reverse=True)
-    return DIRECTORIES
+    yield from DIRECTORIES
 
 
 # ------------------------------------------------------------------------------

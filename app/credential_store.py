@@ -19,7 +19,6 @@ from keyrings.alt.file import PlaintextKeyring
 @dataclass(frozen=True)
 class KeyringBootstrap:
     keyring_file_path: Path
-    xdg_data_home: Path
 
 
 # ------------------------------------------------------------------------------
@@ -27,27 +26,25 @@ class KeyringBootstrap:
 #
 # 1. "config_dir" is the root directory used for worker runtime state.
 #
-# Returns: "KeyringBootstrap" describing the applied bootstrap paths.
+# Returns: "KeyringBootstrap" describing the applied bootstrap path.
 #
 # N.B.
-# This bootstrap keeps process-wide environment changes narrow. The keyring
-# backend file path stays explicit, while only the XDG data location is set for
-# libraries that still derive cache or data paths from environment state.
+# This bootstrap keeps keyring setup backend-local. The file path stays
+# explicit, but no broader XDG or home-directory state is changed for the
+# process.
 #
 # Notes: File keyring keeps credentials in mounted container volumes.
 # ------------------------------------------------------------------------------
 def configure_keyring(CONFIG_DIR: Path) -> KeyringBootstrap:
     KEYRING_DIR = CONFIG_DIR / "keyring"
     KEYRING_FILE_PATH = KEYRING_DIR / "keyring_pass.cfg"
-    XDG_DATA_HOME = CONFIG_DIR / ".local" / "share"
     KEYRING_DIR.mkdir(parents=True, exist_ok=True)
     os.environ["PYTHON_KEYRING_FILENAME"] = str(KEYRING_FILE_PATH)
-    os.environ["XDG_DATA_HOME"] = str(XDG_DATA_HOME)
 
     KEYRING_BACKEND = PlaintextKeyring()
     KEYRING_BACKEND.file_path = str(KEYRING_FILE_PATH)
     keyring.set_keyring(KEYRING_BACKEND)
-    return KeyringBootstrap(KEYRING_FILE_PATH, XDG_DATA_HOME)
+    return KeyringBootstrap(KEYRING_FILE_PATH)
 
 
 # ------------------------------------------------------------------------------

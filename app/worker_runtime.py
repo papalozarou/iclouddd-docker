@@ -6,9 +6,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
-from app.command_runtime import CommandPollBatch
+from app.auth_runtime import AuthAttemptResult
+from app.command_runtime import CommandHandleResult, CommandPollBatch
+from app.backup_runtime import BackupRunResult
 from app.runtime_context import WorkerRuntimeContext
 from app.state import AuthState
 from app.telegram_bot import TelegramConfig
@@ -46,12 +48,12 @@ class CommandBatchPoller(Protocol):
 # ------------------------------------------------------------------------------
 @dataclass(frozen=True)
 class WorkerRuntimeDeps:
-    attempt_auth_fn: Callable[..., tuple[AuthState, bool, str]]
+    attempt_auth_fn: Callable[..., AuthAttemptResult]
     process_reauth_reminders_fn: Callable[..., AuthState]
     poll_command_batch_fn: CommandBatchPoller
-    handle_command_fn: Callable[..., tuple[AuthState, bool, bool]]
+    handle_command_fn: Callable[..., CommandHandleResult]
     enforce_safety_net_fn: Callable[..., bool]
-    run_backup_fn: Callable[..., None]
+    run_backup_fn: Callable[..., BackupRunResult]
     notify_fn: Callable[..., None]
     log_line_fn: Callable[..., None]
     get_next_run_epoch_fn: Callable[..., int]
@@ -77,6 +79,15 @@ class WorkerRunResult:
 
 
 # ------------------------------------------------------------------------------
+# This data class tracks auth state plus live auth validity in the worker loop.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class WorkerAuthState:
+    auth_state: AuthState
+    is_authenticated: bool
+
+
+# ------------------------------------------------------------------------------
 # This data class tracks command polling cursor state for a worker run.
 #
 # N.B.
@@ -91,6 +102,15 @@ class CommandPollingState:
 
 
 # ------------------------------------------------------------------------------
+# This data class returns one worker-side command read plus polling state.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class CommandBatchReadResult:
+    commands: list[tuple[str, str]]
+    polling_state: CommandPollingState
+
+
+# ------------------------------------------------------------------------------
 # This function reads the next command batch and advances polling state.
 #
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
@@ -98,19 +118,22 @@ class CommandPollingState:
 # 3. "DEPS" groups runtime callbacks used by worker orchestration.
 # 4. "DRAIN_ONLY" discards parsed commands while still advancing the cursor.
 #
-# Returns: Tuple "(commands, polling_state)" for the next loop step.
+# Returns: "CommandBatchReadResult" for the next loop step.
 # ------------------------------------------------------------------------------
 def read_command_batch(
     RUNTIME_CONTEXT: WorkerRuntimeContext,
     POLLING_STATE: CommandPollingState,
     DEPS: WorkerRuntimeDeps,
     DRAIN_ONLY: bool = False,
-) -> tuple[list[tuple[str, str]], CommandPollingState]:
+) -> CommandBatchReadResult:
     if POLLING_STATE.buffered_commands and not DRAIN_ONLY:
-        return list(POLLING_STATE.buffered_commands), CommandPollingState(
-            phase="live_polling",
-            next_update_offset=POLLING_STATE.next_update_offset,
-            buffered_commands=(),
+        return CommandBatchReadResult(
+            commands=list(POLLING_STATE.buffered_commands),
+            polling_state=CommandPollingState(
+                phase="live_polling",
+                next_update_offset=POLLING_STATE.next_update_offset,
+                buffered_commands=(),
+            ),
         )
 
     BATCH = DEPS.poll_command_batch_fn(
@@ -124,9 +147,12 @@ def read_command_batch(
     )
 
     if DRAIN_ONLY:
-        return [], NEXT_STATE
+        return CommandBatchReadResult([], NEXT_STATE)
 
-    return [(EVENT.command, EVENT.args) for EVENT in BATCH.commands], NEXT_STATE
+    return CommandBatchReadResult(
+        commands=[(EVENT.command, EVENT.args) for EVENT in BATCH.commands],
+        polling_state=NEXT_STATE,
+    )
 
 
 # ------------------------------------------------------------------------------
@@ -192,16 +218,15 @@ def drain_startup_command_backlog(
 # 4. "IS_AUTHENTICATED" tracks current auth validity.
 # 5. "DEPS" groups runtime callbacks used by worker orchestration.
 #
-# Returns: Tuple "(auth_state, is_authenticated)".
+# Returns: "WorkerAuthState" after one-shot auth waiting completes.
 # ------------------------------------------------------------------------------
 def wait_for_one_shot_auth(
     RUNTIME_CONTEXT: WorkerRuntimeContext,
     CLIENT: Any,
-    AUTH_STATE: AuthState,
-    IS_AUTHENTICATED: bool,
+    AUTH_RUNTIME_STATE: WorkerAuthState,
     DEPS: WorkerRuntimeDeps,
     STARTUP_CUTOVER_EPOCH: int = 0,
-) -> tuple[AuthState, bool]:
+) -> WorkerAuthState:
     START_EPOCH = int(DEPS.time_fn())
     POLLING_STATE = drain_startup_command_backlog(
         RUNTIME_CONTEXT,
@@ -210,30 +235,38 @@ def wait_for_one_shot_auth(
     )
 
     while True:
-        if IS_AUTHENTICATED and not AUTH_STATE.reauth_pending:
-            return AUTH_STATE, IS_AUTHENTICATED
+        if (
+            AUTH_RUNTIME_STATE.is_authenticated
+            and not AUTH_RUNTIME_STATE.auth_state.reauth_pending
+        ):
+            return AUTH_RUNTIME_STATE
 
         NOW_EPOCH = int(DEPS.time_fn())
         ELAPSED_SECONDS = NOW_EPOCH - START_EPOCH
 
         if ELAPSED_SECONDS >= RUN_ONCE_AUTH_WAIT_SECONDS:
-            return AUTH_STATE, IS_AUTHENTICATED
+            return AUTH_RUNTIME_STATE
 
-        COMMANDS, POLLING_STATE = read_command_batch(
+        READ_RESULT = read_command_batch(
             RUNTIME_CONTEXT,
             POLLING_STATE,
             DEPS,
         )
+        POLLING_STATE = READ_RESULT.polling_state
 
-        for COMMAND, ARGS in COMMANDS:
-            AUTH_STATE, IS_AUTHENTICATED, _ = DEPS.handle_command_fn(
+        for COMMAND, ARGS in READ_RESULT.commands:
+            HANDLE_RESULT = DEPS.handle_command_fn(
                 COMMAND,
                 ARGS,
                 RUNTIME_CONTEXT.CONFIG,
                 CLIENT,
-                AUTH_STATE,
-                IS_AUTHENTICATED,
+                AUTH_RUNTIME_STATE.auth_state,
+                AUTH_RUNTIME_STATE.is_authenticated,
                 RUNTIME_CONTEXT.TELEGRAM,
+            )
+            AUTH_RUNTIME_STATE = WorkerAuthState(
+                auth_state=HANDLE_RESULT.auth_state,
+                is_authenticated=HANDLE_RESULT.is_authenticated,
             )
 
         DEPS.sleep_fn(RUN_ONCE_AUTH_POLL_SECONDS)
@@ -243,28 +276,25 @@ def wait_for_one_shot_auth(
 # This function logs startup authentication status after the initial attempt.
 #
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
-# 2. "AUTH_STATE" is current auth state.
-# 3. "IS_AUTHENTICATED" tracks current auth validity.
-# 4. "DETAILS" is auth result detail text.
-# 5. "DEPS" groups runtime callbacks used by worker orchestration.
+# 2. "AUTH_RESULT" is startup auth attempt outcome.
+# 3. "DEPS" groups runtime callbacks used by worker orchestration.
 #
 # Returns: None.
 # ------------------------------------------------------------------------------
 def log_startup_auth_state(
     RUNTIME_CONTEXT: WorkerRuntimeContext,
-    AUTH_STATE: AuthState,
-    IS_AUTHENTICATED: bool,
-    DETAILS: str,
+    AUTH_RESULT: AuthAttemptResult,
     DEPS: WorkerRuntimeDeps,
 ) -> None:
-    DEPS.log_line_fn(RUNTIME_CONTEXT.LOG_FILE, "info", DETAILS)
+    DEPS.log_line_fn(RUNTIME_CONTEXT.LOG_FILE, "info", AUTH_RESULT.operator_detail)
     DEPS.log_line_fn(
         RUNTIME_CONTEXT.LOG_FILE,
         "debug",
         "Auth state after startup attempt: "
-        f"is_authenticated={IS_AUTHENTICATED}, "
-        f"auth_pending={AUTH_STATE.auth_pending}, "
-        f"reauth_pending={AUTH_STATE.reauth_pending}",
+        f"is_authenticated={AUTH_RESULT.is_authenticated}, "
+        f"auth_pending={AUTH_RESULT.auth_state.auth_pending}, "
+        f"reauth_pending={AUTH_RESULT.auth_state.reauth_pending}, "
+        f"reason_code={AUTH_RESULT.reason_code}",
     )
 
 
@@ -273,21 +303,22 @@ def log_startup_auth_state(
 #
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
 # 2. "CLIENT" is iCloud client wrapper.
-# 3. "AUTH_STATE" is current auth state.
-# 4. "IS_AUTHENTICATED" tracks current auth validity.
-# 5. "DEPS" groups runtime callbacks used by worker orchestration.
+# 3. "AUTH_RUNTIME_STATE" is current worker auth state snapshot.
+# 4. "DEPS" groups runtime callbacks used by worker orchestration.
 #
 # Returns: Worker exit result for one-shot processing.
 # ------------------------------------------------------------------------------
 def run_one_shot_worker(
     RUNTIME_CONTEXT: WorkerRuntimeContext,
     CLIENT: Any,
-    AUTH_STATE: AuthState,
-    IS_AUTHENTICATED: bool,
+    AUTH_RUNTIME_STATE: WorkerAuthState,
     DEPS: WorkerRuntimeDeps,
     STARTUP_CUTOVER_EPOCH: int = 0,
 ) -> WorkerRunResult:
-    if not IS_AUTHENTICATED or AUTH_STATE.reauth_pending:
+    if (
+        not AUTH_RUNTIME_STATE.is_authenticated
+        or AUTH_RUNTIME_STATE.auth_state.reauth_pending
+    ):
         DEPS.notify_fn(
             RUNTIME_CONTEXT.TELEGRAM,
             DEPS.build_one_shot_waiting_for_auth_message_fn(
@@ -295,16 +326,15 @@ def run_one_shot_worker(
                 max(1, RUN_ONCE_AUTH_WAIT_SECONDS // 60),
             ),
         )
-        AUTH_STATE, IS_AUTHENTICATED = wait_for_one_shot_auth(
+        AUTH_RUNTIME_STATE = wait_for_one_shot_auth(
             RUNTIME_CONTEXT,
             CLIENT,
-            AUTH_STATE,
-            IS_AUTHENTICATED,
+            AUTH_RUNTIME_STATE,
             DEPS,
             STARTUP_CUTOVER_EPOCH,
         )
 
-    if not IS_AUTHENTICATED:
+    if not AUTH_RUNTIME_STATE.is_authenticated:
         DEPS.notify_fn(
             RUNTIME_CONTEXT.TELEGRAM,
             DEPS.build_backup_skipped_auth_incomplete_message_fn(
@@ -316,7 +346,7 @@ def run_one_shot_worker(
             stop_status="One-shot backup skipped due to incomplete authentication.",
         )
 
-    if AUTH_STATE.reauth_pending:
+    if AUTH_RUNTIME_STATE.auth_state.reauth_pending:
         DEPS.notify_fn(
             RUNTIME_CONTEXT.TELEGRAM,
             DEPS.build_backup_skipped_reauth_pending_message_fn(
@@ -356,17 +386,15 @@ def run_one_shot_worker(
 #
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
 # 2. "CLIENT" is iCloud client wrapper.
-# 3. "AUTH_STATE" is current auth state.
-# 4. "IS_AUTHENTICATED" tracks current auth validity.
-# 5. "DEPS" groups runtime callbacks used by worker orchestration.
+# 3. "AUTH_RUNTIME_STATE" is current worker auth state snapshot.
+# 4. "DEPS" groups runtime callbacks used by worker orchestration.
 #
 # Returns: This function does not return during normal operation.
 # ------------------------------------------------------------------------------
 def run_scheduled_worker_loop(
     RUNTIME_CONTEXT: WorkerRuntimeContext,
     CLIENT: Any,
-    AUTH_STATE: AuthState,
-    IS_AUTHENTICATED: bool,
+    AUTH_RUNTIME_STATE: WorkerAuthState,
     DEPS: WorkerRuntimeDeps,
     STARTUP_CUTOVER_EPOCH: int = 0,
 ) -> None:
@@ -387,30 +415,38 @@ def run_scheduled_worker_loop(
         )
 
     while True:
-        AUTH_STATE = DEPS.process_reauth_reminders_fn(
-            AUTH_STATE,
-            RUNTIME_CONTEXT.CONFIG.auth_state_path,
-            RUNTIME_CONTEXT.TELEGRAM,
-            RUNTIME_CONTEXT.CONFIG.container_username,
-            RUNTIME_CONTEXT.CONFIG.reauth_interval_days,
+        AUTH_RUNTIME_STATE = WorkerAuthState(
+            auth_state=DEPS.process_reauth_reminders_fn(
+                AUTH_RUNTIME_STATE.auth_state,
+                RUNTIME_CONTEXT.CONFIG.auth_state_path,
+                RUNTIME_CONTEXT.TELEGRAM,
+                RUNTIME_CONTEXT.CONFIG.container_username,
+                RUNTIME_CONTEXT.CONFIG.reauth_interval_days,
+            ),
+            is_authenticated=AUTH_RUNTIME_STATE.is_authenticated,
         )
-        COMMANDS, POLLING_STATE = read_command_batch(
+        READ_RESULT = read_command_batch(
             RUNTIME_CONTEXT,
             POLLING_STATE,
             DEPS,
         )
+        POLLING_STATE = READ_RESULT.polling_state
 
-        for COMMAND, ARGS in COMMANDS:
-            AUTH_STATE, IS_AUTHENTICATED, REQUESTED = DEPS.handle_command_fn(
+        for COMMAND, ARGS in READ_RESULT.commands:
+            HANDLE_RESULT = DEPS.handle_command_fn(
                 COMMAND,
                 ARGS,
                 RUNTIME_CONTEXT.CONFIG,
                 CLIENT,
-                AUTH_STATE,
-                IS_AUTHENTICATED,
+                AUTH_RUNTIME_STATE.auth_state,
+                AUTH_RUNTIME_STATE.is_authenticated,
                 RUNTIME_CONTEXT.TELEGRAM,
             )
-            BACKUP_REQUESTED = BACKUP_REQUESTED or REQUESTED
+            AUTH_RUNTIME_STATE = WorkerAuthState(
+                auth_state=HANDLE_RESULT.auth_state,
+                is_authenticated=HANDLE_RESULT.is_authenticated,
+            )
+            BACKUP_REQUESTED = BACKUP_REQUESTED or HANDLE_RESULT.backup_requested
 
         NOW_EPOCH = int(DEPS.time_fn())
         SCHEDULE_DUE = NOW_EPOCH >= NEXT_RUN_EPOCH
@@ -424,7 +460,7 @@ def run_scheduled_worker_loop(
             NOW_EPOCH,
         )
 
-        if not IS_AUTHENTICATED:
+        if not AUTH_RUNTIME_STATE.is_authenticated:
             DEPS.notify_fn(
                 RUNTIME_CONTEXT.TELEGRAM,
                 DEPS.build_backup_skipped_auth_incomplete_message_fn(
@@ -435,7 +471,7 @@ def run_scheduled_worker_loop(
             DEPS.sleep_fn(5)
             continue
 
-        if AUTH_STATE.reauth_pending:
+        if AUTH_RUNTIME_STATE.auth_state.reauth_pending:
             DEPS.notify_fn(
                 RUNTIME_CONTEXT.TELEGRAM,
                 DEPS.build_backup_skipped_reauth_pending_message_fn(
@@ -484,7 +520,7 @@ def run_worker_runtime(
     DEPS: WorkerRuntimeDeps,
 ) -> WorkerRunResult:
     STARTUP_CUTOVER_EPOCH = int(time.time())
-    AUTH_STATE, IS_AUTHENTICATED, DETAILS = DEPS.attempt_auth_fn(
+    AUTH_RESULT = DEPS.attempt_auth_fn(
         CLIENT,
         AUTH_STATE,
         RUNTIME_CONTEXT.CONFIG.auth_state_path,
@@ -495,18 +531,19 @@ def run_worker_runtime(
     )
     log_startup_auth_state(
         RUNTIME_CONTEXT,
-        AUTH_STATE,
-        IS_AUTHENTICATED,
-        DETAILS,
+        AUTH_RESULT,
         DEPS,
+    )
+    AUTH_RUNTIME_STATE = WorkerAuthState(
+        auth_state=AUTH_RESULT.auth_state,
+        is_authenticated=AUTH_RESULT.is_authenticated,
     )
 
     if RUNTIME_CONTEXT.CONFIG.run_once:
         return run_one_shot_worker(
             RUNTIME_CONTEXT,
             CLIENT,
-            AUTH_STATE,
-            IS_AUTHENTICATED,
+            AUTH_RUNTIME_STATE,
             DEPS,
             STARTUP_CUTOVER_EPOCH,
         )
@@ -514,8 +551,7 @@ def run_worker_runtime(
     run_scheduled_worker_loop(
         RUNTIME_CONTEXT,
         CLIENT,
-        AUTH_STATE,
-        IS_AUTHENTICATED,
+        AUTH_RUNTIME_STATE,
         DEPS,
         STARTUP_CUTOVER_EPOCH,
     )

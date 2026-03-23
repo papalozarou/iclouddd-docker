@@ -114,7 +114,7 @@ def reauth_days_left(LAST_AUTH_UTC: str, INTERVAL_DAYS: int) -> int:
 # 5. "USERNAME" is command prefix used by Telegram control.
 # 6. "PROVIDED_CODE" is optional MFA code.
 #
-# Returns: Tuple "(new_state, is_authenticated, details_message)".
+# Returns: "AuthAttemptResult" for the completed auth attempt.
 # ------------------------------------------------------------------------------
 def attempt_auth(
     CLIENT: ICloudDriveClient,
@@ -124,8 +124,8 @@ def attempt_auth(
     USERNAME: str,
     APPLE_ID: str,
     PROVIDED_CODE: str,
-) -> tuple[AuthState, bool, str]:
-    NEW_STATE, IS_AUTHENTICATED, DETAILS = auth_runtime.attempt_auth(
+) -> auth_runtime.AuthAttemptResult:
+    AUTH_RESULT = auth_runtime.attempt_auth(
         CLIENT,
         AUTH_STATE,
         AUTH_STATE_PATH,
@@ -139,14 +139,14 @@ def attempt_auth(
             notify_fn=notify,
         ),
     )
-    if IS_AUTHENTICATED:
+    if AUTH_RESULT.is_authenticated:
         save_credentials(
             CLIENT.config.keychain_service_name,
             USERNAME,
             CLIENT.config.icloud_email,
             CLIENT.config.icloud_password,
         )
-    return NEW_STATE, IS_AUTHENTICATED, DETAILS
+    return AUTH_RESULT
 
 
 # ------------------------------------------------------------------------------
@@ -316,7 +316,7 @@ def poll_command_batch(
 # 3. "TELEGRAM" is Telegram integration configuration.
 # 4. "LOG_FILE" is worker log destination.
 #
-# Returns: None.
+# Returns: "BackupRunResult" for the completed backup pass.
 # ------------------------------------------------------------------------------
 def run_backup(
     CLIENT: ICloudDriveClient,
@@ -324,7 +324,7 @@ def run_backup(
     TELEGRAM: TelegramConfig,
     LOG_FILE: Path,
     TRIGGER: str,
-) -> None:
+) -> backup_runtime.BackupRunResult:
     APPLE_ID_LABEL = format_apple_id_label(CONFIG.icloud_email)
     SCHEDULE_LINE = format_schedule_line(CONFIG, TRIGGER)
     return backup_runtime.run_backup(
@@ -375,7 +375,7 @@ def log_effective_backup_settings(CONFIG: AppConfig, LOG_FILE: Path) -> None:
 # 6. "IS_AUTHENTICATED" tracks current auth validity.
 # 7. "TELEGRAM" is Telegram integration configuration.
 #
-# Returns: Tuple "(auth_state, is_authenticated, backup_requested)".
+# Returns: "CommandHandleResult" for the handled command.
 # ------------------------------------------------------------------------------
 def handle_command(
     COMMAND: str,
@@ -385,7 +385,7 @@ def handle_command(
     AUTH_STATE: AuthState,
     IS_AUTHENTICATED: bool,
     TELEGRAM: TelegramConfig,
-) -> tuple[AuthState, bool, bool]:
+) -> command_runtime.CommandHandleResult:
     APPLE_ID_LABEL = format_apple_id_label(CONFIG.icloud_email)
     return command_runtime.handle_command(
         COMMAND,

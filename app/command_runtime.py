@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Protocol
 
+from app.auth_runtime import AuthAttemptResult
 from app.state import AuthState, save_auth_state
 from app.telegram_bot import CommandEvent, TelegramConfig, fetch_updates, parse_command
 from app.telegram_messages import (
@@ -51,11 +52,29 @@ class CommandPollBatch:
 
 
 # ------------------------------------------------------------------------------
+# This data class models one handled command using explicit result fields.
+#
+# 1. "auth_state" is the updated auth state after command handling.
+# 2. "is_authenticated" records final auth validity.
+# 3. "backup_requested" records whether this command requested a backup.
+# 4. "reason_code" is the stable machine-facing command outcome code.
+# 5. "operator_detail" is optional human-readable detail for logs.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class CommandHandleResult:
+    auth_state: AuthState
+    is_authenticated: bool
+    backup_requested: bool
+    reason_code: str
+    operator_detail: str = ""
+
+
+# ------------------------------------------------------------------------------
 # This data class groups runtime callbacks used by command handling.
 # ------------------------------------------------------------------------------
 @dataclass(frozen=True)
 class CommandRuntimeDeps:
-    attempt_auth_fn: Callable
+    attempt_auth_fn: Callable[..., AuthAttemptResult]
     notify_fn: Callable[[TelegramConfig, str], None]
     save_auth_state_fn: Callable[[Path, AuthState], None] = save_auth_state
     log_line_fn: Callable | None = None
@@ -140,7 +159,7 @@ def process_commands(
 # 8. "APPLE_ID_LABEL" is the formatted Apple ID label.
 # 9. "DEPS" groups runtime callbacks used by command handling.
 #
-# Returns: Tuple "(auth_state, is_authenticated, backup_requested)".
+# Returns: "CommandHandleResult" for the handled command.
 # ------------------------------------------------------------------------------
 def handle_command(
     COMMAND: str,
@@ -152,16 +171,21 @@ def handle_command(
     TELEGRAM: TelegramConfig,
     APPLE_ID_LABEL: str,
     DEPS: CommandRuntimeDeps,
-) -> tuple[AuthState, bool, bool]:
+) -> CommandHandleResult:
     if COMMAND == "backup":
         DEPS.notify_fn(
             TELEGRAM,
             build_backup_requested_message(APPLE_ID_LABEL),
         )
-        return AUTH_STATE, IS_AUTHENTICATED, True
+        return CommandHandleResult(
+            auth_state=AUTH_STATE,
+            is_authenticated=IS_AUTHENTICATED,
+            backup_requested=True,
+            reason_code="backup_requested",
+        )
 
     if COMMAND == "auth" and not ARGS:
-        NEW_STATE, NEW_AUTH, DETAILS = DEPS.attempt_auth_fn(
+        AUTH_RESULT = DEPS.attempt_auth_fn(
             CLIENT,
             AUTH_STATE,
             CONFIG.auth_state_path,
@@ -175,14 +199,20 @@ def handle_command(
             DEPS.log_line_fn(
                 DEPS.log_file_path,
                 "info",
-                f"Auth command result: {DETAILS}",
+                f"Auth command result: {AUTH_RESULT.operator_detail}",
             )
 
-        return NEW_STATE, NEW_AUTH, False
+        return CommandHandleResult(
+            auth_state=AUTH_RESULT.auth_state,
+            is_authenticated=AUTH_RESULT.is_authenticated,
+            backup_requested=False,
+            reason_code=AUTH_RESULT.reason_code,
+            operator_detail=AUTH_RESULT.operator_detail,
+        )
 
     if COMMAND == "reauth" and not ARGS:
         REAUTH_STATE = replace(AUTH_STATE, reauth_pending=True)
-        NEW_STATE, NEW_AUTH, DETAILS = DEPS.attempt_auth_fn(
+        AUTH_RESULT = DEPS.attempt_auth_fn(
             CLIENT,
             REAUTH_STATE,
             CONFIG.auth_state_path,
@@ -196,12 +226,18 @@ def handle_command(
             DEPS.log_line_fn(
                 DEPS.log_file_path,
                 "info",
-                f"Auth command result: {DETAILS}",
+                f"Auth command result: {AUTH_RESULT.operator_detail}",
             )
 
-        return NEW_STATE, NEW_AUTH, False
+        return CommandHandleResult(
+            auth_state=AUTH_RESULT.auth_state,
+            is_authenticated=AUTH_RESULT.is_authenticated,
+            backup_requested=False,
+            reason_code=AUTH_RESULT.reason_code,
+            operator_detail=AUTH_RESULT.operator_detail,
+        )
 
-    NEW_STATE, NEW_AUTH, DETAILS = DEPS.attempt_auth_fn(
+    AUTH_RESULT = DEPS.attempt_auth_fn(
         CLIENT,
         AUTH_STATE,
         CONFIG.auth_state_path,
@@ -212,6 +248,16 @@ def handle_command(
     )
 
     if DEPS.log_line_fn is not None and DEPS.log_file_path is not None:
-        DEPS.log_line_fn(DEPS.log_file_path, "info", f"Auth command result: {DETAILS}")
+        DEPS.log_line_fn(
+            DEPS.log_file_path,
+            "info",
+            f"Auth command result: {AUTH_RESULT.operator_detail}",
+        )
 
-    return NEW_STATE, NEW_AUTH, False
+    return CommandHandleResult(
+        auth_state=AUTH_RESULT.auth_state,
+        is_authenticated=AUTH_RESULT.is_authenticated,
+        backup_requested=False,
+        reason_code=AUTH_RESULT.reason_code,
+        operator_detail=AUTH_RESULT.operator_detail,
+    )

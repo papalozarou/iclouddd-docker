@@ -13,7 +13,9 @@ from tests._stubs import install_dependency_stubs
 
 install_dependency_stubs()
 
-from app.backup_runtime import format_deleted_summary
+from app.auth_runtime import AuthAttemptResult
+from app.backup_runtime import BackupRunResult, format_deleted_summary
+from app.command_runtime import CommandHandleResult
 from app.config import AppConfig
 from app.main import (
     attempt_auth,
@@ -30,7 +32,7 @@ from app.main import (
     start_heartbeat_updater,
     update_heartbeat,
 )
-from app.worker_runtime import wait_for_one_shot_auth
+from app.worker_runtime import WorkerAuthState, wait_for_one_shot_auth
 from app.state import AuthState
 from app.telegram_bot import CommandEvent, TelegramConfig
 
@@ -178,11 +180,10 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
             TELEGRAM = TelegramConfig("token", "12345")
 
-            RESULT_STATE, RESULT_AUTH = wait_for_one_shot_auth(
+            RESULT = wait_for_one_shot_auth(
                 SimpleNamespace(CONFIG=CONFIG, TELEGRAM=TELEGRAM),
                 Mock(),
-                STATE,
-                True,
+                WorkerAuthState(auth_state=STATE, is_authenticated=True),
                 SimpleNamespace(
                     poll_command_batch_fn=Mock(
                         return_value=SimpleNamespace(
@@ -198,8 +199,8 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 0,
             )
 
-        self.assertEqual(RESULT_STATE, STATE)
-        self.assertTrue(RESULT_AUTH)
+        self.assertEqual(RESULT.auth_state, STATE)
+        self.assertTrue(RESULT.is_authenticated)
 
 # --------------------------------------------------------------------------
 # This test confirms notify delegates to send_message_result.
@@ -283,7 +284,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             with patch("app.main.now_iso", return_value="2026-03-10T10:00:00+00:00"):
                 with patch("app.main.notify") as NOTIFY:
                     with patch("app.main.save_credentials") as SAVE_CREDENTIALS:
-                        NEW_STATE, IS_AUTHENTICATED, DETAILS = attempt_auth(
+                        RESULT = attempt_auth(
                             CLIENT,
                             AUTH_STATE,
                             AUTH_STATE_PATH,
@@ -293,11 +294,12 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                             " 123456 ",
                         )
 
-            self.assertTrue(IS_AUTHENTICATED)
-            self.assertEqual(DETAILS, "ok")
-            self.assertEqual(NEW_STATE.last_auth_utc, "2026-03-10T10:00:00+00:00")
-            self.assertFalse(NEW_STATE.auth_pending)
-            self.assertFalse(NEW_STATE.reauth_pending)
+            self.assertTrue(RESULT.is_authenticated)
+            self.assertEqual(RESULT.operator_detail, "ok")
+            self.assertEqual(RESULT.reason_code, "authenticated")
+            self.assertEqual(RESULT.auth_state.last_auth_utc, "2026-03-10T10:00:00+00:00")
+            self.assertFalse(RESULT.auth_state.auth_pending)
+            self.assertFalse(RESULT.auth_state.reauth_pending)
             CLIENT.complete_authentication.assert_called_once_with("123456")
             SAVE_CREDENTIALS.assert_called_once_with(
                 "pyiclodoc-drive",
@@ -326,7 +328,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
 
             with patch("app.main.notify") as NOTIFY:
                 with patch("app.main.save_credentials") as SAVE_CREDENTIALS:
-                    NEW_STATE, IS_AUTHENTICATED, DETAILS = attempt_auth(
+                    RESULT = attempt_auth(
                         CLIENT,
                         AUTH_STATE,
                         AUTH_STATE_PATH,
@@ -336,10 +338,11 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                         "",
                     )
 
-            self.assertFalse(IS_AUTHENTICATED)
-            self.assertIn("Two-factor code is required", DETAILS)
-            self.assertTrue(NEW_STATE.auth_pending)
-            self.assertFalse(NEW_STATE.reauth_pending)
+            self.assertFalse(RESULT.is_authenticated)
+            self.assertIn("Two-factor code is required", RESULT.operator_detail)
+            self.assertEqual(RESULT.reason_code, "mfa_required")
+            self.assertTrue(RESULT.auth_state.auth_pending)
+            self.assertFalse(RESULT.auth_state.reauth_pending)
             CLIENT.start_authentication.assert_called_once()
             SAVE_CREDENTIALS.assert_not_called()
             self.assertIn("Authentication required", NOTIFY.call_args[0][1])
@@ -364,7 +367,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
 
             with patch("app.main.notify") as NOTIFY:
                 with patch("app.main.save_credentials") as SAVE_CREDENTIALS:
-                    NEW_STATE, IS_AUTHENTICATED, _ = attempt_auth(
+                    RESULT = attempt_auth(
                         CLIENT,
                         AUTH_STATE,
                         AUTH_STATE_PATH,
@@ -374,8 +377,9 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                         "",
                     )
 
-            self.assertFalse(IS_AUTHENTICATED)
-            self.assertTrue(NEW_STATE.auth_pending)
+            self.assertFalse(RESULT.is_authenticated)
+            self.assertEqual(RESULT.reason_code, "auth_failed")
+            self.assertTrue(RESULT.auth_state.auth_pending)
             CLIENT.start_authentication.assert_called_once()
             SAVE_CREDENTIALS.assert_not_called()
             self.assertIn("Authentication failed", NOTIFY.call_args[0][1])
@@ -412,11 +416,19 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch(
                                             "app.main.attempt_auth",
-                                            return_value=(STATE, False, "Bad credentials"),
+                                            return_value=AuthAttemptResult(
+                                                auth_state=STATE,
+                                                is_authenticated=False,
+                                                reason_code="auth_failed",
+                                                operator_detail="Bad credentials",
+                                            ),
                                         ):
                                             with patch(
                                                 "app.worker_runtime.wait_for_one_shot_auth",
-                                                return_value=(STATE, False),
+                                                return_value=WorkerAuthState(
+                                                    auth_state=STATE,
+                                                    is_authenticated=False,
+                                                ),
                                             ):
                                                 RESULT = __import__(
                                                     "app.main", fromlist=["main"]
@@ -462,10 +474,13 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                                                     "env@example.com",
                                                     "verified-password",
                                                 ),
-                                                STATE,
-                                                True,
-                                                "ok",
-                                            )[1:],
+                                                AuthAttemptResult(
+                                                    auth_state=STATE,
+                                                    is_authenticated=True,
+                                                    reason_code="authenticated",
+                                                    operator_detail="ok",
+                                                ),
+                                            )[1],
                                         ):
                                             with patch("app.worker_runtime.run_one_shot_worker") as RUN_ONE_SHOT:
                                                 RUN_ONE_SHOT.return_value = SimpleNamespace(
@@ -884,7 +899,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
 
             with patch("app.main.notify") as NOTIFY:
-                NEW_STATE, IS_AUTHENTICATED, REQUESTED = handle_command(
+                RESULT = handle_command(
                     "backup",
                     "",
                     CONFIG,
@@ -894,9 +909,10 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                     TELEGRAM,
                 )
 
-            self.assertEqual(NEW_STATE, AUTH_STATE)
-            self.assertTrue(IS_AUTHENTICATED)
-            self.assertTrue(REQUESTED)
+            self.assertEqual(RESULT.auth_state, AUTH_STATE)
+            self.assertTrue(RESULT.is_authenticated)
+            self.assertTrue(RESULT.backup_requested)
+            self.assertEqual(RESULT.reason_code, "backup_requested")
             self.assertIn("Backup requested", NOTIFY.call_args[0][1])
             self.assertIn("Manual backup requested for Apple ID alice@example.com.", NOTIFY.call_args[0][1])
 
@@ -916,9 +932,17 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 "none",
             )
 
-            with patch("app.main.attempt_auth", return_value=(EXPECTED_STATE, False, "mfa")) as ATTEMPT:
+            with patch(
+                "app.main.attempt_auth",
+                return_value=AuthAttemptResult(
+                    auth_state=EXPECTED_STATE,
+                    is_authenticated=False,
+                    reason_code="mfa_required",
+                    operator_detail="mfa",
+                ),
+            ) as ATTEMPT:
                 with patch("app.main.log_line") as LOG:
-                    NEW_STATE, IS_AUTHENTICATED, REQUESTED = handle_command(
+                    RESULT = handle_command(
                         "auth",
                         "",
                         CONFIG,
@@ -928,9 +952,10 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                         TELEGRAM,
                     )
 
-            self.assertTrue(NEW_STATE.auth_pending)
-            self.assertFalse(IS_AUTHENTICATED)
-            self.assertFalse(REQUESTED)
+            self.assertTrue(RESULT.auth_state.auth_pending)
+            self.assertFalse(RESULT.is_authenticated)
+            self.assertFalse(RESULT.backup_requested)
+            self.assertEqual(RESULT.reason_code, "mfa_required")
             ATTEMPT.assert_called_once()
             self.assertEqual(ATTEMPT.call_args[0][1], AUTH_STATE)
             self.assertEqual(ATTEMPT.call_args[0][6], "")
@@ -953,9 +978,17 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 "none",
             )
 
-            with patch("app.main.attempt_auth", return_value=(EXPECTED_STATE, False, "mfa")) as ATTEMPT:
+            with patch(
+                "app.main.attempt_auth",
+                return_value=AuthAttemptResult(
+                    auth_state=EXPECTED_STATE,
+                    is_authenticated=False,
+                    reason_code="mfa_required",
+                    operator_detail="mfa",
+                ),
+            ) as ATTEMPT:
                 with patch("app.main.log_line") as LOG:
-                    NEW_STATE, IS_AUTHENTICATED, REQUESTED = handle_command(
+                    RESULT = handle_command(
                         "reauth",
                         "",
                         CONFIG,
@@ -965,9 +998,10 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                         TELEGRAM,
                     )
 
-            self.assertTrue(NEW_STATE.reauth_pending)
-            self.assertFalse(IS_AUTHENTICATED)
-            self.assertFalse(REQUESTED)
+            self.assertTrue(RESULT.auth_state.reauth_pending)
+            self.assertFalse(RESULT.is_authenticated)
+            self.assertFalse(RESULT.backup_requested)
+            self.assertEqual(RESULT.reason_code, "mfa_required")
             ATTEMPT.assert_called_once()
             self.assertTrue(ATTEMPT.call_args[0][1].reauth_pending)
             self.assertEqual(ATTEMPT.call_args[0][6], "")
@@ -983,9 +1017,17 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
             EXPECTED_STATE = AuthState("2026-03-09T12:00:00+00:00", False, False, "none")
 
-            with patch("app.main.attempt_auth", return_value=(EXPECTED_STATE, True, "ok")) as ATTEMPT:
+            with patch(
+                "app.main.attempt_auth",
+                return_value=AuthAttemptResult(
+                    auth_state=EXPECTED_STATE,
+                    is_authenticated=True,
+                    reason_code="authenticated",
+                    operator_detail="ok",
+                ),
+            ) as ATTEMPT:
                 with patch("app.main.log_line") as LOG:
-                    NEW_STATE, IS_AUTHENTICATED, REQUESTED = handle_command(
+                    RESULT = handle_command(
                         "auth",
                         "123456",
                         CONFIG,
@@ -997,9 +1039,10 @@ class TestMainRuntimeHelpers(unittest.TestCase):
 
             ATTEMPT.assert_called_once()
             LOG.assert_called_once()
-            self.assertEqual(NEW_STATE, EXPECTED_STATE)
-            self.assertTrue(IS_AUTHENTICATED)
-            self.assertFalse(REQUESTED)
+            self.assertEqual(RESULT.auth_state, EXPECTED_STATE)
+            self.assertTrue(RESULT.is_authenticated)
+            self.assertFalse(RESULT.backup_requested)
+            self.assertEqual(RESULT.reason_code, "authenticated")
 
 
 # ------------------------------------------------------------------------------
@@ -1038,10 +1081,21 @@ class TestMainEntrypoint(unittest.TestCase):
                             with patch("app.main.save_credentials"):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
-                                        with patch("app.main.attempt_auth", return_value=(STATE, False, "fail")):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            return_value=AuthAttemptResult(
+                                                auth_state=STATE,
+                                                is_authenticated=False,
+                                                reason_code="auth_failed",
+                                                operator_detail="fail",
+                                            ),
+                                        ):
                                             with patch(
                                                 "app.worker_runtime.wait_for_one_shot_auth",
-                                                return_value=(STATE, False),
+                                                return_value=WorkerAuthState(
+                                                    auth_state=STATE,
+                                                    is_authenticated=False,
+                                                ),
                                             ):
                                                 with patch("app.main.notify") as NOTIFY:
                                                     RESULT = __import__("app.main", fromlist=["main"]).main()
@@ -1068,10 +1122,21 @@ class TestMainEntrypoint(unittest.TestCase):
                             with patch("app.main.save_credentials"):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
-                                        with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            return_value=AuthAttemptResult(
+                                                auth_state=STATE,
+                                                is_authenticated=True,
+                                                reason_code="authenticated",
+                                                operator_detail="ok",
+                                            ),
+                                        ):
                                             with patch(
                                                 "app.worker_runtime.wait_for_one_shot_auth",
-                                                return_value=(STATE, True),
+                                                return_value=WorkerAuthState(
+                                                    auth_state=STATE,
+                                                    is_authenticated=True,
+                                                ),
                                             ):
                                                 RESULT = __import__("app.main", fromlist=["main"]).main()
 
@@ -1092,7 +1157,15 @@ class TestMainEntrypoint(unittest.TestCase):
                             with patch("app.main.save_credentials"):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
-                                        with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            return_value=AuthAttemptResult(
+                                                auth_state=STATE,
+                                                is_authenticated=True,
+                                                reason_code="authenticated",
+                                                operator_detail="ok",
+                                            ),
+                                        ):
                                             with patch(
                                                 "app.worker_runtime.run_one_shot_worker",
                                                 return_value=SimpleNamespace(
@@ -1122,7 +1195,15 @@ class TestMainEntrypoint(unittest.TestCase):
                             with patch("app.main.save_credentials"):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
-                                        with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            return_value=AuthAttemptResult(
+                                                auth_state=STATE,
+                                                is_authenticated=True,
+                                                reason_code="authenticated",
+                                                operator_detail="ok",
+                                            ),
+                                        ):
                                             with patch("app.worker_runtime.run_one_shot_worker") as RUN_ONE_SHOT:
                                                 RUN_ONE_SHOT.return_value = SimpleNamespace(
                                                     exit_code=0,
@@ -1157,10 +1238,21 @@ class TestMainEntrypoint(unittest.TestCase):
                             with patch("app.main.save_credentials"):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=INITIAL_STATE):
-                                        with patch("app.main.attempt_auth", return_value=(INITIAL_STATE, False, "mfa")):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            return_value=AuthAttemptResult(
+                                                auth_state=INITIAL_STATE,
+                                                is_authenticated=False,
+                                                reason_code="mfa_required",
+                                                operator_detail="mfa",
+                                            ),
+                                        ):
                                             with patch(
                                                 "app.worker_runtime.wait_for_one_shot_auth",
-                                                return_value=(READY_STATE, True),
+                                                return_value=WorkerAuthState(
+                                                    auth_state=READY_STATE,
+                                                    is_authenticated=True,
+                                                ),
                                             ) as WAIT_AUTH:
                                                 with patch("app.main.run_backup") as RUN_BACKUP:
                                                     with patch(
@@ -1191,10 +1283,21 @@ class TestMainEntrypoint(unittest.TestCase):
                             with patch("app.main.save_credentials"):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
-                                        with patch("app.main.attempt_auth", return_value=(STATE, False, "mfa")):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            return_value=AuthAttemptResult(
+                                                auth_state=STATE,
+                                                is_authenticated=False,
+                                                reason_code="mfa_required",
+                                                operator_detail="mfa",
+                                            ),
+                                        ):
                                             with patch(
                                                 "app.worker_runtime.wait_for_one_shot_auth",
-                                                return_value=(STATE, False),
+                                                return_value=WorkerAuthState(
+                                                    auth_state=STATE,
+                                                    is_authenticated=False,
+                                                ),
                                             ):
                                                 with patch("app.main.notify"):
                                                     with patch("app.main.log_line") as LOG_LINE:
@@ -1221,7 +1324,15 @@ class TestMainEntrypoint(unittest.TestCase):
                             with patch("app.main.save_credentials"):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
-                                        with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            return_value=AuthAttemptResult(
+                                                auth_state=STATE,
+                                                is_authenticated=True,
+                                                reason_code="authenticated",
+                                                operator_detail="ok",
+                                            ),
+                                        ):
                                             with patch("app.main.get_next_run_epoch", return_value=200):
                                                 with patch(
                                                     "app.worker_runtime.time.time",
@@ -1261,7 +1372,15 @@ class TestMainEntrypoint(unittest.TestCase):
                             with patch("app.main.save_credentials"):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
-                                        with patch("app.main.attempt_auth", return_value=(STATE, False, "fail")):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            return_value=AuthAttemptResult(
+                                                auth_state=STATE,
+                                                is_authenticated=False,
+                                                reason_code="auth_failed",
+                                                operator_detail="fail",
+                                            ),
+                                        ):
                                             with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
                                                 with patch("app.main.process_reauth_reminders", return_value=STATE):
                                                     with patch(
@@ -1295,7 +1414,15 @@ class TestMainEntrypoint(unittest.TestCase):
                             with patch("app.main.save_credentials"):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
-                                        with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            return_value=AuthAttemptResult(
+                                                auth_state=STATE,
+                                                is_authenticated=True,
+                                                reason_code="authenticated",
+                                                operator_detail="ok",
+                                            ),
+                                        ):
                                             with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
                                                 with patch("app.main.process_reauth_reminders", return_value=STATE):
                                                     with patch(
@@ -1329,7 +1456,15 @@ class TestMainEntrypoint(unittest.TestCase):
                             with patch("app.main.save_credentials"):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
-                                        with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            return_value=AuthAttemptResult(
+                                                auth_state=STATE,
+                                                is_authenticated=True,
+                                                reason_code="authenticated",
+                                                operator_detail="ok",
+                                            ),
+                                        ):
                                             with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
                                                 with patch("app.main.process_reauth_reminders", return_value=STATE):
                                                     with patch(
@@ -1364,7 +1499,15 @@ class TestMainEntrypoint(unittest.TestCase):
                             with patch("app.main.save_credentials"):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
-                                        with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            return_value=AuthAttemptResult(
+                                                auth_state=STATE,
+                                                is_authenticated=True,
+                                                reason_code="authenticated",
+                                                operator_detail="ok",
+                                            ),
+                                        ):
                                             with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
                                                 with patch("app.main.process_reauth_reminders", return_value=STATE):
                                                     with patch(

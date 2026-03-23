@@ -36,6 +36,22 @@ class AuthClient(Protocol):
 
 
 # ------------------------------------------------------------------------------
+# This data class models one auth attempt using explicit machine-facing fields.
+#
+# 1. "auth_state" is the updated persisted auth state.
+# 2. "is_authenticated" records final auth validity after the attempt.
+# 3. "reason_code" is the stable machine-facing outcome code.
+# 4. "operator_detail" is the human-readable detail returned by the client.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class AuthAttemptResult:
+    auth_state: AuthState
+    is_authenticated: bool
+    reason_code: str
+    operator_detail: str
+
+
+# ------------------------------------------------------------------------------
 # This function parses an ISO timestamp with a strict epoch fallback.
 #
 # 1. "VALUE" is an ISO-formatted timestamp string.
@@ -88,7 +104,7 @@ class AuthRuntimeDeps:
 # 5. "USERNAME" is command prefix used by Telegram control.
 # 6. "PROVIDED_CODE" is optional MFA code.
 #
-# Returns: Tuple "(new_state, is_authenticated, details_message)".
+# Returns: "AuthAttemptResult" for the completed auth attempt.
 # ------------------------------------------------------------------------------
 def attempt_auth(
     CLIENT: AuthClient,
@@ -99,7 +115,7 @@ def attempt_auth(
     APPLE_ID: str,
     PROVIDED_CODE: str,
     DEPS: AuthRuntimeDeps | None = None,
-) -> tuple[AuthState, bool, str]:
+) -> AuthAttemptResult:
     RUNTIME_DEPS = DEPS or AuthRuntimeDeps()
     CODE = PROVIDED_CODE.strip()
     APPLE_ID_LABEL = format_apple_id_label(APPLE_ID)
@@ -121,7 +137,12 @@ def attempt_auth(
             TELEGRAM,
             build_authentication_complete_message(APPLE_ID_LABEL, DETAILS),
         )
-        return NEW_STATE, True, DETAILS
+        return AuthAttemptResult(
+            auth_state=NEW_STATE,
+            is_authenticated=True,
+            reason_code="authenticated",
+            operator_detail=DETAILS,
+        )
 
     if "Two-factor code is required" in DETAILS:
         NEW_STATE = replace(AUTH_STATE, auth_pending=True)
@@ -130,7 +151,12 @@ def attempt_auth(
             TELEGRAM,
             build_authentication_required_message(APPLE_ID_LABEL, USERNAME),
         )
-        return NEW_STATE, False, DETAILS
+        return AuthAttemptResult(
+            auth_state=NEW_STATE,
+            is_authenticated=False,
+            reason_code="mfa_required",
+            operator_detail=DETAILS,
+        )
 
     NEW_STATE = replace(AUTH_STATE, auth_pending=True)
     RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
@@ -138,7 +164,12 @@ def attempt_auth(
         TELEGRAM,
         build_authentication_failed_message(APPLE_ID_LABEL, DETAILS),
     )
-    return NEW_STATE, False, DETAILS
+    return AuthAttemptResult(
+        auth_state=NEW_STATE,
+        is_authenticated=False,
+        reason_code="auth_failed",
+        operator_detail=DETAILS,
+    )
 
 
 # ------------------------------------------------------------------------------

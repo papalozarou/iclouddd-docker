@@ -177,6 +177,24 @@ class BackupRuntimeDeps:
 
 
 # ------------------------------------------------------------------------------
+# This data class models the completed backup run for caller inspection.
+#
+# 1. "summary" is the sync summary returned by incremental sync.
+# 2. "manifest_updated" records whether the manifest was persisted.
+# 3. "total_errors" is the combined transfer and delete error count.
+# 4. "completion_message" is the Telegram completion message body.
+# 5. "completion_log_message" is the final worker log line.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class BackupRunResult:
+    summary: SyncResult
+    manifest_updated: bool
+    total_errors: int
+    completion_message: str
+    completion_log_message: str
+
+
+# ------------------------------------------------------------------------------
 # This function logs effective non-secret backup settings for debug runs.
 #
 # 1. "CONFIG" is runtime configuration.
@@ -231,7 +249,7 @@ def log_effective_backup_settings(
 # 6. "SCHEDULE_LINE" is formatted schedule line.
 # 7. "DEPS" groups runtime callbacks used by backup execution.
 #
-# Returns: None.
+# Returns: "BackupRunResult" for the completed backup pass.
 # ------------------------------------------------------------------------------
 def run_backup(
     CLIENT: ICloudDriveClient,
@@ -241,7 +259,7 @@ def run_backup(
     APPLE_ID_LABEL: str,
     SCHEDULE_LINE: str,
     DEPS: BackupRuntimeDeps,
-) -> None:
+) -> BackupRunResult:
     log_effective_backup_settings(
         CONFIG,
         LOG_FILE,
@@ -343,4 +361,11 @@ def run_backup(
         LOG_FILE,
         "info" if TRAVERSAL_COMPLETE else "error",
         COMPLETION_LOG_MESSAGE,
+    )
+    return BackupRunResult(
+        summary=SUMMARY,
+        manifest_updated=TRAVERSAL_COMPLETE,
+        total_errors=TOTAL_ERRORS,
+        completion_message=COMPLETION_MESSAGE,
+        completion_log_message=COMPLETION_LOG_MESSAGE,
     )

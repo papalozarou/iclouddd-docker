@@ -14,13 +14,17 @@ from tests._stubs import install_dependency_stubs
 
 install_dependency_stubs()
 
-from app.command_runtime import CommandPollBatch
+from app.auth_runtime import AuthAttemptResult
+from app.command_runtime import CommandHandleResult, CommandPollBatch
+from app.backup_runtime import BackupRunResult
 from app.config import AppConfig
 from app.runtime_context import WorkerRuntimeContext
 from app.state import AuthState
 from app.telegram_bot import CommandEvent, TelegramConfig
 from app.worker_runtime import (
+    CommandBatchReadResult,
     CommandPollingState,
+    WorkerAuthState,
     WorkerRunResult,
     drain_startup_command_backlog,
     read_command_batch,
@@ -210,16 +214,15 @@ class TestWorkerRuntime(unittest.TestCase):
             )
             DEPS.time_fn = Mock(side_effect=[0, 900])
 
-            RESULT_STATE, RESULT_AUTH = wait_for_one_shot_auth(
+            RESULT = wait_for_one_shot_auth(
                 RUNTIME_CONTEXT,
                 Mock(),
-                AUTH_STATE,
-                False,
+                WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=False),
                 DEPS,
             )
 
-        self.assertEqual(RESULT_STATE, AUTH_STATE)
-        self.assertFalse(RESULT_AUTH)
+        self.assertEqual(RESULT.auth_state, AUTH_STATE)
+        self.assertFalse(RESULT.is_authenticated)
         PROCESS_COMMANDS.assert_called_once_with(
             RUNTIME_CONTEXT.TELEGRAM,
             RUNTIME_CONTEXT.CONFIG.container_username,
@@ -247,7 +250,15 @@ class TestWorkerRuntime(unittest.TestCase):
                     ([("auth", "123456")], 9),
                 ]
             )
-            HANDLE_COMMAND = Mock(return_value=(UPDATED_STATE, True, False))
+            HANDLE_COMMAND = Mock(
+                return_value=CommandHandleResult(
+                    auth_state=UPDATED_STATE,
+                    is_authenticated=True,
+                    backup_requested=False,
+                    reason_code="authenticated",
+                    operator_detail="ok",
+                )
+            )
             DEPS = self.build_deps(
                 PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
                 HANDLE_COMMAND_FN=HANDLE_COMMAND,
@@ -257,16 +268,15 @@ class TestWorkerRuntime(unittest.TestCase):
             )
             DEPS.time_fn = Mock(side_effect=[0, 1, 2])
 
-            RESULT_STATE, RESULT_AUTH = wait_for_one_shot_auth(
+            RESULT = wait_for_one_shot_auth(
                 RUNTIME_CONTEXT,
                 Mock(),
-                AUTH_STATE,
-                False,
+                WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=False),
                 DEPS,
             )
 
-        self.assertEqual(RESULT_STATE, UPDATED_STATE)
-        self.assertTrue(RESULT_AUTH)
+        self.assertEqual(RESULT.auth_state, UPDATED_STATE)
+        self.assertTrue(RESULT.is_authenticated)
         self.assertEqual(PROCESS_COMMANDS.call_count, 2)
         HANDLE_COMMAND.assert_called_once()
         DEPS.sleep_fn.assert_called_once()
@@ -365,22 +375,25 @@ class TestWorkerRuntime(unittest.TestCase):
                 SLEEP_FN=Mock(),
             )
 
-            _DRAINED_COMMANDS, FIRST_STATE = read_command_batch(
+            FIRST_RESULT = read_command_batch(
                 RUNTIME_CONTEXT,
                 CommandPollingState(),
                 DEPS,
                 DRAIN_ONLY=True,
             )
-            COMMANDS, SECOND_STATE = read_command_batch(
+            SECOND_RESULT = read_command_batch(
                 RUNTIME_CONTEXT,
-                FIRST_STATE,
+                FIRST_RESULT.polling_state,
                 DEPS,
             )
 
-        self.assertEqual(FIRST_STATE, CommandPollingState(phase="live_polling", next_update_offset=9))
-        self.assertEqual(COMMANDS, [("auth", "123456")])
         self.assertEqual(
-            SECOND_STATE,
+            FIRST_RESULT.polling_state,
+            CommandPollingState(phase="live_polling", next_update_offset=9),
+        )
+        self.assertEqual(SECOND_RESULT.commands, [("auth", "123456")])
+        self.assertEqual(
+            SECOND_RESULT.polling_state,
             CommandPollingState(phase="live_polling", next_update_offset=10),
         )
         self.assertEqual(PROCESS_COMMANDS.call_count, 2)
@@ -406,7 +419,15 @@ class TestWorkerRuntime(unittest.TestCase):
                     self.build_command_batch([("auth", "123456", 100)], 10),
                 ]
             )
-            HANDLE_COMMAND = Mock(return_value=(UPDATED_STATE, True, False))
+            HANDLE_COMMAND = Mock(
+                return_value=CommandHandleResult(
+                    auth_state=UPDATED_STATE,
+                    is_authenticated=True,
+                    backup_requested=False,
+                    reason_code="authenticated",
+                    operator_detail="ok",
+                )
+            )
             DEPS = self.build_deps(
                 PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
                 HANDLE_COMMAND_FN=HANDLE_COMMAND,
@@ -416,17 +437,16 @@ class TestWorkerRuntime(unittest.TestCase):
             )
             DEPS.time_fn = Mock(side_effect=[0, 1, 2])
 
-            RESULT_STATE, RESULT_AUTH = wait_for_one_shot_auth(
+            RESULT = wait_for_one_shot_auth(
                 RUNTIME_CONTEXT,
                 Mock(),
-                AUTH_STATE,
-                False,
+                WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=False),
                 DEPS,
                 100,
             )
 
-        self.assertEqual(RESULT_STATE, UPDATED_STATE)
-        self.assertTrue(RESULT_AUTH)
+        self.assertEqual(RESULT.auth_state, UPDATED_STATE)
+        self.assertTrue(RESULT.is_authenticated)
         self.assertEqual(PROCESS_COMMANDS.call_count, 2)
         HANDLE_COMMAND.assert_called_once_with(
             "auth",
@@ -459,8 +479,7 @@ class TestWorkerRuntime(unittest.TestCase):
             RESULT = run_one_shot_worker(
                 RUNTIME_CONTEXT,
                 Mock(),
-                AUTH_STATE,
-                True,
+                WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=True),
                 DEPS,
             )
 
@@ -484,7 +503,14 @@ class TestWorkerRuntime(unittest.TestCase):
             RUNTIME_CONTEXT, TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
             NOTIFY = Mock()
             PROCESS_COMMANDS = Mock(side_effect=[([], None), ([("backup", "")], 6), ([], 6)])
-            HANDLE_COMMAND = Mock(return_value=(AUTH_STATE, False, True))
+            HANDLE_COMMAND = Mock(
+                return_value=CommandHandleResult(
+                    auth_state=AUTH_STATE,
+                    is_authenticated=False,
+                    backup_requested=True,
+                    reason_code="backup_requested",
+                )
+            )
             ENFORCE_SAFETY_NET = Mock(return_value=True)
             SLEEP_CALLS = {"count": 0}
 
@@ -505,8 +531,7 @@ class TestWorkerRuntime(unittest.TestCase):
                 run_scheduled_worker_loop(
                     RUNTIME_CONTEXT,
                     Mock(),
-                    AUTH_STATE,
-                    False,
+                    WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=False),
                     DEPS,
                 )
 
@@ -526,7 +551,14 @@ class TestWorkerRuntime(unittest.TestCase):
             )
             NOTIFY = Mock()
             PROCESS_COMMANDS = Mock(side_effect=[([], None), ([("backup", "")], 6), ([], 6)])
-            HANDLE_COMMAND = Mock(return_value=(AUTH_STATE, True, True))
+            HANDLE_COMMAND = Mock(
+                return_value=CommandHandleResult(
+                    auth_state=AUTH_STATE,
+                    is_authenticated=True,
+                    backup_requested=True,
+                    reason_code="backup_requested",
+                )
+            )
             ENFORCE_SAFETY_NET = Mock(return_value=True)
             SLEEP_CALLS = {"count": 0}
 
@@ -547,8 +579,7 @@ class TestWorkerRuntime(unittest.TestCase):
                 run_scheduled_worker_loop(
                     RUNTIME_CONTEXT,
                     Mock(),
-                    AUTH_STATE,
-                    True,
+                    WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=True),
                     DEPS,
                 )
 
@@ -569,7 +600,14 @@ class TestWorkerRuntime(unittest.TestCase):
                     self.build_command_batch([("backup", "", 100)], 10),
                 ]
             )
-            HANDLE_COMMAND = Mock(return_value=(AUTH_STATE, True, True))
+            HANDLE_COMMAND = Mock(
+                return_value=CommandHandleResult(
+                    auth_state=AUTH_STATE,
+                    is_authenticated=True,
+                    backup_requested=True,
+                    reason_code="backup_requested",
+                )
+            )
 
             def sleep_fn(_SECONDS: float) -> None:
                 raise StopWorkerLoop()
@@ -587,8 +625,7 @@ class TestWorkerRuntime(unittest.TestCase):
                 run_scheduled_worker_loop(
                     RUNTIME_CONTEXT,
                     Mock(),
-                    AUTH_STATE,
-                    True,
+                    WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=True),
                     DEPS,
                     100,
                 )
@@ -606,7 +643,14 @@ class TestWorkerRuntime(unittest.TestCase):
             RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
             NOTIFY = Mock()
             PROCESS_COMMANDS = Mock(side_effect=[([], None), ([("backup", "")], 6), ([], 6)])
-            HANDLE_COMMAND = Mock(return_value=(AUTH_STATE, True, True))
+            HANDLE_COMMAND = Mock(
+                return_value=CommandHandleResult(
+                    auth_state=AUTH_STATE,
+                    is_authenticated=True,
+                    backup_requested=True,
+                    reason_code="backup_requested",
+                )
+            )
             ENFORCE_SAFETY_NET = Mock(return_value=False)
             SLEEP_CALLS = {"count": 0}
 
@@ -627,8 +671,7 @@ class TestWorkerRuntime(unittest.TestCase):
                 run_scheduled_worker_loop(
                     RUNTIME_CONTEXT,
                     Mock(),
-                    AUTH_STATE,
-                    True,
+                    WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=True),
                     DEPS,
                 )
 
@@ -658,8 +701,7 @@ class TestWorkerRuntime(unittest.TestCase):
                 run_scheduled_worker_loop(
                     RUNTIME_CONTEXT,
                     Mock(),
-                    AUTH_STATE,
-                    True,
+                    WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=True),
                     DEPS,
                 )
 
@@ -675,7 +717,14 @@ class TestWorkerRuntime(unittest.TestCase):
     def test_run_worker_runtime_returns_scheduled_worker_result(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
-            ATTEMPT_AUTH = Mock(return_value=(AUTH_STATE, True, "ok"))
+            ATTEMPT_AUTH = Mock(
+                return_value=AuthAttemptResult(
+                    auth_state=AUTH_STATE,
+                    is_authenticated=True,
+                    reason_code="authenticated",
+                    operator_detail="ok",
+                )
+            )
             PROCESS_COMMANDS = Mock(return_value=([], None))
             HANDLE_COMMAND = Mock()
             DEPS = self.build_deps(

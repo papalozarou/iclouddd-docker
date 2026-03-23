@@ -22,11 +22,11 @@ from app.runtime_context import WorkerRuntimeContext
 from app.state import AuthState
 from app.telegram_bot import CommandEvent, TelegramConfig
 from app.worker_runtime import (
+    capture_startup_command_polling_state,
     CommandBatchReadResult,
     CommandPollingState,
     WorkerAuthState,
     WorkerRunResult,
-    drain_startup_command_backlog,
     read_command_batch,
     run_one_shot_worker,
     run_scheduled_worker_loop,
@@ -218,16 +218,13 @@ class TestWorkerRuntime(unittest.TestCase):
                 RUNTIME_CONTEXT,
                 Mock(),
                 WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=False),
+                CommandPollingState(phase="live_polling", next_update_offset=None),
                 DEPS,
             )
 
         self.assertEqual(RESULT.auth_state, AUTH_STATE)
         self.assertFalse(RESULT.is_authenticated)
-        PROCESS_COMMANDS.assert_called_once_with(
-            RUNTIME_CONTEXT.TELEGRAM,
-            RUNTIME_CONTEXT.CONFIG.container_username,
-            None,
-        )
+        PROCESS_COMMANDS.assert_not_called()
         HANDLE_COMMAND.assert_not_called()
         DEPS.sleep_fn.assert_not_called()
 
@@ -272,6 +269,7 @@ class TestWorkerRuntime(unittest.TestCase):
                 RUNTIME_CONTEXT,
                 Mock(),
                 WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=False),
+                CommandPollingState(phase="live_polling", next_update_offset=None),
                 DEPS,
             )
 
@@ -282,17 +280,14 @@ class TestWorkerRuntime(unittest.TestCase):
         DEPS.sleep_fn.assert_called_once()
 
 # --------------------------------------------------------------------------
-# This test confirms startup backlog drain discards all historical command
-# batches and returns the final polling state for active command polling.
+# This test confirms startup cutover captures one live polling cursor from the
+# current Telegram update snapshot.
 # --------------------------------------------------------------------------
-    def test_drain_startup_command_backlog_returns_next_offset(self) -> None:
+    def test_capture_startup_command_polling_state_returns_next_offset(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             RUNTIME_CONTEXT, _TELEGRAM, _AUTH_STATE = self.build_runtime_context(TMPDIR)
             PROCESS_COMMANDS = Mock(
-                side_effect=[
-                    self.build_command_batch([("backup", "", 50)], 41),
-                    self.build_command_batch([("auth", "123456", 100)], 42),
-                ]
+                return_value=self.build_command_batch([("backup", "", 50)], 41)
             )
             DEPS = self.build_deps(
                 PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
@@ -302,41 +297,35 @@ class TestWorkerRuntime(unittest.TestCase):
                 SLEEP_FN=Mock(),
             )
 
-            RESULT = drain_startup_command_backlog(
+            RESULT = capture_startup_command_polling_state(
                 RUNTIME_CONTEXT,
                 DEPS,
-                STARTUP_CUTOVER_EPOCH=100,
             )
 
         self.assertEqual(
             RESULT,
             CommandPollingState(
                 phase="live_polling",
-                next_update_offset=42,
-                buffered_commands=(("auth", "123456"),),
+                next_update_offset=41,
             ),
         )
-        self.assertEqual(PROCESS_COMMANDS.call_count, 2)
+        self.assertEqual(PROCESS_COMMANDS.call_count, 1)
         self.assertEqual(PROCESS_COMMANDS.call_args_list[0].args[2], None)
-        self.assertEqual(PROCESS_COMMANDS.call_args_list[1].args[2], 41)
-        PROCESS_COMMANDS.assert_any_call(
+        PROCESS_COMMANDS.assert_called_once_with(
             RUNTIME_CONTEXT.TELEGRAM,
             RUNTIME_CONTEXT.CONFIG.container_username,
             None,
         )
 
 # --------------------------------------------------------------------------
-# This test confirms startup backlog drain stops when live updates are seen,
-# even if the current batch contains no parsed command events.
+# This test confirms startup cutover still advances the cursor when the
+# current snapshot contains no parsed command events.
 # --------------------------------------------------------------------------
-    def test_drain_startup_command_backlog_stops_at_live_non_command_updates(self) -> None:
+    def test_capture_startup_command_polling_state_handles_non_command_updates(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             RUNTIME_CONTEXT, _TELEGRAM, _AUTH_STATE = self.build_runtime_context(TMPDIR)
             PROCESS_COMMANDS = Mock(
-                side_effect=[
-                    self.build_command_batch([("backup", "", 50)], 41),
-                    self.build_command_batch([], 42, MAX_MESSAGE_EPOCH=100),
-                ]
+                return_value=self.build_command_batch([], 42, MAX_MESSAGE_EPOCH=100)
             )
             DEPS = self.build_deps(
                 PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
@@ -346,14 +335,13 @@ class TestWorkerRuntime(unittest.TestCase):
                 SLEEP_FN=Mock(),
             )
 
-            RESULT = drain_startup_command_backlog(
+            RESULT = capture_startup_command_polling_state(
                 RUNTIME_CONTEXT,
                 DEPS,
-                STARTUP_CUTOVER_EPOCH=100,
             )
 
         self.assertEqual(RESULT, CommandPollingState(phase="live_polling", next_update_offset=42))
-        self.assertEqual(PROCESS_COMMANDS.call_count, 2)
+        self.assertEqual(PROCESS_COMMANDS.call_count, 1)
 
 # --------------------------------------------------------------------------
 # This test confirms command batch reads advance and reuse one polling state.
@@ -379,7 +367,6 @@ class TestWorkerRuntime(unittest.TestCase):
                 RUNTIME_CONTEXT,
                 CommandPollingState(),
                 DEPS,
-                DRAIN_ONLY=True,
             )
             SECOND_RESULT = read_command_batch(
                 RUNTIME_CONTEXT,
@@ -391,6 +378,7 @@ class TestWorkerRuntime(unittest.TestCase):
             FIRST_RESULT.polling_state,
             CommandPollingState(phase="live_polling", next_update_offset=9),
         )
+        self.assertEqual(FIRST_RESULT.commands, [("backup", "")])
         self.assertEqual(SECOND_RESULT.commands, [("auth", "123456")])
         self.assertEqual(
             SECOND_RESULT.polling_state,
@@ -401,10 +389,10 @@ class TestWorkerRuntime(unittest.TestCase):
         self.assertEqual(PROCESS_COMMANDS.call_args_list[1].args[2], 9)
 
 # --------------------------------------------------------------------------
-# This test confirms one-shot auth wait ignores startup backlog and only
-# processes new commands after the drained offset.
+# This test confirms one-shot auth wait starts from the captured cutover
+# cursor and only processes later commands.
 # --------------------------------------------------------------------------
-    def test_wait_for_one_shot_auth_ignores_startup_backlog(self) -> None:
+    def test_wait_for_one_shot_auth_uses_captured_startup_cursor(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
             UPDATED_STATE = AuthState(
@@ -414,10 +402,7 @@ class TestWorkerRuntime(unittest.TestCase):
                 "none",
             )
             PROCESS_COMMANDS = Mock(
-                side_effect=[
-                    self.build_command_batch([("backup", "", 50)], 9),
-                    self.build_command_batch([("auth", "123456", 100)], 10),
-                ]
+                return_value=self.build_command_batch([("auth", "123456", 100)], 10)
             )
             HANDLE_COMMAND = Mock(
                 return_value=CommandHandleResult(
@@ -441,13 +426,13 @@ class TestWorkerRuntime(unittest.TestCase):
                 RUNTIME_CONTEXT,
                 Mock(),
                 WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=False),
+                CommandPollingState(phase="live_polling", next_update_offset=9),
                 DEPS,
-                100,
             )
 
         self.assertEqual(RESULT.auth_state, UPDATED_STATE)
         self.assertTrue(RESULT.is_authenticated)
-        self.assertEqual(PROCESS_COMMANDS.call_count, 2)
+        self.assertEqual(PROCESS_COMMANDS.call_count, 1)
         HANDLE_COMMAND.assert_called_once_with(
             "auth",
             "123456",
@@ -480,6 +465,7 @@ class TestWorkerRuntime(unittest.TestCase):
                 RUNTIME_CONTEXT,
                 Mock(),
                 WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=True),
+                CommandPollingState(phase="live_polling", next_update_offset=None),
                 DEPS,
             )
 
@@ -532,6 +518,7 @@ class TestWorkerRuntime(unittest.TestCase):
                     RUNTIME_CONTEXT,
                     Mock(),
                     WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=False),
+                    CommandPollingState(phase="live_polling", next_update_offset=None),
                     DEPS,
                 )
 
@@ -580,6 +567,7 @@ class TestWorkerRuntime(unittest.TestCase):
                     RUNTIME_CONTEXT,
                     Mock(),
                     WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=True),
+                    CommandPollingState(phase="live_polling", next_update_offset=None),
                     DEPS,
                 )
 
@@ -588,17 +576,14 @@ class TestWorkerRuntime(unittest.TestCase):
         DEPS.run_backup_fn.assert_not_called()
 
 # --------------------------------------------------------------------------
-# This test confirms scheduled runtime ignores startup backlog and processes
-# only new commands after the drained offset.
+# This test confirms scheduled runtime starts from the captured cutover cursor
+# and processes only later commands.
 # --------------------------------------------------------------------------
-    def test_run_scheduled_worker_loop_ignores_startup_backlog(self) -> None:
+    def test_run_scheduled_worker_loop_uses_captured_startup_cursor(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
             PROCESS_COMMANDS = Mock(
-                side_effect=[
-                    self.build_command_batch([("backup", "", 50)], 9),
-                    self.build_command_batch([("backup", "", 100)], 10),
-                ]
+                return_value=self.build_command_batch([("backup", "", 100)], 10)
             )
             HANDLE_COMMAND = Mock(
                 return_value=CommandHandleResult(
@@ -626,11 +611,11 @@ class TestWorkerRuntime(unittest.TestCase):
                     RUNTIME_CONTEXT,
                     Mock(),
                     WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=True),
+                    CommandPollingState(phase="live_polling", next_update_offset=9),
                     DEPS,
-                    100,
                 )
 
-        self.assertEqual(PROCESS_COMMANDS.call_count, 2)
+        self.assertEqual(PROCESS_COMMANDS.call_count, 1)
         HANDLE_COMMAND.assert_called_once()
         DEPS.run_backup_fn.assert_called_once()
 
@@ -672,6 +657,7 @@ class TestWorkerRuntime(unittest.TestCase):
                     RUNTIME_CONTEXT,
                     Mock(),
                     WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=True),
+                    CommandPollingState(phase="live_polling", next_update_offset=None),
                     DEPS,
                 )
 
@@ -702,6 +688,7 @@ class TestWorkerRuntime(unittest.TestCase):
                     RUNTIME_CONTEXT,
                     Mock(),
                     WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=True),
+                    CommandPollingState(phase="live_polling", next_update_offset=None),
                     DEPS,
                 )
 
@@ -756,6 +743,49 @@ class TestWorkerRuntime(unittest.TestCase):
         ATTEMPT_AUTH.assert_called_once()
         RUN_LOOP.assert_called_once()
         self.assertEqual(DEPS.log_line_fn.call_count, 2)
+
+# --------------------------------------------------------------------------
+# This test confirms runtime captures the startup cursor before auth and
+# passes the same live polling state into the scheduled loop.
+# --------------------------------------------------------------------------
+    def test_run_worker_runtime_captures_startup_cursor_before_auth(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
+            STARTUP_BATCH = self.build_command_batch([("backup", "", 50)], 9)
+            ATTEMPT_AUTH = Mock(
+                return_value=AuthAttemptResult(
+                    auth_state=AUTH_STATE,
+                    is_authenticated=True,
+                    reason_code="authenticated",
+                    operator_detail="ok",
+                )
+            )
+            PROCESS_COMMANDS = Mock(return_value=STARTUP_BATCH)
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
+                HANDLE_COMMAND_FN=Mock(),
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=Mock(),
+            )
+            DEPS.attempt_auth_fn = ATTEMPT_AUTH
+            DEPS.log_line_fn = Mock()
+
+            with patch("app.worker_runtime.run_scheduled_worker_loop") as RUN_LOOP:
+                run_worker_runtime(
+                    RUNTIME_CONTEXT,
+                    Mock(),
+                    AUTH_STATE,
+                    DEPS,
+                )
+
+        PROCESS_COMMANDS.assert_called_once_with(
+            RUNTIME_CONTEXT.TELEGRAM,
+            RUNTIME_CONTEXT.CONFIG.container_username,
+            None,
+        )
+        ATTEMPT_AUTH.assert_called_once()
+        self.assertEqual(RUN_LOOP.call_args.args[3], CommandPollingState(phase="live_polling", next_update_offset=9))
 
 
 if __name__ == "__main__":

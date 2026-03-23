@@ -91,14 +91,13 @@ class WorkerAuthState:
 # This data class tracks command polling cursor state for a worker run.
 #
 # N.B.
-# Startup backlog drain and active polling share this same state object so
+# Startup cutover capture and active polling share this same state object so
 # update-offset ownership stays in one place inside the runtime loop.
 # ------------------------------------------------------------------------------
 @dataclass(frozen=True)
 class CommandPollingState:
     phase: str = "startup_snapshot"
     next_update_offset: int | None = None
-    buffered_commands: tuple[tuple[str, str], ...] = ()
 
 
 # ------------------------------------------------------------------------------
@@ -111,12 +110,40 @@ class CommandBatchReadResult:
 
 
 # ------------------------------------------------------------------------------
-# This function reads the next command batch and advances polling state.
+# This function captures the startup cutover cursor for Telegram polling.
+#
+# 1. "RUNTIME_CONTEXT" is shared worker runtime state.
+# 2. "DEPS" groups runtime callbacks used by worker orchestration.
+#
+# Returns: Initialised polling state for active command polling.
+#
+# N.B.
+# This captures the current update cursor once and discards only the updates
+# already visible at that snapshot. After this point, the worker uses the
+# returned cursor for all live polling, so startup no longer depends on
+# message timestamps or repeated backlog-drain loops.
+# ------------------------------------------------------------------------------
+def capture_startup_command_polling_state(
+    RUNTIME_CONTEXT: WorkerRuntimeContext,
+    DEPS: WorkerRuntimeDeps,
+) -> CommandPollingState:
+    BATCH = DEPS.poll_command_batch_fn(
+        RUNTIME_CONTEXT.TELEGRAM,
+        RUNTIME_CONTEXT.CONFIG.container_username,
+        None,
+    )
+    return CommandPollingState(
+        phase="live_polling",
+        next_update_offset=BATCH.next_update_offset,
+    )
+
+
+# ------------------------------------------------------------------------------
+# This function reads the next live command batch and advances polling state.
 #
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
 # 2. "POLLING_STATE" is the current command polling cursor state.
 # 3. "DEPS" groups runtime callbacks used by worker orchestration.
-# 4. "DRAIN_ONLY" discards parsed commands while still advancing the cursor.
 #
 # Returns: "CommandBatchReadResult" for the next loop step.
 # ------------------------------------------------------------------------------
@@ -124,89 +151,19 @@ def read_command_batch(
     RUNTIME_CONTEXT: WorkerRuntimeContext,
     POLLING_STATE: CommandPollingState,
     DEPS: WorkerRuntimeDeps,
-    DRAIN_ONLY: bool = False,
 ) -> CommandBatchReadResult:
-    if POLLING_STATE.buffered_commands and not DRAIN_ONLY:
-        return CommandBatchReadResult(
-            commands=list(POLLING_STATE.buffered_commands),
-            polling_state=CommandPollingState(
-                phase="live_polling",
-                next_update_offset=POLLING_STATE.next_update_offset,
-                buffered_commands=(),
-            ),
-        )
-
     BATCH = DEPS.poll_command_batch_fn(
         RUNTIME_CONTEXT.TELEGRAM,
         RUNTIME_CONTEXT.CONFIG.container_username,
         POLLING_STATE.next_update_offset,
     )
-    NEXT_STATE = CommandPollingState(
-        phase="live_polling",
-        next_update_offset=BATCH.next_update_offset,
-    )
-
-    if DRAIN_ONLY:
-        return CommandBatchReadResult([], NEXT_STATE)
-
     return CommandBatchReadResult(
         commands=[(EVENT.command, EVENT.args) for EVENT in BATCH.commands],
-        polling_state=NEXT_STATE,
-    )
-
-
-# ------------------------------------------------------------------------------
-# This function drains only historical Telegram backlog at startup.
-#
-# 1. "RUNTIME_CONTEXT" is shared worker runtime state.
-# 2. "DEPS" groups runtime callbacks used by worker orchestration.
-# 3. "STARTUP_CUTOVER_EPOCH" is the startup epoch that separates historical
-#    backlog from live commands.
-#
-# Returns: Initialised polling state for active command polling.
-# ------------------------------------------------------------------------------
-def drain_startup_command_backlog(
-    RUNTIME_CONTEXT: WorkerRuntimeContext,
-    DEPS: WorkerRuntimeDeps,
-    STARTUP_CUTOVER_EPOCH: int = 0,
-) -> CommandPollingState:
-    POLLING_STATE = CommandPollingState(phase="startup_snapshot")
-
-    while True:
-        BATCH = DEPS.poll_command_batch_fn(
-            RUNTIME_CONTEXT.TELEGRAM,
-            RUNTIME_CONTEXT.CONFIG.container_username,
-            POLLING_STATE.next_update_offset,
-        )
-        LIVE_COMMANDS = tuple(
-            (EVENT.command, EVENT.args)
-            for EVENT in BATCH.commands
-            if EVENT.message_epoch >= STARTUP_CUTOVER_EPOCH
-        )
-        if LIVE_COMMANDS:
-            return CommandPollingState(
-                phase="live_polling",
-                next_update_offset=BATCH.next_update_offset,
-                buffered_commands=LIVE_COMMANDS,
-            )
-
-        if BATCH.max_message_epoch >= STARTUP_CUTOVER_EPOCH:
-            return CommandPollingState(
-                phase="live_polling",
-                next_update_offset=BATCH.next_update_offset,
-                buffered_commands=(),
-            )
-
-        NEXT_STATE = CommandPollingState(
-            phase="backlog_drain",
+        polling_state=CommandPollingState(
+            phase="live_polling",
             next_update_offset=BATCH.next_update_offset,
-            buffered_commands=(),
-        )
-
-        if NEXT_STATE.next_update_offset == POLLING_STATE.next_update_offset:
-            return NEXT_STATE
-
-        POLLING_STATE = NEXT_STATE
+        ),
+    )
 
 
 # ------------------------------------------------------------------------------
@@ -214,8 +171,8 @@ def drain_startup_command_backlog(
 #
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
 # 2. "CLIENT" is iCloud client wrapper.
-# 3. "AUTH_STATE" is current auth state.
-# 4. "IS_AUTHENTICATED" tracks current auth validity.
+# 3. "AUTH_RUNTIME_STATE" is current worker auth state snapshot.
+# 4. "POLLING_STATE" is the captured live polling cursor state.
 # 5. "DEPS" groups runtime callbacks used by worker orchestration.
 #
 # Returns: "WorkerAuthState" after one-shot auth waiting completes.
@@ -224,15 +181,10 @@ def wait_for_one_shot_auth(
     RUNTIME_CONTEXT: WorkerRuntimeContext,
     CLIENT: Any,
     AUTH_RUNTIME_STATE: WorkerAuthState,
+    POLLING_STATE: CommandPollingState,
     DEPS: WorkerRuntimeDeps,
-    STARTUP_CUTOVER_EPOCH: int = 0,
 ) -> WorkerAuthState:
     START_EPOCH = int(DEPS.time_fn())
-    POLLING_STATE = drain_startup_command_backlog(
-        RUNTIME_CONTEXT,
-        DEPS,
-        STARTUP_CUTOVER_EPOCH,
-    )
 
     while True:
         if (
@@ -268,6 +220,11 @@ def wait_for_one_shot_auth(
                 auth_state=HANDLE_RESULT.auth_state,
                 is_authenticated=HANDLE_RESULT.is_authenticated,
             )
+            if (
+                AUTH_RUNTIME_STATE.is_authenticated
+                and not AUTH_RUNTIME_STATE.auth_state.reauth_pending
+            ):
+                return AUTH_RUNTIME_STATE
 
         DEPS.sleep_fn(RUN_ONCE_AUTH_POLL_SECONDS)
 
@@ -304,7 +261,8 @@ def log_startup_auth_state(
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
 # 2. "CLIENT" is iCloud client wrapper.
 # 3. "AUTH_RUNTIME_STATE" is current worker auth state snapshot.
-# 4. "DEPS" groups runtime callbacks used by worker orchestration.
+# 4. "POLLING_STATE" is the captured live polling cursor state.
+# 5. "DEPS" groups runtime callbacks used by worker orchestration.
 #
 # Returns: Worker exit result for one-shot processing.
 # ------------------------------------------------------------------------------
@@ -312,8 +270,8 @@ def run_one_shot_worker(
     RUNTIME_CONTEXT: WorkerRuntimeContext,
     CLIENT: Any,
     AUTH_RUNTIME_STATE: WorkerAuthState,
+    POLLING_STATE: CommandPollingState,
     DEPS: WorkerRuntimeDeps,
-    STARTUP_CUTOVER_EPOCH: int = 0,
 ) -> WorkerRunResult:
     if (
         not AUTH_RUNTIME_STATE.is_authenticated
@@ -330,8 +288,8 @@ def run_one_shot_worker(
             RUNTIME_CONTEXT,
             CLIENT,
             AUTH_RUNTIME_STATE,
+            POLLING_STATE,
             DEPS,
-            STARTUP_CUTOVER_EPOCH,
         )
 
     if not AUTH_RUNTIME_STATE.is_authenticated:
@@ -387,7 +345,8 @@ def run_one_shot_worker(
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
 # 2. "CLIENT" is iCloud client wrapper.
 # 3. "AUTH_RUNTIME_STATE" is current worker auth state snapshot.
-# 4. "DEPS" groups runtime callbacks used by worker orchestration.
+# 4. "POLLING_STATE" is the captured live polling cursor state.
+# 5. "DEPS" groups runtime callbacks used by worker orchestration.
 #
 # Returns: This function does not return during normal operation.
 # ------------------------------------------------------------------------------
@@ -395,15 +354,10 @@ def run_scheduled_worker_loop(
     RUNTIME_CONTEXT: WorkerRuntimeContext,
     CLIENT: Any,
     AUTH_RUNTIME_STATE: WorkerAuthState,
+    POLLING_STATE: CommandPollingState,
     DEPS: WorkerRuntimeDeps,
-    STARTUP_CUTOVER_EPOCH: int = 0,
 ) -> None:
     BACKUP_REQUESTED = False
-    POLLING_STATE = drain_startup_command_backlog(
-        RUNTIME_CONTEXT,
-        DEPS,
-        STARTUP_CUTOVER_EPOCH,
-    )
     INITIAL_EPOCH = int(DEPS.time_fn())
 
     if RUNTIME_CONTEXT.CONFIG.schedule_mode == "interval":
@@ -519,7 +473,10 @@ def run_worker_runtime(
     AUTH_STATE: AuthState,
     DEPS: WorkerRuntimeDeps,
 ) -> WorkerRunResult:
-    STARTUP_CUTOVER_EPOCH = int(time.time())
+    POLLING_STATE = capture_startup_command_polling_state(
+        RUNTIME_CONTEXT,
+        DEPS,
+    )
     AUTH_RESULT = DEPS.attempt_auth_fn(
         CLIENT,
         AUTH_STATE,
@@ -544,16 +501,16 @@ def run_worker_runtime(
             RUNTIME_CONTEXT,
             CLIENT,
             AUTH_RUNTIME_STATE,
+            POLLING_STATE,
             DEPS,
-            STARTUP_CUTOVER_EPOCH,
         )
 
     run_scheduled_worker_loop(
         RUNTIME_CONTEXT,
         CLIENT,
         AUTH_RUNTIME_STATE,
+        POLLING_STATE,
         DEPS,
-        STARTUP_CUTOVER_EPOCH,
     )
     return WorkerRunResult(
         exit_code=0,

@@ -26,12 +26,13 @@ N.B.
    complete the current pending challenge.
 4. `auth <code>` and `reauth <code>` do not start a fresh login attempt; they
    only validate against the active pending session.
-5. On worker startup, the container captures a startup cutover point, drains
-   only older queued Telegram updates, then switches to live polling.
-6. Commands that arrive after startup begins are preserved for active
-   handling; only pre-start backlog is discarded.
-7. Startup drain still completes if newer Telegram updates keep arriving while
-   the worker is starting.
+5. On worker startup, the container captures one Telegram update cursor
+   snapshot and discards only the queued updates already visible at that
+   cursor.
+6. After that snapshot, the worker switches to live polling from the captured
+   offset, so later commands are preserved for active handling.
+7. Startup cutover still completes even if newer Telegram updates keep
+   arriving while the worker is starting.
 8. One-shot and scheduled modes both use the same cutover contract, so a
    restart does not change which commands count as backlog.
 9. If a worker restart clears in-memory auth session state, send `auth` or

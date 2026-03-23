@@ -32,7 +32,7 @@ from app.main import (
     start_heartbeat_updater,
     update_heartbeat,
 )
-from app.worker_runtime import WorkerAuthState, wait_for_one_shot_auth
+from app.worker_runtime import CommandPollingState, WorkerAuthState, wait_for_one_shot_auth
 from app.state import AuthState
 from app.telegram_bot import CommandEvent, TelegramConfig
 
@@ -184,6 +184,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 SimpleNamespace(CONFIG=CONFIG, TELEGRAM=TELEGRAM),
                 Mock(),
                 WorkerAuthState(auth_state=STATE, is_authenticated=True),
+                CommandPollingState(phase="live_polling", next_update_offset=None),
                 SimpleNamespace(
                     poll_command_batch_fn=Mock(
                         return_value=SimpleNamespace(
@@ -196,7 +197,6 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                     time_fn=lambda: 0,
                     sleep_fn=Mock(),
                 ),
-                0,
             )
 
         self.assertEqual(RESULT.auth_state, STATE)

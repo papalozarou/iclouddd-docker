@@ -8,11 +8,11 @@
   seconds in both recurring and one-shot execution paths.
 - Telegram commands are ignored unless they come from `H_TGM_CHAT_ID`.
 - If `H_TGM_CHAT_ID` is unset, Telegram command polling stays disabled.
-- On startup, the worker captures a startup cutover point, drains only older
-  queued Telegram updates, then switches to live polling.
-- Commands that arrive after startup begins are preserved for active handling;
-  only pre-start backlog is discarded.
-- Startup drain completes even if newer Telegram updates keep arriving while
+- On startup, the worker captures one Telegram update cursor snapshot and
+  discards only the queued updates already visible at that cursor.
+- After that snapshot, the worker switches to live polling from the captured
+  offset, so later commands are preserved for active handling.
+- Startup cutover completes even if newer Telegram updates keep arriving while
   the worker is still starting.
 - If Telegram is not configured, notifications are skipped quietly rather than
   logged as delivery failures.

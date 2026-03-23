@@ -6,10 +6,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
-from typing import Any, Callable
+from typing import Callable, Protocol
 
+from app.command_runtime import CommandPollBatch
 from app.runtime_context import WorkerRuntimeContext
 from app.state import AuthState
+from app.telegram_bot import TelegramConfig
 from app.telegram_messages import (
     build_backup_skipped_auth_incomplete_message,
     build_backup_skipped_reauth_pending_message,
@@ -18,6 +20,19 @@ from app.telegram_messages import (
 
 RUN_ONCE_AUTH_WAIT_SECONDS = 900
 RUN_ONCE_AUTH_POLL_SECONDS = 5
+
+
+# ------------------------------------------------------------------------------
+# This protocol describes the Telegram command poller used by the worker loop.
+# ------------------------------------------------------------------------------
+class CommandBatchPoller(Protocol):
+    def __call__(
+        self,
+        TELEGRAM: TelegramConfig,
+        USERNAME: str,
+        UPDATE_OFFSET: int | None,
+    ) -> CommandPollBatch:
+        ...
 
 
 # ------------------------------------------------------------------------------
@@ -33,7 +48,7 @@ RUN_ONCE_AUTH_POLL_SECONDS = 5
 class WorkerRuntimeDeps:
     attempt_auth_fn: Callable[..., tuple[AuthState, bool, str]]
     process_reauth_reminders_fn: Callable[..., AuthState]
-    poll_command_batch_fn: Callable[..., Any]
+    poll_command_batch_fn: CommandBatchPoller
     handle_command_fn: Callable[..., tuple[AuthState, bool, bool]]
     enforce_safety_net_fn: Callable[..., bool]
     run_backup_fn: Callable[..., None]

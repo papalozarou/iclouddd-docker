@@ -102,6 +102,22 @@ class TransferClient(Protocol):
 
 
 # ------------------------------------------------------------------------------
+# This protocol describes traversal telemetry required by sync reporting.
+# ------------------------------------------------------------------------------
+class TraversalStatsClient(Protocol):
+    def get_traversal_stats_snapshot(self) -> TraversalStatsSnapshot:
+        ...
+
+
+# ------------------------------------------------------------------------------
+# This protocol describes the client capabilities required by sync execution.
+# ------------------------------------------------------------------------------
+class SyncClient(TransferClient, TraversalStatsClient, Protocol):
+    def list_entries(self) -> list[RemoteEntry]:
+        ...
+
+
+# ------------------------------------------------------------------------------
 # This data class captures one terminal transfer result for a file entry.
 #
 # N.B.
@@ -324,7 +340,7 @@ def needs_transfer(ENTRY: RemoteEntry, MANIFEST: dict[str, dict[str, Any]]) -> b
 # Returns: Tuple of sync summary metrics and a refreshed manifest mapping.
 # ------------------------------------------------------------------------------
 def perform_incremental_sync(
-    CLIENT: ICloudDriveClient,
+    CLIENT: SyncClient,
     OUTPUT_DIR: Path,
     MANIFEST: dict[str, dict[str, Any]],
     SYNC_DOWNLOAD_WORKERS: int = 0,
@@ -686,26 +702,23 @@ def perform_incremental_sync(
 # ------------------------------------------------------------------------------
 # This function returns traversal hard-failure count from client telemetry.
 #
-# 1. "CLIENT" is the active iCloud API wrapper.
+# 1. "CLIENT" exposes traversal stats through the sync client contract.
 #
 # Returns: Count of hard traversal failures recorded by the client.
 # ------------------------------------------------------------------------------
-def get_traversal_hard_failure_count(CLIENT: ICloudDriveClient) -> int:
+def get_traversal_hard_failure_count(CLIENT: TraversalStatsClient) -> int:
     STATS = get_traversal_stats_snapshot(CLIENT)
     return max(int(STATS.get("dir_hard_failures", 0)), 0)
 
 
 # ------------------------------------------------------------------------------
-# This function returns a traversal-stats snapshot for clients that support it.
+# This function returns a validated traversal-stats snapshot.
 #
-# 1. "CLIENT" is the active iCloud API wrapper.
+# 1. "CLIENT" exposes traversal stats through the sync client contract.
 #
 # Returns: Traversal stats snapshot, or an empty default snapshot.
 # ------------------------------------------------------------------------------
-def get_traversal_stats_snapshot(CLIENT: ICloudDriveClient) -> TraversalStatsSnapshot:
-    if not hasattr(CLIENT, "get_traversal_stats_snapshot"):
-        return build_empty_traversal_stats_snapshot()
-
+def get_traversal_stats_snapshot(CLIENT: TraversalStatsClient) -> TraversalStatsSnapshot:
     STATS = CLIENT.get_traversal_stats_snapshot()
     if not isinstance(STATS, dict):
         return build_empty_traversal_stats_snapshot()

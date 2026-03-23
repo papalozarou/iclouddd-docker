@@ -285,10 +285,11 @@ class TestSyncerHelpers(unittest.TestCase):
 
 # --------------------------------------------------------------------------
 # This test confirms traversal hard-failure count falls back safely when the
-# client does not expose a stats snapshot.
+# client returns a malformed stats payload.
 # --------------------------------------------------------------------------
-    def test_get_traversal_hard_failure_count_handles_missing_snapshot(self) -> None:
-        self.assertEqual(get_traversal_hard_failure_count(object()), 0)
+    def test_get_traversal_hard_failure_count_handles_malformed_snapshot(self) -> None:
+        CLIENT = SimpleNamespace(get_traversal_stats_snapshot=lambda: None)
+        self.assertEqual(get_traversal_hard_failure_count(CLIENT), 0)
 
 # --------------------------------------------------------------------------
 # This test confirms traversal hard-failure count ignores non-dictionary
@@ -987,6 +988,9 @@ class TestSyncerHelpers(unittest.TestCase):
                 time.sleep(0.05)
                 return []
 
+            def get_traversal_stats_snapshot(self):
+                return build_empty_traversal_stats_snapshot()
+
             def download_file(self, REMOTE_PATH, LOCAL_PATH):
                 _ = REMOTE_PATH
                 _ = LOCAL_PATH
@@ -1355,6 +1359,9 @@ class TestSyncerHelpers(unittest.TestCase):
 
             def list_entries(self):
                 return ENTRIES
+
+            def get_traversal_stats_snapshot(self):
+                return build_empty_traversal_stats_snapshot()
 
             def download_file(self, REMOTE_PATH, LOCAL_PATH):
                 _ = REMOTE_PATH

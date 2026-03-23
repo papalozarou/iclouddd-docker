@@ -2,6 +2,8 @@
 # This test module verifies the worker-loop control flow in "app.worker_runtime".
 # ------------------------------------------------------------------------------
 
+from __future__ import annotations
+
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,10 +14,11 @@ from tests._stubs import install_dependency_stubs
 
 install_dependency_stubs()
 
+from app.command_runtime import CommandPollBatch
 from app.config import AppConfig
 from app.runtime_context import WorkerRuntimeContext
 from app.state import AuthState
-from app.telegram_bot import TelegramConfig
+from app.telegram_bot import CommandEvent, TelegramConfig
 from app.worker_runtime import (
     CommandPollingState,
     WorkerRunResult,
@@ -110,6 +113,35 @@ class TestWorkerRuntime(unittest.TestCase):
         return RUNTIME_CONTEXT, TELEGRAM, AUTH_STATE
 
 # --------------------------------------------------------------------------
+# This function builds one command batch fixture for polling tests.
+#
+# 1. "COMMANDS" is a list of "(command, args, message_epoch)" tuples.
+# 2. "NEXT_UPDATE_OFFSET" is the next polling cursor.
+# 3. "MAX_MESSAGE_EPOCH" optionally overrides the batch max message epoch.
+#
+# Returns: "CommandPollBatch" fixture.
+# --------------------------------------------------------------------------
+    def build_command_batch(
+        self,
+        COMMANDS: list[tuple[str, str, int]],
+        NEXT_UPDATE_OFFSET: int | None,
+        *,
+        MAX_MESSAGE_EPOCH: int | None = None,
+    ) -> CommandPollBatch:
+        EVENTS = [
+            CommandEvent(
+                command=COMMAND,
+                args=ARGS,
+                update_id=INDEX + 1,
+                message_epoch=MESSAGE_EPOCH,
+            )
+            for INDEX, (COMMAND, ARGS, MESSAGE_EPOCH) in enumerate(COMMANDS)
+        ]
+        if MAX_MESSAGE_EPOCH is None:
+            MAX_MESSAGE_EPOCH = max((EVENT.message_epoch for EVENT in EVENTS), default=0)
+        return CommandPollBatch(EVENTS, NEXT_UPDATE_OFFSET, MAX_MESSAGE_EPOCH)
+
+# --------------------------------------------------------------------------
 # This function builds worker-loop dependencies with controllable callbacks.
 #
 # 1. "PROCESS_COMMANDS_FN" returns Telegram commands plus next offset.
@@ -129,9 +161,21 @@ class TestWorkerRuntime(unittest.TestCase):
         NOTIFY_FN,
         SLEEP_FN,
     ) -> SimpleNamespace:
+        def poll_command_batch_fn(*ARGS):
+            RESULT = PROCESS_COMMANDS_FN(*ARGS)
+
+            if isinstance(RESULT, CommandPollBatch):
+                return RESULT
+
+            COMMANDS, NEXT_UPDATE_OFFSET = RESULT
+            return self.build_command_batch(
+                [(COMMAND, COMMAND_ARGS, 0) for COMMAND, COMMAND_ARGS in COMMANDS],
+                NEXT_UPDATE_OFFSET,
+            )
+
         return SimpleNamespace(
             process_reauth_reminders_fn=lambda AUTH_STATE, *_: AUTH_STATE,
-            process_commands_fn=PROCESS_COMMANDS_FN,
+            poll_command_batch_fn=poll_command_batch_fn,
             handle_command_fn=HANDLE_COMMAND_FN,
             enforce_safety_net_fn=ENFORCE_SAFETY_NET_FN,
             run_backup_fn=Mock(),
@@ -236,9 +280,8 @@ class TestWorkerRuntime(unittest.TestCase):
             RUNTIME_CONTEXT, _TELEGRAM, _AUTH_STATE = self.build_runtime_context(TMPDIR)
             PROCESS_COMMANDS = Mock(
                 side_effect=[
-                    ([("backup", "")], 41),
-                    ([("auth", "123456")], 42),
-                    ([], 42),
+                    self.build_command_batch([("backup", "", 50)], 41),
+                    self.build_command_batch([("auth", "123456", 100)], 42),
                 ]
             )
             DEPS = self.build_deps(
@@ -249,18 +292,57 @@ class TestWorkerRuntime(unittest.TestCase):
                 SLEEP_FN=Mock(),
             )
 
-            RESULT = drain_startup_command_backlog(RUNTIME_CONTEXT, DEPS)
+            RESULT = drain_startup_command_backlog(
+                RUNTIME_CONTEXT,
+                DEPS,
+                STARTUP_CUTOVER_EPOCH=100,
+            )
 
-        self.assertEqual(RESULT, CommandPollingState(next_update_offset=42))
-        self.assertEqual(PROCESS_COMMANDS.call_count, 3)
+        self.assertEqual(
+            RESULT,
+            CommandPollingState(
+                next_update_offset=42,
+                buffered_commands=(("auth", "123456"),),
+            ),
+        )
+        self.assertEqual(PROCESS_COMMANDS.call_count, 2)
         self.assertEqual(PROCESS_COMMANDS.call_args_list[0].args[2], None)
         self.assertEqual(PROCESS_COMMANDS.call_args_list[1].args[2], 41)
-        self.assertEqual(PROCESS_COMMANDS.call_args_list[2].args[2], 42)
         PROCESS_COMMANDS.assert_any_call(
             RUNTIME_CONTEXT.TELEGRAM,
             RUNTIME_CONTEXT.CONFIG.container_username,
             None,
         )
+
+# --------------------------------------------------------------------------
+# This test confirms startup backlog drain stops when live updates are seen,
+# even if the current batch contains no parsed command events.
+# --------------------------------------------------------------------------
+    def test_drain_startup_command_backlog_stops_at_live_non_command_updates(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, _AUTH_STATE = self.build_runtime_context(TMPDIR)
+            PROCESS_COMMANDS = Mock(
+                side_effect=[
+                    self.build_command_batch([("backup", "", 50)], 41),
+                    self.build_command_batch([], 42, MAX_MESSAGE_EPOCH=100),
+                ]
+            )
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
+                HANDLE_COMMAND_FN=Mock(),
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=Mock(),
+            )
+
+            RESULT = drain_startup_command_backlog(
+                RUNTIME_CONTEXT,
+                DEPS,
+                STARTUP_CUTOVER_EPOCH=100,
+            )
+
+        self.assertEqual(RESULT, CommandPollingState(next_update_offset=42))
+        self.assertEqual(PROCESS_COMMANDS.call_count, 2)
 
 # --------------------------------------------------------------------------
 # This test confirms command batch reads advance and reuse one polling state.
@@ -316,9 +398,8 @@ class TestWorkerRuntime(unittest.TestCase):
             )
             PROCESS_COMMANDS = Mock(
                 side_effect=[
-                    ([("backup", "")], 9),
-                    ([], 9),
-                    ([("auth", "123456")], 10),
+                    self.build_command_batch([("backup", "", 50)], 9),
+                    self.build_command_batch([("auth", "123456", 100)], 10),
                 ]
             )
             HANDLE_COMMAND = Mock(return_value=(UPDATED_STATE, True, False))
@@ -337,11 +418,12 @@ class TestWorkerRuntime(unittest.TestCase):
                 AUTH_STATE,
                 False,
                 DEPS,
+                100,
             )
 
         self.assertEqual(RESULT_STATE, UPDATED_STATE)
         self.assertTrue(RESULT_AUTH)
-        self.assertEqual(PROCESS_COMMANDS.call_count, 3)
+        self.assertEqual(PROCESS_COMMANDS.call_count, 2)
         HANDLE_COMMAND.assert_called_once_with(
             "auth",
             "123456",
@@ -479,9 +561,8 @@ class TestWorkerRuntime(unittest.TestCase):
             RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
             PROCESS_COMMANDS = Mock(
                 side_effect=[
-                    ([("backup", "")], 9),
-                    ([], 9),
-                    ([("backup", "")], 10),
+                    self.build_command_batch([("backup", "", 50)], 9),
+                    self.build_command_batch([("backup", "", 100)], 10),
                 ]
             )
             HANDLE_COMMAND = Mock(return_value=(AUTH_STATE, True, True))
@@ -505,9 +586,10 @@ class TestWorkerRuntime(unittest.TestCase):
                     AUTH_STATE,
                     True,
                     DEPS,
+                    100,
                 )
 
-        self.assertEqual(PROCESS_COMMANDS.call_count, 3)
+        self.assertEqual(PROCESS_COMMANDS.call_count, 2)
         HANDLE_COMMAND.assert_called_once()
         DEPS.run_backup_fn.assert_called_once()
 

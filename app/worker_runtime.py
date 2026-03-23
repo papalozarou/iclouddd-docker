@@ -33,7 +33,7 @@ RUN_ONCE_AUTH_POLL_SECONDS = 5
 class WorkerRuntimeDeps:
     attempt_auth_fn: Callable[..., tuple[AuthState, bool, str]]
     process_reauth_reminders_fn: Callable[..., AuthState]
-    process_commands_fn: Callable[..., tuple[list[tuple[str, str]], int | None]]
+    poll_command_batch_fn: Callable[..., Any]
     handle_command_fn: Callable[..., tuple[AuthState, bool, bool]]
     enforce_safety_net_fn: Callable[..., bool]
     run_backup_fn: Callable[..., None]
@@ -71,6 +71,7 @@ class WorkerRunResult:
 @dataclass(frozen=True)
 class CommandPollingState:
     next_update_offset: int | None = None
+    buffered_commands: tuple[tuple[str, str], ...] = ()
 
 
 # ------------------------------------------------------------------------------
@@ -89,40 +90,63 @@ def read_command_batch(
     DEPS: WorkerRuntimeDeps,
     DRAIN_ONLY: bool = False,
 ) -> tuple[list[tuple[str, str]], CommandPollingState]:
-    COMMANDS, NEXT_UPDATE_OFFSET = DEPS.process_commands_fn(
+    if POLLING_STATE.buffered_commands and not DRAIN_ONLY:
+        return list(POLLING_STATE.buffered_commands), CommandPollingState(
+            next_update_offset=POLLING_STATE.next_update_offset,
+            buffered_commands=(),
+        )
+
+    BATCH = DEPS.poll_command_batch_fn(
         RUNTIME_CONTEXT.TELEGRAM,
         RUNTIME_CONTEXT.CONFIG.container_username,
         POLLING_STATE.next_update_offset,
     )
-    NEXT_STATE = CommandPollingState(next_update_offset=NEXT_UPDATE_OFFSET)
+    NEXT_STATE = CommandPollingState(next_update_offset=BATCH.next_update_offset)
 
     if DRAIN_ONLY:
         return [], NEXT_STATE
 
-    return COMMANDS, NEXT_STATE
+    return [(EVENT.command, EVENT.args) for EVENT in BATCH.commands], NEXT_STATE
 
 
 # ------------------------------------------------------------------------------
-# This function drains all queued Telegram commands at startup.
+# This function drains only historical Telegram backlog at startup.
 #
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
 # 2. "DEPS" groups runtime callbacks used by worker orchestration.
+# 3. "STARTUP_CUTOVER_EPOCH" is the startup epoch that separates historical
+#    backlog from live commands.
 #
 # Returns: Initialised polling state for active command polling.
 # ------------------------------------------------------------------------------
 def drain_startup_command_backlog(
     RUNTIME_CONTEXT: WorkerRuntimeContext,
     DEPS: WorkerRuntimeDeps,
+    STARTUP_CUTOVER_EPOCH: int = 0,
 ) -> CommandPollingState:
     POLLING_STATE = CommandPollingState()
 
     while True:
-        _COMMANDS, NEXT_STATE = read_command_batch(
-            RUNTIME_CONTEXT,
-            POLLING_STATE,
-            DEPS,
-            DRAIN_ONLY=True,
+        BATCH = DEPS.poll_command_batch_fn(
+            RUNTIME_CONTEXT.TELEGRAM,
+            RUNTIME_CONTEXT.CONFIG.container_username,
+            POLLING_STATE.next_update_offset,
         )
+        LIVE_COMMANDS = tuple(
+            (EVENT.command, EVENT.args)
+            for EVENT in BATCH.commands
+            if EVENT.message_epoch >= STARTUP_CUTOVER_EPOCH
+        )
+        NEXT_STATE = CommandPollingState(
+            next_update_offset=BATCH.next_update_offset,
+            buffered_commands=LIVE_COMMANDS,
+        )
+
+        if LIVE_COMMANDS:
+            return NEXT_STATE
+
+        if BATCH.max_message_epoch >= STARTUP_CUTOVER_EPOCH:
+            return NEXT_STATE
 
         if NEXT_STATE.next_update_offset == POLLING_STATE.next_update_offset:
             return NEXT_STATE
@@ -147,9 +171,14 @@ def wait_for_one_shot_auth(
     AUTH_STATE: AuthState,
     IS_AUTHENTICATED: bool,
     DEPS: WorkerRuntimeDeps,
+    STARTUP_CUTOVER_EPOCH: int = 0,
 ) -> tuple[AuthState, bool]:
     START_EPOCH = int(DEPS.time_fn())
-    POLLING_STATE = drain_startup_command_backlog(RUNTIME_CONTEXT, DEPS)
+    POLLING_STATE = drain_startup_command_backlog(
+        RUNTIME_CONTEXT,
+        DEPS,
+        STARTUP_CUTOVER_EPOCH,
+    )
 
     while True:
         if IS_AUTHENTICATED and not AUTH_STATE.reauth_pending:
@@ -227,6 +256,7 @@ def run_one_shot_worker(
     AUTH_STATE: AuthState,
     IS_AUTHENTICATED: bool,
     DEPS: WorkerRuntimeDeps,
+    STARTUP_CUTOVER_EPOCH: int = 0,
 ) -> WorkerRunResult:
     if not IS_AUTHENTICATED or AUTH_STATE.reauth_pending:
         DEPS.notify_fn(
@@ -242,6 +272,7 @@ def run_one_shot_worker(
             AUTH_STATE,
             IS_AUTHENTICATED,
             DEPS,
+            STARTUP_CUTOVER_EPOCH,
         )
 
     if not IS_AUTHENTICATED:
@@ -308,9 +339,14 @@ def run_scheduled_worker_loop(
     AUTH_STATE: AuthState,
     IS_AUTHENTICATED: bool,
     DEPS: WorkerRuntimeDeps,
+    STARTUP_CUTOVER_EPOCH: int = 0,
 ) -> None:
     BACKUP_REQUESTED = False
-    POLLING_STATE = drain_startup_command_backlog(RUNTIME_CONTEXT, DEPS)
+    POLLING_STATE = drain_startup_command_backlog(
+        RUNTIME_CONTEXT,
+        DEPS,
+        STARTUP_CUTOVER_EPOCH,
+    )
     INITIAL_EPOCH = int(DEPS.time_fn())
 
     if RUNTIME_CONTEXT.CONFIG.schedule_mode == "interval":
@@ -418,6 +454,7 @@ def run_worker_runtime(
     AUTH_STATE: AuthState,
     DEPS: WorkerRuntimeDeps,
 ) -> WorkerRunResult:
+    STARTUP_CUTOVER_EPOCH = int(time.time())
     AUTH_STATE, IS_AUTHENTICATED, DETAILS = DEPS.attempt_auth_fn(
         CLIENT,
         AUTH_STATE,
@@ -442,6 +479,7 @@ def run_worker_runtime(
             AUTH_STATE,
             IS_AUTHENTICATED,
             DEPS,
+            STARTUP_CUTOVER_EPOCH,
         )
 
     run_scheduled_worker_loop(
@@ -450,6 +488,7 @@ def run_worker_runtime(
         AUTH_STATE,
         IS_AUTHENTICATED,
         DEPS,
+        STARTUP_CUTOVER_EPOCH,
     )
     return WorkerRunResult(
         exit_code=0,

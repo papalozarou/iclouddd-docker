@@ -26,13 +26,15 @@ N.B.
    complete the current pending challenge.
 4. `auth <code>` and `reauth <code>` do not start a fresh login attempt; they
    only validate against the active pending session.
-5. On worker startup, the container drains all older queued Telegram updates
-   before active polling starts. This stops stale `backup`, `auth`, and
-   `reauth` commands from being replayed after a restart, even when Telegram
-   returns the backlog across multiple batches.
-6. If a worker restart clears in-memory auth session state, send `auth` or
+5. On worker startup, the container captures a startup cutover point, drains
+   only older queued Telegram updates, then switches to live polling.
+6. Commands that arrive after startup begins are preserved for active
+   handling; only pre-start backlog is discarded.
+7. Startup drain still completes if newer Telegram updates keep arriving while
+   the worker is starting.
+8. If a worker restart clears in-memory auth session state, send `auth` or
    `reauth` without a code first to trigger a new challenge prompt.
-7. If successful, pending auth state is cleared and normal backup flow resumes.
+9. If successful, pending auth state is cleared and normal backup flow resumes.
 
 ## Password file behaviour
 

@@ -184,11 +184,18 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 STATE,
                 True,
                 SimpleNamespace(
-                    process_commands_fn=Mock(return_value=([], None)),
+                    poll_command_batch_fn=Mock(
+                        return_value=SimpleNamespace(
+                            commands=[],
+                            next_update_offset=None,
+                            max_message_epoch=0,
+                        )
+                    ),
                     handle_command_fn=Mock(),
                     time_fn=lambda: 0,
                     sleep_fn=Mock(),
                 ),
+                0,
             )
 
         self.assertEqual(RESULT_STATE, STATE)
@@ -554,7 +561,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
         UPDATES = [{"update_id": 1}, {"update_id": 7}]
         EVENTS = [
             None,
-            CommandEvent(command="backup", args="", update_id=7),
+            CommandEvent(command="backup", args="", update_id=7, message_epoch=0),
         ]
 
         with patch("app.main.fetch_updates", return_value=UPDATES):
@@ -1218,13 +1225,20 @@ class TestMainEntrypoint(unittest.TestCase):
                                             with patch("app.main.get_next_run_epoch", return_value=200):
                                                 with patch(
                                                     "app.worker_runtime.time.time",
-                                                    side_effect=[100, 100],
+                                                    side_effect=[100, 100, 100],
                                                 ):
                                                     with patch(
                                                         "app.main.process_reauth_reminders",
                                                         return_value=STATE,
                                                     ):
-                                                        with patch("app.main.process_commands", return_value=([], None)):
+                                                        with patch(
+                                                            "app.main.poll_command_batch",
+                                                            return_value=SimpleNamespace(
+                                                                commands=[],
+                                                                next_update_offset=None,
+                                                                max_message_epoch=0,
+                                                            ),
+                                                        ):
                                                             with patch(
                                                                 "app.worker_runtime.time.sleep",
                                                                 side_effect=SystemExit,
@@ -1248,9 +1262,16 @@ class TestMainEntrypoint(unittest.TestCase):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, False, "fail")):
-                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100]):
+                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
                                                 with patch("app.main.process_reauth_reminders", return_value=STATE):
-                                                    with patch("app.main.process_commands", return_value=([], None)):
+                                                    with patch(
+                                                        "app.main.poll_command_batch",
+                                                        return_value=SimpleNamespace(
+                                                            commands=[],
+                                                            next_update_offset=None,
+                                                            max_message_epoch=0,
+                                                        ),
+                                                    ):
                                                         with patch("app.main.get_next_run_epoch", return_value=160):
                                                             with patch(
                                                                 "app.worker_runtime.time.sleep",
@@ -1275,9 +1296,16 @@ class TestMainEntrypoint(unittest.TestCase):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
-                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100]):
+                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
                                                 with patch("app.main.process_reauth_reminders", return_value=STATE):
-                                                    with patch("app.main.process_commands", return_value=([], None)):
+                                                    with patch(
+                                                        "app.main.poll_command_batch",
+                                                        return_value=SimpleNamespace(
+                                                            commands=[],
+                                                            next_update_offset=None,
+                                                            max_message_epoch=0,
+                                                        ),
+                                                    ):
                                                         with patch("app.main.get_next_run_epoch", return_value=160):
                                                             with patch(
                                                                 "app.worker_runtime.time.sleep",
@@ -1302,9 +1330,16 @@ class TestMainEntrypoint(unittest.TestCase):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
-                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100]):
+                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
                                                 with patch("app.main.process_reauth_reminders", return_value=STATE):
-                                                    with patch("app.main.process_commands", return_value=([], None)):
+                                                    with patch(
+                                                        "app.main.poll_command_batch",
+                                                        return_value=SimpleNamespace(
+                                                            commands=[],
+                                                            next_update_offset=None,
+                                                            max_message_epoch=0,
+                                                        ),
+                                                    ):
                                                         with patch("app.main.get_next_run_epoch", return_value=160):
                                                             with patch("app.main.enforce_safety_net", return_value=False):
                                                                 with patch(
@@ -1330,9 +1365,16 @@ class TestMainEntrypoint(unittest.TestCase):
                                 with patch("app.main.ICloudDriveClient", return_value=Mock()):
                                     with patch("app.main.load_auth_state", return_value=STATE):
                                         with patch("app.main.attempt_auth", return_value=(STATE, True, "ok")):
-                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100]):
+                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
                                                 with patch("app.main.process_reauth_reminders", return_value=STATE):
-                                                    with patch("app.main.process_commands", return_value=([], None)):
+                                                    with patch(
+                                                        "app.main.poll_command_batch",
+                                                        return_value=SimpleNamespace(
+                                                            commands=[],
+                                                            next_update_offset=None,
+                                                            max_message_epoch=0,
+                                                        ),
+                                                    ):
                                                         with patch("app.main.get_next_run_epoch", return_value=160):
                                                             with patch("app.main.enforce_safety_net", return_value=True):
                                                                 with patch("app.main.run_backup") as RUN_BACKUP:

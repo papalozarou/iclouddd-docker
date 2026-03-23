@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from app.state import AuthState, save_auth_state
-from app.telegram_bot import TelegramConfig, fetch_updates, parse_command
+from app.telegram_bot import CommandEvent, TelegramConfig, fetch_updates, parse_command
 from app.telegram_messages import (
     build_backup_requested_message,
 )
@@ -41,6 +41,16 @@ class CommandPollingDeps:
 
 
 # ------------------------------------------------------------------------------
+# This data class returns one polled Telegram update batch plus cursor state.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class CommandPollBatch:
+    commands: list[CommandEvent]
+    next_update_offset: int | None
+    max_message_epoch: int
+
+
+# ------------------------------------------------------------------------------
 # This data class groups runtime callbacks used by command handling.
 # ------------------------------------------------------------------------------
 @dataclass(frozen=True)
@@ -61,32 +71,60 @@ class CommandRuntimeDeps:
 #
 # Returns: Tuple "(commands, next_offset)" for command execution.
 # ------------------------------------------------------------------------------
+def poll_command_batch(
+    TELEGRAM: TelegramConfig,
+    USERNAME: str,
+    UPDATE_OFFSET: int | None,
+    DEPS: CommandPollingDeps | None = None,
+) -> CommandPollBatch:
+    RUNTIME_DEPS = DEPS or CommandPollingDeps()
+    UPDATES = RUNTIME_DEPS.fetch_updates_fn(TELEGRAM, UPDATE_OFFSET)
+
+    if not UPDATES:
+        return CommandPollBatch([], UPDATE_OFFSET, 0)
+
+    COMMANDS: list[CommandEvent] = []
+    MAX_UPDATE = UPDATE_OFFSET or 0
+    MAX_MESSAGE_EPOCH = 0
+
+    for UPDATE in UPDATES:
+        EVENT = RUNTIME_DEPS.parse_command_fn(UPDATE, USERNAME, TELEGRAM.chat_id)
+        UPDATE_ID = int(UPDATE.get("update_id", 0))
+        MAX_UPDATE = max(MAX_UPDATE, UPDATE_ID + 1)
+        MESSAGE = UPDATE.get("message")
+        if isinstance(MESSAGE, dict):
+            MAX_MESSAGE_EPOCH = max(MAX_MESSAGE_EPOCH, int(MESSAGE.get("date", 0)))
+
+        if EVENT is None:
+            continue
+
+        COMMANDS.append(EVENT)
+
+    return CommandPollBatch(COMMANDS, MAX_UPDATE, MAX_MESSAGE_EPOCH)
+
+
+# ------------------------------------------------------------------------------
+# This function polls Telegram and returns parsed command intents.
+#
+# 1. "TELEGRAM" is Telegram configuration.
+# 2. "USERNAME" is command prefix.
+# 3. "UPDATE_OFFSET" is update offset cursor.
+#
+# Returns: Tuple "(commands, next_offset)" for command execution.
+# ------------------------------------------------------------------------------
 def process_commands(
     TELEGRAM: TelegramConfig,
     USERNAME: str,
     UPDATE_OFFSET: int | None,
     DEPS: CommandPollingDeps | None = None,
 ) -> tuple[list[tuple[str, str]], int | None]:
-    RUNTIME_DEPS = DEPS or CommandPollingDeps()
-    UPDATES = RUNTIME_DEPS.fetch_updates_fn(TELEGRAM, UPDATE_OFFSET)
-
-    if not UPDATES:
-        return [], UPDATE_OFFSET
-
-    COMMANDS: list[tuple[str, str]] = []
-    MAX_UPDATE = UPDATE_OFFSET or 0
-
-    for UPDATE in UPDATES:
-        EVENT = RUNTIME_DEPS.parse_command_fn(UPDATE, USERNAME, TELEGRAM.chat_id)
-        UPDATE_ID = int(UPDATE.get("update_id", 0))
-        MAX_UPDATE = max(MAX_UPDATE, UPDATE_ID + 1)
-
-        if EVENT is None:
-            continue
-
-        COMMANDS.append((EVENT.command, EVENT.args))
-
-    return COMMANDS, MAX_UPDATE
+    BATCH = poll_command_batch(
+        TELEGRAM,
+        USERNAME,
+        UPDATE_OFFSET,
+        DEPS,
+    )
+    return [(EVENT.command, EVENT.args) for EVENT in BATCH.commands], BATCH.next_update_offset
 
 
 # ------------------------------------------------------------------------------

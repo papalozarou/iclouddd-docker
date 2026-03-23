@@ -27,6 +27,7 @@ class CommandEvent:
     command: str
     args: str
     update_id: int
+    message_epoch: int
 
 
 # ------------------------------------------------------------------------------
@@ -264,4 +265,9 @@ def parse_command(
     if COMMAND not in {"backup", "auth", "reauth"}:
         return None
 
-    return CommandEvent(command=COMMAND, args=ARGS, update_id=UPDATE_ID)
+    return CommandEvent(
+        command=COMMAND,
+        args=ARGS,
+        update_id=UPDATE_ID,
+        message_epoch=int(MESSAGE.get("date", 0)),
+    )

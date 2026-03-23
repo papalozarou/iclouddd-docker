@@ -283,6 +283,32 @@ def process_commands(
 
 
 # ------------------------------------------------------------------------------
+# This function polls Telegram and returns one raw command batch plus cursor
+# and message timing metadata.
+#
+# 1. "TELEGRAM" is Telegram configuration.
+# 2. "USERNAME" is command prefix.
+# 3. "UPDATE_OFFSET" is update offset cursor.
+#
+# Returns: "CommandPollBatch" for startup or active command ingestion.
+# ------------------------------------------------------------------------------
+def poll_command_batch(
+    TELEGRAM: TelegramConfig,
+    USERNAME: str,
+    UPDATE_OFFSET: int | None,
+) -> command_runtime.CommandPollBatch:
+    return command_runtime.poll_command_batch(
+        TELEGRAM,
+        USERNAME,
+        UPDATE_OFFSET,
+        DEPS=command_runtime.CommandPollingDeps(
+            fetch_updates_fn=fetch_updates,
+            parse_command_fn=parse_command,
+        ),
+    )
+
+
+# ------------------------------------------------------------------------------
 # This function executes one backup pass and persists refreshed manifest data.
 #
 # 1. "CLIENT" is iCloud client wrapper.
@@ -455,7 +481,7 @@ def main() -> int:
             worker_runtime.WorkerRuntimeDeps(
                 attempt_auth_fn=attempt_auth,
                 process_reauth_reminders_fn=process_reauth_reminders,
-                process_commands_fn=process_commands,
+                poll_command_batch_fn=poll_command_batch,
                 handle_command_fn=handle_command,
                 enforce_safety_net_fn=enforce_safety_net,
                 run_backup_fn=run_backup,

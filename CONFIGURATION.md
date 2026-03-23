@@ -146,6 +146,8 @@ Runtime layout:
 - `keyring/keyring_pass.cfg` stores the worker keyring backend data. Saved
   iCloud credentials are only updated after a successful login, so a failed
   startup attempt does not overwrite the last known good stored credentials.
+- Keyring bootstrap sets `PYTHON_KEYRING_FILENAME` and `XDG_DATA_HOME` for the
+  worker process, but it does not rewrite `HOME`.
 - JSON state files are written via a temporary file and atomic replace. If a
   write fails, the worker logs the problem and cleans up the temporary file
   where possible.

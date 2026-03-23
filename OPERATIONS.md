@@ -18,6 +18,9 @@
   logged as delivery failures.
 - The same internal update cursor is then reused for active polling, so
   drained updates are not revisited later in the same worker run.
+- Transfer workers report structured per-file outcomes back to sync
+  aggregation, so retry counts, fallback mode, and failure reasons stay tied
+  to the correct entry even when downloads run concurrently.
 - If Telegram rejects a notification or the request fails, the worker logs the
   failure detail so the dropped alert is visible in container output.
 - Entrypoint starts as root only to read Docker secret files, then drops to
@@ -51,6 +54,9 @@
 - Root is used at startup only for secret file access under `/run/secrets`.
 - If your Docker runtime blocks group switching (`setgroups`), startup can fail
   during the privilege drop step.
+- Keyring bootstrap keeps process-wide side effects narrow. The worker sets an
+  explicit keyring file path and XDG data path, but no longer rewrites `HOME`
+  for the whole process.
 
 ## Scheduling
 

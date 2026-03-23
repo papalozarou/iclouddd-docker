@@ -301,6 +301,7 @@ class TestWorkerRuntime(unittest.TestCase):
         self.assertEqual(
             RESULT,
             CommandPollingState(
+                phase="live_polling",
                 next_update_offset=42,
                 buffered_commands=(("auth", "123456"),),
             ),
@@ -341,7 +342,7 @@ class TestWorkerRuntime(unittest.TestCase):
                 STARTUP_CUTOVER_EPOCH=100,
             )
 
-        self.assertEqual(RESULT, CommandPollingState(next_update_offset=42))
+        self.assertEqual(RESULT, CommandPollingState(phase="live_polling", next_update_offset=42))
         self.assertEqual(PROCESS_COMMANDS.call_count, 2)
 
 # --------------------------------------------------------------------------
@@ -376,9 +377,12 @@ class TestWorkerRuntime(unittest.TestCase):
                 DEPS,
             )
 
-        self.assertEqual(FIRST_STATE, CommandPollingState(next_update_offset=9))
+        self.assertEqual(FIRST_STATE, CommandPollingState(phase="live_polling", next_update_offset=9))
         self.assertEqual(COMMANDS, [("auth", "123456")])
-        self.assertEqual(SECOND_STATE, CommandPollingState(next_update_offset=10))
+        self.assertEqual(
+            SECOND_STATE,
+            CommandPollingState(phase="live_polling", next_update_offset=10),
+        )
         self.assertEqual(PROCESS_COMMANDS.call_count, 2)
         self.assertEqual(PROCESS_COMMANDS.call_args_list[0].args[2], None)
         self.assertEqual(PROCESS_COMMANDS.call_args_list[1].args[2], 9)

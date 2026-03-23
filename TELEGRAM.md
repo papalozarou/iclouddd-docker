@@ -32,9 +32,12 @@ N.B.
    handling; only pre-start backlog is discarded.
 7. Startup drain still completes if newer Telegram updates keep arriving while
    the worker is starting.
-8. If a worker restart clears in-memory auth session state, send `auth` or
+8. One-shot and scheduled modes both use the same cutover contract, so a
+   restart does not change which commands count as backlog.
+9. If a worker restart clears in-memory auth session state, send `auth` or
    `reauth` without a code first to trigger a new challenge prompt.
-9. If successful, pending auth state is cleared and normal backup flow resumes.
+10. If successful, pending auth state is cleared and normal backup flow
+    resumes.
 
 ## Password file behaviour
 

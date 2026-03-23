@@ -9,13 +9,18 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, TimeoutError
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 import errno
 import os
 import shutil
 import time
 
-from app.icloud_client import ICloudDriveClient, RemoteEntry, TraversalStatsSnapshot
+from app.icloud_client import (
+    DownloadResult,
+    ICloudDriveClient,
+    RemoteEntry,
+    TraversalStatsSnapshot,
+)
 from app.logger import log_line
 
 TRANSFER_PROGRESS_LOG_INTERVAL_SECONDS = 30.0
@@ -83,6 +88,42 @@ class SyncResult:
     traversal_complete: bool = True
     traversal_hard_failures: int = 0
     delete_phase_skipped: bool = False
+
+
+# ------------------------------------------------------------------------------
+# This protocol describes the transfer methods required by sync execution.
+# ------------------------------------------------------------------------------
+class TransferClient(Protocol):
+    def download_file(self, REMOTE_PATH: str, LOCAL_PATH: Path) -> DownloadResult:
+        ...
+
+    def download_package_tree(self, REMOTE_PATH: str, LOCAL_PATH: Path) -> DownloadResult:
+        ...
+
+
+# ------------------------------------------------------------------------------
+# This data class captures one terminal transfer result for a file entry.
+#
+# N.B.
+# This is the stable boundary consumed by worker threads, summary reporting,
+# and manifest updates. It keeps retry state and outcome semantics explicit.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class TransferResult:
+    is_success: bool
+    attempt_count: int
+    outcome: str
+
+
+# ------------------------------------------------------------------------------
+# This data class models one transfer attempt before retry orchestration decides
+# whether to stop, retry, or switch strategy.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class TransferAttemptResult:
+    outcome: str
+    transfer_mode: str = ""
+    failure_reason: str = ""
 
 
 # ------------------------------------------------------------------------------
@@ -449,7 +490,7 @@ def perform_incremental_sync(
                     ENTRY = FUTURES[FUTURE]
                     COMPLETED += 1
                     try:
-                        SUCCESS, ATTEMPT_COUNT, TRANSFER_MODE = FUTURE.result()
+                        TRANSFER_RESULT = FUTURE.result()
                     except Exception as ERROR:
                         if LOG_FILE is not None:
                             log_line(
@@ -474,27 +515,30 @@ def perform_incremental_sync(
                             NEW_MANIFEST[ENTRY.path] = EXISTING_METADATA
                         continue
 
-                    if SUCCESS:
+                    if TRANSFER_RESULT.is_success:
                         LOCAL_PATH = OUTPUT_DIR / ENTRY.path
                         apply_remote_modified_time(LOCAL_PATH, ENTRY.modified, LOG_FILE)
                         TRANSFERRED += 1
                         TRANSFERRED_BYTES += max(ENTRY.size, 0)
-                        if TRANSFER_MODE in {"package", "package_reconciled"}:
-                            NEW_MANIFEST[ENTRY.path] = package_entry_metadata(ENTRY, TRANSFER_MODE)
+                        if TRANSFER_RESULT.outcome in {"package", "package_reconciled"}:
+                            NEW_MANIFEST[ENTRY.path] = package_entry_metadata(
+                                ENTRY,
+                                TRANSFER_RESULT.outcome,
+                            )
                         else:
                             NEW_MANIFEST[ENTRY.path] = TRANSFER_CANDIDATE_METADATA[ENTRY.path]
                         if LOG_FILE is not None:
-                            if ATTEMPT_COUNT > 1:
+                            if TRANSFER_RESULT.attempt_count > 1:
                                 log_line(
                                     LOG_FILE,
                                     "debug",
                                     f"File transferred after retries: {ENTRY.path} "
-                                    f"(attempts={ATTEMPT_COUNT}, "
+                                    f"(attempts={TRANSFER_RESULT.attempt_count}, "
                                     f"{max(ENTRY.size, 0)} bytes)",
                                 )
                                 continue
 
-                            if TRANSFER_MODE == "package":
+                            if TRANSFER_RESULT.outcome == "package":
                                 log_line(
                                     LOG_FILE,
                                     "debug",
@@ -502,7 +546,7 @@ def perform_incremental_sync(
                                     f"({max(ENTRY.size, 0)} bytes)",
                                 )
                                 continue
-                            if TRANSFER_MODE == "package_reconciled":
+                            if TRANSFER_RESULT.outcome == "package_reconciled":
                                 log_line(
                                     LOG_FILE,
                                     "debug",
@@ -520,7 +564,7 @@ def perform_incremental_sync(
                         continue
 
                     ERRORS += 1
-                    FAILURE_REASON = normalise_transfer_reason(TRANSFER_MODE)
+                    FAILURE_REASON = normalise_transfer_reason(TRANSFER_RESULT.outcome)
                     FAILURE_REASON_COUNTS[FAILURE_REASON] = (
                         FAILURE_REASON_COUNTS.get(FAILURE_REASON, 0) + 1
                     )
@@ -532,7 +576,8 @@ def perform_incremental_sync(
                         log_line(
                             LOG_FILE,
                             "debug",
-                            f"File transfer failed: {ENTRY.path} (reason={TRANSFER_MODE})",
+                            "File transfer failed: "
+                            f"{ENTRY.path} (reason={TRANSFER_RESULT.outcome})",
                         )
 
                 NOW_EPOCH = time.monotonic()
@@ -1143,67 +1188,102 @@ def apply_remote_modified_time(
 
 
 # ------------------------------------------------------------------------------
-# This function transfers a file only when required by manifest diffing.
+# This function executes one transfer attempt without retry orchestration.
+#
+# 1. "CLIENT" is the active iCloud API wrapper.
+# 2. "LOCAL_PATH" is the resolved destination path for "ENTRY".
+# 3. "ENTRY" is file metadata.
+#
+# Returns: "TransferAttemptResult" for retry orchestration.
+# ------------------------------------------------------------------------------
+def execute_transfer_attempt(
+    CLIENT: TransferClient,
+    LOCAL_PATH: Path,
+    ENTRY: RemoteEntry,
+) -> TransferAttemptResult:
+    IS_KNOWN_PACKAGE_PATH = is_known_package_path(ENTRY.path)
+
+    if not change_conflicting_local_path(LOCAL_PATH, IS_KNOWN_PACKAGE_PATH):
+        return TransferAttemptResult(
+            "terminal_failure",
+            failure_reason="local_type_conflict_cleanup_failed",
+        )
+
+    if LOCAL_PATH.exists() and LOCAL_PATH.is_dir():
+        PACKAGE_RESULT = CLIENT.download_package_tree(ENTRY.path, LOCAL_PATH)
+        if PACKAGE_RESULT.is_success:
+            return TransferAttemptResult("success", transfer_mode="package")
+
+        if PACKAGE_RESULT.failure_reason in {
+            "package_item_missing",
+            "package_children_unavailable",
+        }:
+            return TransferAttemptResult("success", transfer_mode="package_reconciled")
+
+        return TransferAttemptResult(
+            "terminal_failure",
+            failure_reason=PACKAGE_RESULT.failure_reason or "package_download_failed",
+        )
+
+    if IS_KNOWN_PACKAGE_PATH:
+        PACKAGE_RESULT = CLIENT.download_package_tree(ENTRY.path, LOCAL_PATH)
+        if PACKAGE_RESULT.is_success:
+            return TransferAttemptResult("success", transfer_mode="package")
+
+        if PACKAGE_RESULT.failure_reason in {
+            "package_item_missing",
+            "package_children_unavailable",
+        }:
+            return TransferAttemptResult(
+                "terminal_failure",
+                failure_reason="known_package_metadata_unavailable",
+            )
+
+        return TransferAttemptResult(
+            "terminal_failure",
+            failure_reason=PACKAGE_RESULT.failure_reason or "package_download_failed",
+        )
+
+    FILE_RESULT = CLIENT.download_file(ENTRY.path, LOCAL_PATH)
+    if FILE_RESULT.is_success:
+        return TransferAttemptResult("success", transfer_mode="file")
+
+    PACKAGE_RESULT = CLIENT.download_package_tree(ENTRY.path, LOCAL_PATH)
+    if PACKAGE_RESULT.is_success:
+        return TransferAttemptResult("success", transfer_mode="package")
+
+    FAILURE_REASON = get_transfer_failure_reason(
+        FILE_RESULT.failure_reason,
+        PACKAGE_RESULT.failure_reason,
+    )
+    return TransferAttemptResult("terminal_failure", failure_reason=FAILURE_REASON)
+
+
+# ------------------------------------------------------------------------------
+# This function executes a file transfer with explicit retry semantics.
 #
 # 1. "CLIENT" is the active iCloud API wrapper.
 # 2. "OUTPUT_DIR" is local backup root.
 # 3. "ENTRY" is file metadata.
 # 4. "SHOULD_TRANSFER" determines whether download should proceed.
 #
-# Returns: True when skipped or downloaded successfully, otherwise False.
+# Returns: "TransferResult" describing the final transfer outcome.
 # ------------------------------------------------------------------------------
 def transfer_if_required(
-    CLIENT: ICloudDriveClient,
+    CLIENT: TransferClient,
     OUTPUT_DIR: Path,
     ENTRY: RemoteEntry,
     SHOULD_TRANSFER: bool,
-) -> tuple[bool, int, str]:
+) -> TransferResult:
     if not SHOULD_TRANSFER:
-        return True, 1, "skipped"
+        return TransferResult(True, 1, "skipped")
 
     LOCAL_PATH = OUTPUT_DIR / ENTRY.path
-    IS_KNOWN_PACKAGE_PATH = is_known_package_path(ENTRY.path)
     ATTEMPT = 1
 
     while ATTEMPT <= TRANSFER_RETRY_ATTEMPTS:
         try:
-            if not change_conflicting_local_path(LOCAL_PATH, IS_KNOWN_PACKAGE_PATH):
-                return False, ATTEMPT, "local_type_conflict_cleanup_failed"
-
-            if LOCAL_PATH.exists() and LOCAL_PATH.is_dir():
-                IS_PACKAGE_SUCCESS = CLIENT.download_package_tree(ENTRY.path, LOCAL_PATH)
-                if IS_PACKAGE_SUCCESS:
-                    return True, ATTEMPT, "package"
-
-                PACKAGE_REASON = CLIENT.get_last_download_failure_reason().strip().lower()
-                if PACKAGE_REASON in {"package_item_missing", "package_children_unavailable"}:
-                    return True, ATTEMPT, "package_reconciled"
-
-                return False, ATTEMPT, PACKAGE_REASON or "package_download_failed"
-
-            if IS_KNOWN_PACKAGE_PATH:
-                IS_PACKAGE_SUCCESS = CLIENT.download_package_tree(ENTRY.path, LOCAL_PATH)
-                if IS_PACKAGE_SUCCESS:
-                    return True, ATTEMPT, "package"
-
-                PACKAGE_REASON = CLIENT.get_last_download_failure_reason().strip().lower()
-                if PACKAGE_REASON in {"package_item_missing", "package_children_unavailable"}:
-                    return False, ATTEMPT, "known_package_metadata_unavailable"
-
-                return False, ATTEMPT, PACKAGE_REASON or "package_download_failed"
-
-            IS_SUCCESS = CLIENT.download_file(ENTRY.path, LOCAL_PATH)
-            if IS_SUCCESS:
-                return True, ATTEMPT, "file"
-
-            FILE_REASON = CLIENT.get_last_download_failure_reason().strip().lower()
-            IS_PACKAGE_SUCCESS = CLIENT.download_package_tree(ENTRY.path, LOCAL_PATH)
-            if IS_PACKAGE_SUCCESS:
-                return True, ATTEMPT, "package"
-
-            PACKAGE_REASON = CLIENT.get_last_download_failure_reason().strip().lower()
-            FAILURE_REASON = get_transfer_failure_reason(FILE_REASON, PACKAGE_REASON)
-            return False, ATTEMPT, FAILURE_REASON
+            ATTEMPT_RESULT = execute_transfer_attempt(CLIENT, LOCAL_PATH, ENTRY)
         except Exception as ERROR:
             if ATTEMPT >= TRANSFER_RETRY_ATTEMPTS:
                 raise
@@ -1217,8 +1297,14 @@ def transfer_if_required(
             )
             time.sleep(DELAY_SECONDS)
             ATTEMPT += 1
+            continue
 
-    return False, ATTEMPT, "retry_exhausted"
+        if ATTEMPT_RESULT.outcome == "success":
+            return TransferResult(True, ATTEMPT, ATTEMPT_RESULT.transfer_mode)
+
+        return TransferResult(False, ATTEMPT, ATTEMPT_RESULT.failure_reason)
+
+    return TransferResult(False, ATTEMPT, "retry_exhausted")
 
 
 # ------------------------------------------------------------------------------

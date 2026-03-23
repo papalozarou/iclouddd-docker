@@ -22,6 +22,8 @@ from tests._stubs import install_dependency_stubs
 install_dependency_stubs()
 
 from app.syncer import (
+    DownloadResult,
+    TransferResult,
     apply_remote_modified_time,
     build_local_file_index,
     build_empty_traversal_stats_snapshot,
@@ -74,13 +76,12 @@ class FakeClient:
         self.package_failure_reasons: dict[str, str] = {}
         self.download_calls = 0
         self.package_calls = 0
-        self.last_reason = ""
         self.traversal_stats = {"dir_hard_failures": 0}
 
     def list_entries(self) -> list[RemoteEntry]:
         return self.entries
 
-    def download_file(self, REMOTE_PATH: str, LOCAL_PATH: Path) -> bool:
+    def download_file(self, REMOTE_PATH: str, LOCAL_PATH: Path) -> DownloadResult:
         self.download_calls += 1
         if REMOTE_PATH == "docs/explode.txt":
             raise RuntimeError("boom")
@@ -88,28 +89,24 @@ class FakeClient:
         if RESULT:
             LOCAL_PATH.parent.mkdir(parents=True, exist_ok=True)
             LOCAL_PATH.write_bytes(b"data")
-            self.last_reason = ""
-            return RESULT
+            return DownloadResult(True)
 
-        self.last_reason = "download_failed"
-        return RESULT
+        return DownloadResult(False, "download_failed")
 
-    def download_package_tree(self, REMOTE_PATH: str, LOCAL_PATH: Path) -> bool:
+    def download_package_tree(self, REMOTE_PATH: str, LOCAL_PATH: Path) -> DownloadResult:
         _ = LOCAL_PATH
         self.package_calls += 1
         RESULT = self.package_results.get(REMOTE_PATH, False)
         if RESULT:
-            self.last_reason = ""
-            return True
+            return DownloadResult(True)
 
-        self.last_reason = self.package_failure_reasons.get(
-            REMOTE_PATH,
-            "package_download_failed",
+        return DownloadResult(
+            False,
+            self.package_failure_reasons.get(
+                REMOTE_PATH,
+                "package_download_failed",
+            ),
         )
-        return False
-
-    def get_last_download_failure_reason(self) -> str:
-        return self.last_reason
 
     def get_traversal_stats_snapshot(self) -> dict[str, int]:
         return dict(self.traversal_stats)
@@ -442,7 +439,7 @@ class TestSyncerHelpers(unittest.TestCase):
 
         RESULT = transfer_if_required(FakeClient([], {}), Path("/tmp"), ENTRY, False)
 
-        self.assertEqual(RESULT, (True, 1, "skipped"))
+        self.assertEqual(RESULT, TransferResult(True, 1, "skipped"))
 
 # --------------------------------------------------------------------------
 # This test confirms known local package directories return package success
@@ -460,7 +457,7 @@ class TestSyncerHelpers(unittest.TestCase):
 
             RESULT = transfer_if_required(CLIENT, ROOT_DIR, ENTRY, True)
 
-        self.assertEqual(RESULT, (True, 1, "package"))
+        self.assertEqual(RESULT, TransferResult(True, 1, "package"))
 
 # --------------------------------------------------------------------------
 # This test confirms known local package directories surface package-fallback
@@ -479,7 +476,7 @@ class TestSyncerHelpers(unittest.TestCase):
 
             RESULT = transfer_if_required(CLIENT, ROOT_DIR, ENTRY, True)
 
-        self.assertEqual(RESULT, (False, 1, "package_download_failed"))
+        self.assertEqual(RESULT, TransferResult(False, 1, "package_download_failed"))
 
 # --------------------------------------------------------------------------
 # This test confirms known package paths return package success when package
@@ -493,7 +490,7 @@ class TestSyncerHelpers(unittest.TestCase):
         with tempfile.TemporaryDirectory() as TMPDIR:
             RESULT = transfer_if_required(CLIENT, Path(TMPDIR), ENTRY, True)
 
-        self.assertEqual(RESULT, (True, 1, "package"))
+        self.assertEqual(RESULT, TransferResult(True, 1, "package"))
 
 # --------------------------------------------------------------------------
 # This test confirms transfer failure reason helper handles equal and missing
@@ -606,16 +603,14 @@ class TestSyncerHelpers(unittest.TestCase):
         CLIENT.package_failure_reasons["docs/archive.pkg"] = "not_directory_node"
 
         with tempfile.TemporaryDirectory() as TMPDIR:
-            IS_SUCCESS, ATTEMPT, REASON = transfer_if_required(
+            RESULT = transfer_if_required(
                 CLIENT,
                 Path(TMPDIR),
                 ENTRY,
                 True,
             )
 
-        self.assertFalse(IS_SUCCESS)
-        self.assertEqual(ATTEMPT, 1)
-        self.assertEqual(REASON, "download_failed")
+        self.assertEqual(RESULT, TransferResult(False, 1, "download_failed"))
 
 # --------------------------------------------------------------------------
 # This test confirms existing local package directories are reconciled when
@@ -638,16 +633,14 @@ class TestSyncerHelpers(unittest.TestCase):
             PACKAGE_DIR.mkdir(parents=True, exist_ok=True)
             (PACKAGE_DIR / "child.dat").write_bytes(b"x")
 
-            IS_SUCCESS, ATTEMPT, REASON = transfer_if_required(
+            RESULT = transfer_if_required(
                 CLIENT,
                 ROOT_DIR,
                 ENTRY,
                 True,
             )
 
-        self.assertTrue(IS_SUCCESS)
-        self.assertEqual(ATTEMPT, 1)
-        self.assertEqual(REASON, "package_reconciled")
+        self.assertEqual(RESULT, TransferResult(True, 1, "package_reconciled"))
         self.assertEqual(CLIENT.download_calls, 0)
         self.assertEqual(CLIENT.package_calls, 1)
 
@@ -669,16 +662,14 @@ class TestSyncerHelpers(unittest.TestCase):
             CONFLICT_DIR = ROOT_DIR / "docs" / "report.txt"
             CONFLICT_DIR.mkdir(parents=True, exist_ok=True)
 
-            IS_SUCCESS, ATTEMPT, REASON = transfer_if_required(
+            RESULT = transfer_if_required(
                 CLIENT,
                 ROOT_DIR,
                 ENTRY,
                 True,
             )
 
-        self.assertTrue(IS_SUCCESS)
-        self.assertEqual(ATTEMPT, 1)
-        self.assertEqual(REASON, "file")
+        self.assertEqual(RESULT, TransferResult(True, 1, "file"))
         self.assertEqual(CLIENT.download_calls, 1)
         self.assertEqual(CLIENT.package_calls, 0)
 
@@ -702,16 +693,14 @@ class TestSyncerHelpers(unittest.TestCase):
             CONFLICT_FILE.parent.mkdir(parents=True, exist_ok=True)
             CONFLICT_FILE.write_text("file", encoding="utf-8")
 
-            IS_SUCCESS, ATTEMPT, REASON = transfer_if_required(
+            RESULT = transfer_if_required(
                 CLIENT,
                 ROOT_DIR,
                 ENTRY,
                 True,
             )
 
-            self.assertTrue(IS_SUCCESS)
-            self.assertEqual(ATTEMPT, 1)
-            self.assertEqual(REASON, "package")
+            self.assertEqual(RESULT, TransferResult(True, 1, "package"))
             self.assertEqual(CLIENT.download_calls, 0)
             self.assertEqual(CLIENT.package_calls, 1)
 
@@ -731,16 +720,17 @@ class TestSyncerHelpers(unittest.TestCase):
         CLIENT.package_failure_reasons["docs/archive.bundle"] = "package_item_missing"
 
         with tempfile.TemporaryDirectory() as TMPDIR:
-            IS_SUCCESS, ATTEMPT, REASON = transfer_if_required(
+            RESULT = transfer_if_required(
                 CLIENT,
                 Path(TMPDIR),
                 ENTRY,
                 True,
             )
 
-        self.assertFalse(IS_SUCCESS)
-        self.assertEqual(ATTEMPT, 1)
-        self.assertEqual(REASON, "known_package_metadata_unavailable")
+        self.assertEqual(
+            RESULT,
+            TransferResult(False, 1, "known_package_metadata_unavailable"),
+        )
         self.assertEqual(CLIENT.download_calls, 0)
         self.assertEqual(CLIENT.package_calls, 1)
 
@@ -1000,7 +990,7 @@ class TestSyncerHelpers(unittest.TestCase):
             def download_file(self, REMOTE_PATH, LOCAL_PATH):
                 _ = REMOTE_PATH
                 _ = LOCAL_PATH
-                return True
+                return DownloadResult(True)
 
         CLIENT = SlowClient()
 
@@ -1372,7 +1362,7 @@ class TestSyncerHelpers(unittest.TestCase):
                 self.calls += 1
                 if self.calls < 3:
                     raise RuntimeError("Service Unavailable (503)")
-                return True
+                return DownloadResult(True)
 
         CLIENT = FlakyClient()
 

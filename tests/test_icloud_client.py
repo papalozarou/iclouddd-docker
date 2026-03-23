@@ -627,8 +627,8 @@ class TestICloudClientDownloads(unittest.TestCase):
             CONFIG = build_config_for_icloud(TMPDIR)
             CLIENT = ICloudDriveClient(CONFIG)
             RESULT = CLIENT.download_file("docs/file.txt", Path(TMPDIR) / "out.txt")
-            self.assertFalse(RESULT)
-            self.assertEqual(CLIENT.get_last_download_failure_reason(), "not_authenticated")
+            self.assertFalse(RESULT.is_success)
+            self.assertEqual(RESULT.failure_reason, "not_authenticated")
 
     def test_resolve_file_object_success_and_failure(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
@@ -656,7 +656,7 @@ class TestICloudClientDownloads(unittest.TestCase):
                 LOCAL_PATH = Path(TMPDIR) / "downloads" / "file.bin"
                 RESULT = CLIENT.download_file("docs/file.bin", LOCAL_PATH)
 
-            self.assertTrue(RESULT)
+            self.assertTrue(RESULT.is_success)
             self.assertEqual(LOCAL_PATH.read_bytes(), b"abcdef")
             RESPONSE.iter_content.assert_called_once_with(chunk_size=4 * 1024 * 1024)
 
@@ -673,7 +673,7 @@ class TestICloudClientDownloads(unittest.TestCase):
                 LOCAL_PATH = Path(TMPDIR) / "downloads" / "raw.bin"
                 RESULT = CLIENT.download_file("docs/raw.bin", LOCAL_PATH)
 
-            self.assertTrue(RESULT)
+            self.assertTrue(RESULT.is_success)
             self.assertEqual(LOCAL_PATH.read_bytes(), b"raw-data")
 
     def test_download_file_handles_open_errors(self) -> None:
@@ -687,8 +687,8 @@ class TestICloudClientDownloads(unittest.TestCase):
             with patch.object(CLIENT, "_resolve_file_object", return_value=FILE_NODE):
                 RESULT = CLIENT.download_file("docs/file.bin", Path(TMPDIR) / "file.bin")
 
-            self.assertFalse(RESULT)
-            self.assertEqual(CLIENT.get_last_download_failure_reason(), "open_failed")
+            self.assertFalse(RESULT.is_success)
+            self.assertEqual(RESULT.failure_reason, "open_failed")
 
     def test_download_file_rejects_directory_nodes(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
@@ -700,8 +700,8 @@ class TestICloudClientDownloads(unittest.TestCase):
             with patch.object(CLIENT, "_resolve_file_object", return_value=DIRECTORY_NODE):
                 RESULT = CLIENT.download_file("docs/pkg.bundle", Path(TMPDIR) / "pkg.bundle")
 
-            self.assertFalse(RESULT)
-            self.assertEqual(CLIENT.get_last_download_failure_reason(), "directory_node")
+            self.assertFalse(RESULT.is_success)
+            self.assertEqual(RESULT.failure_reason, "directory_node")
 
     def test_download_package_tree_downloads_nested_files(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
@@ -720,7 +720,7 @@ class TestICloudClientDownloads(unittest.TestCase):
                     Path(TMPDIR) / "pkg.bundle",
                 )
 
-            self.assertTrue(RESULT)
+            self.assertTrue(RESULT.is_success)
             self.assertEqual(
                 (Path(TMPDIR) / "pkg.bundle" / "data" / "inner.txt").read_bytes(),
                 b"abc",
@@ -739,8 +739,8 @@ class TestICloudClientDownloads(unittest.TestCase):
                     Path(TMPDIR) / "pkg.bundle",
                 )
 
-            self.assertFalse(RESULT)
-            self.assertEqual(CLIENT.get_last_download_failure_reason(), "package_child_missing")
+            self.assertFalse(RESULT.is_success)
+            self.assertEqual(RESULT.failure_reason, "package_child_missing")
 
     def test_download_package_tree_uses_parent_metadata_for_non_directory_root(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
@@ -785,7 +785,7 @@ class TestICloudClientDownloads(unittest.TestCase):
                     Path(TMPDIR) / "pkg.bundle",
                 )
 
-            self.assertTrue(RESULT)
+            self.assertTrue(RESULT.is_success)
             self.assertEqual(
                 (Path(TMPDIR) / "pkg.bundle" / "inner.txt").read_bytes(),
                 b"abc",
@@ -811,7 +811,7 @@ class TestICloudClientDownloads(unittest.TestCase):
                 LOCAL_PATH = Path(TMPDIR) / "downloads" / "nostream.bin"
                 RESULT = CLIENT.download_file("docs/nostream.bin", LOCAL_PATH)
 
-            self.assertTrue(RESULT)
+            self.assertTrue(RESULT.is_success)
             self.assertEqual(LOCAL_PATH.read_bytes(), b"xy")
 
     def test_download_file_success_with_open_stream_context_manager(self) -> None:
@@ -832,7 +832,7 @@ class TestICloudClientDownloads(unittest.TestCase):
                 LOCAL_PATH = Path(TMPDIR) / "downloads" / "ctx.bin"
                 RESULT = CLIENT.download_file("docs/ctx.bin", LOCAL_PATH)
 
-            self.assertTrue(RESULT)
+            self.assertTrue(RESULT.is_success)
             self.assertEqual(LOCAL_PATH.read_bytes(), b"ab")
             FILE_NODE.open.assert_called_once_with(stream=True)
 
@@ -849,7 +849,7 @@ class TestICloudClientDownloads(unittest.TestCase):
                 LOCAL_PATH = Path(TMPDIR) / "downloads" / "open.bin"
                 RESULT = CLIENT.download_file("docs/open.bin", LOCAL_PATH)
 
-            self.assertTrue(RESULT)
+            self.assertTrue(RESULT.is_success)
             self.assertEqual(LOCAL_PATH.read_bytes(), b"from-open")
             RESPONSE.close.assert_called_once()
 
@@ -863,7 +863,7 @@ class TestICloudClientDownloads(unittest.TestCase):
             with patch.object(CLIENT, "_resolve_file_object", return_value=FILE_NODE):
                 RESULT = CLIENT.download_file("docs/file.bin", Path(TMPDIR) / "file.bin")
 
-            self.assertFalse(RESULT)
+            self.assertFalse(RESULT.is_success)
 
     def test_write_downloaded_content_rejects_missing_raw(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:

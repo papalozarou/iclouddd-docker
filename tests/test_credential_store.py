@@ -29,12 +29,13 @@ class TestCredentialStore(unittest.TestCase):
             EXPECTED_XDG_DATA_HOME = CONFIG_DIR / ".local" / "share"
 
             with patch.object(credential_store.keyring, "set_keyring") as SET_KEYRING:
-                credential_store.configure_keyring(CONFIG_DIR)
+                BOOTSTRAP = credential_store.configure_keyring(CONFIG_DIR)
 
             self.assertTrue((CONFIG_DIR / "keyring").exists())
             self.assertEqual(os.environ.get("PYTHON_KEYRING_FILENAME"), str(EXPECTED_FILE))
-            self.assertEqual(os.environ.get("HOME"), str(CONFIG_DIR))
             self.assertEqual(os.environ.get("XDG_DATA_HOME"), str(EXPECTED_XDG_DATA_HOME))
+            self.assertEqual(BOOTSTRAP.keyring_file_path, EXPECTED_FILE)
+            self.assertEqual(BOOTSTRAP.xdg_data_home, EXPECTED_XDG_DATA_HOME)
             self.assertEqual(SET_KEYRING.call_count, 1)
             self.assertEqual(
                 getattr(SET_KEYRING.call_args.args[0], "file_path", ""),

@@ -37,6 +37,22 @@ class RemoteEntry:
 
 
 # ------------------------------------------------------------------------------
+# This data class models one download outcome without shared mutable state.
+#
+# 1. "is_success" records whether the requested transfer completed.
+# 2. "failure_reason" stores the stable machine-facing failure token.
+#
+# N.B.
+# Callers must consume this result directly. The client does not retain any
+# global per-transfer failure state because downloads may run concurrently.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class DownloadResult:
+    is_success: bool
+    failure_reason: str = ""
+
+
+# ------------------------------------------------------------------------------
 # This typed dictionary stores one slow-directory traversal sample.
 # ------------------------------------------------------------------------------
 class SlowDirectorySample(TypedDict):
@@ -86,7 +102,6 @@ class ICloudDriveClient:
     def __init__(self, CONFIG: AppConfig):
         self.config = CONFIG
         self.api: PyiCloudService | None = None
-        self._last_download_failure_reason = ""
         self._stats_lock = threading.Lock()
         self._traversal_stats = self._build_empty_traversal_stats()
 
@@ -1105,32 +1120,22 @@ class ICloudDriveClient:
 # 1. "REMOTE_PATH" is slash-separated iCloud Drive path.
 # 2. "LOCAL_PATH" is filesystem destination.
 #
-# Returns: True on successful download/write, otherwise False.
+# Returns: "DownloadResult" describing the final transfer outcome.
 # --------------------------------------------------------------------------
-    def download_file(self, REMOTE_PATH: str, LOCAL_PATH: Path) -> bool:
-        self._set_download_failure_reason("")
-
+    def download_file(self, REMOTE_PATH: str, LOCAL_PATH: Path) -> DownloadResult:
         if self.api is None:
-            self._set_download_failure_reason("not_authenticated")
-            return False
+            return DownloadResult(False, "not_authenticated")
 
         FILE_OBJ = self._resolve_file_object(REMOTE_PATH)
 
         if FILE_OBJ is None:
-            self._set_download_failure_reason("path_not_found")
-            return False
+            return DownloadResult(False, "path_not_found")
 
         if self._child_is_dir(FILE_OBJ):
-            self._set_download_failure_reason("directory_node")
-            return False
+            return DownloadResult(False, "directory_node")
 
         IS_SUCCESS, FAILURE_REASON = self._download_file_object(FILE_OBJ, LOCAL_PATH)
-
-        if not IS_SUCCESS:
-            self._set_download_failure_reason(FAILURE_REASON)
-            return False
-
-        return True
+        return DownloadResult(IS_SUCCESS, FAILURE_REASON)
 
 # --------------------------------------------------------------------------
 # This function downloads package-like directory nodes recursively.
@@ -1138,54 +1143,37 @@ class ICloudDriveClient:
 # 1. "REMOTE_PATH" is slash-separated iCloud Drive path.
 # 2. "LOCAL_PATH" is filesystem destination directory.
 #
-# Returns: True when package export succeeds, otherwise False.
+# Returns: "DownloadResult" describing the final transfer outcome.
 # --------------------------------------------------------------------------
-    def download_package_tree(self, REMOTE_PATH: str, LOCAL_PATH: Path) -> bool:
-        self._set_download_failure_reason("")
-
+    def download_package_tree(self, REMOTE_PATH: str, LOCAL_PATH: Path) -> DownloadResult:
         if self.api is None:
-            self._set_download_failure_reason("not_authenticated")
-            return False
+            return DownloadResult(False, "not_authenticated")
 
         ROOT_NODE = self._resolve_file_object(REMOTE_PATH)
         if ROOT_NODE is None:
-            self._set_download_failure_reason("path_not_found")
-            return False
+            return DownloadResult(False, "path_not_found")
 
         if not self._child_is_dir(ROOT_NODE):
-            IS_METADATA_SUCCESS = self._download_package_tree_from_parent_metadata(
+            RESULT = self._download_package_tree_from_parent_metadata(
                 REMOTE_PATH,
                 LOCAL_PATH,
             )
-            if IS_METADATA_SUCCESS:
-                return True
+            if RESULT.is_success:
+                return RESULT
 
-            if not self._last_download_failure_reason:
-                self._set_download_failure_reason("not_directory_node")
-            return False
+            if RESULT.failure_reason:
+                return RESULT
 
-        IS_SUCCESS = self._download_package_node(ROOT_NODE, LOCAL_PATH)
-        if not IS_SUCCESS and not self._last_download_failure_reason:
-            self._set_download_failure_reason("package_download_failed")
-        return IS_SUCCESS
+            return DownloadResult(False, "not_directory_node")
 
-# --------------------------------------------------------------------------
-# This function returns the most recent download failure reason token.
-#
-# Returns: Failure reason token, or empty string when no failure is recorded.
-# --------------------------------------------------------------------------
-    def get_last_download_failure_reason(self) -> str:
-        return self._last_download_failure_reason
+        RESULT = self._download_package_node(ROOT_NODE, LOCAL_PATH)
+        if RESULT.is_success:
+            return RESULT
 
-# --------------------------------------------------------------------------
-# This function stores a normalised download failure reason token.
-#
-# 1. "REASON" is the reason token to store.
-#
-# Returns: None.
-# --------------------------------------------------------------------------
-    def _set_download_failure_reason(self, REASON: str) -> None:
-        self._last_download_failure_reason = REASON.strip().lower()
+        if RESULT.failure_reason:
+            return RESULT
+
+        return DownloadResult(False, "package_download_failed")
 
 # --------------------------------------------------------------------------
 # This function downloads a resolved file node to the provided local path.
@@ -1218,36 +1206,35 @@ class ICloudDriveClient:
 # 1. "NODE" is current package node.
 # 2. "LOCAL_PATH" is local path for this node.
 #
-# Returns: True when all descendants are exported successfully.
+# Returns: "DownloadResult" describing the final transfer outcome.
 # --------------------------------------------------------------------------
-    def _download_package_node(self, NODE: Any, LOCAL_PATH: Path) -> bool:
+    def _download_package_node(self, NODE: Any, LOCAL_PATH: Path) -> DownloadResult:
         LOCAL_PATH.mkdir(parents=True, exist_ok=True)
         CHILDREN = self._package_child_names(NODE)
 
         if not CHILDREN:
-            return True
+            return DownloadResult(True)
 
         for NAME in CHILDREN:
             CHILD_NODE = self._child_node(NODE, NAME)
             if CHILD_NODE is None:
-                self._set_download_failure_reason("package_child_missing")
-                return False
+                return DownloadResult(False, "package_child_missing")
 
             CHILD_LOCAL_PATH = LOCAL_PATH / NAME
             if self._child_is_dir(CHILD_NODE):
-                if self._download_package_node(CHILD_NODE, CHILD_LOCAL_PATH):
+                RESULT = self._download_package_node(CHILD_NODE, CHILD_LOCAL_PATH)
+                if RESULT.is_success:
                     continue
 
-                return False
+                return RESULT
 
-            IS_SUCCESS, FAILURE_REASON = self._download_file_object(CHILD_NODE, CHILD_LOCAL_PATH)
-            if IS_SUCCESS:
+            RESULT = DownloadResult(*self._download_file_object(CHILD_NODE, CHILD_LOCAL_PATH))
+            if RESULT.is_success:
                 continue
 
-            self._set_download_failure_reason(FAILURE_REASON)
-            return False
+            return RESULT
 
-        return True
+        return DownloadResult(True)
 
 # --------------------------------------------------------------------------
 # This function exports package-like nodes using parent directory metadata
@@ -1256,23 +1243,21 @@ class ICloudDriveClient:
 # 1. "REMOTE_PATH" is slash-separated package path.
 # 2. "LOCAL_PATH" is package destination directory.
 #
-# Returns: True when package children are exported successfully.
+# Returns: "DownloadResult" describing the final transfer outcome.
 # --------------------------------------------------------------------------
     def _download_package_tree_from_parent_metadata(
         self,
         REMOTE_PATH: str,
         LOCAL_PATH: Path,
-    ) -> bool:
+    ) -> DownloadResult:
         PARENT_PATH, ITEM_NAME = self._split_parent_path(REMOTE_PATH)
         PACKAGE_ITEM = self._find_item_metadata(PARENT_PATH, ITEM_NAME)
         if PACKAGE_ITEM is None:
-            self._set_download_failure_reason("package_item_missing")
-            return False
+            return DownloadResult(False, "package_item_missing")
 
         CHILD_ITEMS = self._package_child_items(PACKAGE_ITEM)
         if not CHILD_ITEMS:
-            self._set_download_failure_reason("package_children_unavailable")
-            return False
+            return DownloadResult(False, "package_children_unavailable")
 
         return self._download_package_items_by_metadata(
             REMOTE_PATH,
@@ -1287,14 +1272,14 @@ class ICloudDriveClient:
 # 2. "PARENT_LOCAL_PATH" is matching local directory path.
 # 3. "CHILD_ITEMS" is ordered child item metadata list.
 #
-# Returns: True when all child items are exported.
+# Returns: "DownloadResult" describing the final transfer outcome.
 # --------------------------------------------------------------------------
     def _download_package_items_by_metadata(
         self,
         PARENT_REMOTE_PATH: str,
         PARENT_LOCAL_PATH: Path,
         CHILD_ITEMS: list[tuple[str, dict[str, Any]]],
-    ) -> bool:
+    ) -> DownloadResult:
         PARENT_LOCAL_PATH.mkdir(parents=True, exist_ok=True)
 
         for ITEM_TYPE, ITEM in CHILD_ITEMS:
@@ -1309,33 +1294,33 @@ class ICloudDriveClient:
             if IS_DIRECTORY_ITEM:
                 NESTED_ITEMS = self._package_child_items(ITEM)
                 if not NESTED_ITEMS:
-                    self._set_download_failure_reason("package_children_unavailable")
-                    return False
+                    return DownloadResult(False, "package_children_unavailable")
 
-                if self._download_package_items_by_metadata(
+                RESULT = self._download_package_items_by_metadata(
                     CHILD_REMOTE_PATH,
                     CHILD_LOCAL_PATH,
                     NESTED_ITEMS,
-                ):
+                )
+                if RESULT.is_success:
                     continue
 
-                return False
+                return RESULT
 
             IS_SUCCESS, FAILURE_REASON = self._download_file_by_remote_path(
                 CHILD_REMOTE_PATH,
                 CHILD_LOCAL_PATH,
             )
-            if IS_SUCCESS:
+            RESULT = DownloadResult(IS_SUCCESS, FAILURE_REASON)
+            if RESULT.is_success:
                 continue
 
-            self._set_download_failure_reason(FAILURE_REASON)
-            return False
+            return RESULT
 
-        return True
+        return DownloadResult(True)
 
 # --------------------------------------------------------------------------
-# This function downloads a file by remote path without resetting global
-# failure state.
+# This function downloads a file by remote path without relying on
+# shared mutable failure state.
 #
 # 1. "REMOTE_PATH" is slash-separated iCloud Drive file path.
 # 2. "LOCAL_PATH" is destination file path.

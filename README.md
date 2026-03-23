@@ -6,6 +6,7 @@ It should have all the bits you need for real-world usage, such as:
 
 * persistent auth/session state;
 * keyring credentials updated only after a successful login;
+* startup command cutover that drops stale backlog without losing live commands;
 * manifest-driven incremental sync;
 * automatic recovery when remote paths change between files and directories;
 * one-shot and scheduled modes;

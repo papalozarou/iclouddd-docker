@@ -70,6 +70,7 @@ class WorkerRunResult:
 # ------------------------------------------------------------------------------
 @dataclass(frozen=True)
 class CommandPollingState:
+    phase: str = "startup_snapshot"
     next_update_offset: int | None = None
     buffered_commands: tuple[tuple[str, str], ...] = ()
 
@@ -92,6 +93,7 @@ def read_command_batch(
 ) -> tuple[list[tuple[str, str]], CommandPollingState]:
     if POLLING_STATE.buffered_commands and not DRAIN_ONLY:
         return list(POLLING_STATE.buffered_commands), CommandPollingState(
+            phase="live_polling",
             next_update_offset=POLLING_STATE.next_update_offset,
             buffered_commands=(),
         )
@@ -101,7 +103,10 @@ def read_command_batch(
         RUNTIME_CONTEXT.CONFIG.container_username,
         POLLING_STATE.next_update_offset,
     )
-    NEXT_STATE = CommandPollingState(next_update_offset=BATCH.next_update_offset)
+    NEXT_STATE = CommandPollingState(
+        phase="live_polling",
+        next_update_offset=BATCH.next_update_offset,
+    )
 
     if DRAIN_ONLY:
         return [], NEXT_STATE
@@ -124,7 +129,7 @@ def drain_startup_command_backlog(
     DEPS: WorkerRuntimeDeps,
     STARTUP_CUTOVER_EPOCH: int = 0,
 ) -> CommandPollingState:
-    POLLING_STATE = CommandPollingState()
+    POLLING_STATE = CommandPollingState(phase="startup_snapshot")
 
     while True:
         BATCH = DEPS.poll_command_batch_fn(
@@ -137,16 +142,25 @@ def drain_startup_command_backlog(
             for EVENT in BATCH.commands
             if EVENT.message_epoch >= STARTUP_CUTOVER_EPOCH
         )
-        NEXT_STATE = CommandPollingState(
-            next_update_offset=BATCH.next_update_offset,
-            buffered_commands=LIVE_COMMANDS,
-        )
-
         if LIVE_COMMANDS:
-            return NEXT_STATE
+            return CommandPollingState(
+                phase="live_polling",
+                next_update_offset=BATCH.next_update_offset,
+                buffered_commands=LIVE_COMMANDS,
+            )
 
         if BATCH.max_message_epoch >= STARTUP_CUTOVER_EPOCH:
-            return NEXT_STATE
+            return CommandPollingState(
+                phase="live_polling",
+                next_update_offset=BATCH.next_update_offset,
+                buffered_commands=(),
+            )
+
+        NEXT_STATE = CommandPollingState(
+            phase="backlog_drain",
+            next_update_offset=BATCH.next_update_offset,
+            buffered_commands=(),
+        )
 
         if NEXT_STATE.next_update_offset == POLLING_STATE.next_update_offset:
             return NEXT_STATE

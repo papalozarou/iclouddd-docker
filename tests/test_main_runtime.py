@@ -28,7 +28,6 @@ from app.main import (
     parse_iso,
     poll_command_batch,
     process_reauth_reminders,
-    process_commands,
     run_backup,
     start_heartbeat_updater,
     update_heartbeat,
@@ -36,7 +35,7 @@ from app.main import (
 from app.worker_runtime import CommandPollingState, WorkerAuthState, wait_for_one_shot_auth
 from app.state import AuthState
 from app.syncer import SyncResult
-from app.telegram_bot import CommandEvent, TelegramConfig
+from app.telegram_bot import TelegramConfig
 
 
 # ------------------------------------------------------------------------------
@@ -568,24 +567,6 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 "Expected uid 1000, gid 1000",
                 NOTIFY.call_args[0][1],
             )
-
-# --------------------------------------------------------------------------
-# This test confirms process_commands returns events and next offset.
-# --------------------------------------------------------------------------
-    def test_process_commands_with_updates(self) -> None:
-        TELEGRAM = TelegramConfig("token", "12345")
-        UPDATES = [{"update_id": 1}, {"update_id": 7}]
-        EVENTS = [
-            None,
-            CommandEvent(command="backup", args="", update_id=7, message_epoch=0),
-        ]
-
-        with patch("app.main.fetch_updates", return_value=UPDATES):
-            with patch("app.main.parse_command", side_effect=EVENTS):
-                COMMANDS, OFFSET = process_commands(TELEGRAM, "alice", UPDATE_OFFSET=3)
-
-        self.assertEqual(COMMANDS, [("backup", "")])
-        self.assertEqual(OFFSET, 8)
 
 # --------------------------------------------------------------------------
 # This test confirms startup cutover polling uses short polling so worker

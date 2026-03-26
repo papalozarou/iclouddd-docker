@@ -259,31 +259,6 @@ def enforce_safety_net(CONFIG: AppConfig, TELEGRAM: TelegramConfig, LOG_FILE: Pa
 
 
 # ------------------------------------------------------------------------------
-# This function polls Telegram and returns parsed command intents.
-#
-# 1. "TELEGRAM" is Telegram configuration.
-# 2. "USERNAME" is command prefix.
-# 3. "UPDATE_OFFSET" is update offset cursor.
-#
-# Returns: Tuple "(commands, next_offset)" for command execution.
-# ------------------------------------------------------------------------------
-def process_commands(
-    TELEGRAM: TelegramConfig,
-    USERNAME: str,
-    UPDATE_OFFSET: int | None,
-) -> tuple[list[tuple[str, str]], int | None]:
-    return command_runtime.process_commands(
-        TELEGRAM,
-        USERNAME,
-        UPDATE_OFFSET,
-        DEPS=command_runtime.CommandPollingDeps(
-            fetch_updates_fn=fetch_updates,
-            parse_command_fn=parse_command,
-        ),
-    )
-
-
-# ------------------------------------------------------------------------------
 # This function polls Telegram and returns one raw command batch plus cursor
 # and message timing metadata.
 #

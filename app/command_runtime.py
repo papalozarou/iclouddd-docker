@@ -126,30 +126,6 @@ def poll_command_batch(
 
 
 # ------------------------------------------------------------------------------
-# This function polls Telegram and returns parsed command intents.
-#
-# 1. "TELEGRAM" is Telegram configuration.
-# 2. "USERNAME" is command prefix.
-# 3. "UPDATE_OFFSET" is update offset cursor.
-#
-# Returns: Tuple "(commands, next_offset)" for command execution.
-# ------------------------------------------------------------------------------
-def process_commands(
-    TELEGRAM: TelegramConfig,
-    USERNAME: str,
-    UPDATE_OFFSET: int | None,
-    DEPS: CommandPollingDeps | None = None,
-) -> tuple[list[tuple[str, str]], int | None]:
-    BATCH = poll_command_batch(
-        TELEGRAM,
-        USERNAME,
-        UPDATE_OFFSET,
-        DEPS,
-    )
-    return [(EVENT.command, EVENT.args) for EVENT in BATCH.commands], BATCH.next_update_offset
-
-
-# ------------------------------------------------------------------------------
 # This function handles a single Telegram command.
 #
 # 1. "COMMAND" is parsed command keyword.

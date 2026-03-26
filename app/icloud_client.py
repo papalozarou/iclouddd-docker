@@ -1515,20 +1515,9 @@ class ICloudDriveClient:
     def _write_open_result(self, OPEN_RESULT: Any, LOCAL_PATH: Path) -> bool:
         if hasattr(OPEN_RESULT, "__enter__") and hasattr(OPEN_RESULT, "__exit__"):
             with OPEN_RESULT as RESPONSE:
-                return self._write_downloaded_content(RESPONSE, LOCAL_PATH)
+                return self._write_downloaded_content(RESPONSE, LOCAL_PATH, CLOSE_RESPONSE=False)
 
-        try:
-            RESULT = self._write_downloaded_content(OPEN_RESULT, LOCAL_PATH)
-        finally:
-            CLOSE_METHOD = getattr(OPEN_RESULT, "close", None)
-
-            if callable(CLOSE_METHOD):
-                try:
-                    CLOSE_METHOD()
-                except OSError:
-                    pass
-
-        return RESULT
+        return self._write_downloaded_content(OPEN_RESULT, LOCAL_PATH)
 
     # --------------------------------------------------------------------------
     # This function resolves a file object from a slash-separated
@@ -1558,36 +1547,77 @@ class ICloudDriveClient:
     #
     # 1. "RESPONSE" is download response object.
     # 2. "LOCAL_PATH" is file destination.
+    # 3. "CLOSE_RESPONSE" controls whether this helper owns stream closure.
     #
     # Returns: True on successful write, otherwise False.
     # --------------------------------------------------------------------------
-    def _write_downloaded_content(self, RESPONSE: Any, LOCAL_PATH: Path) -> bool:
-        TEMP_PATH = self._temporary_download_path(LOCAL_PATH)
-        STATUS_CODE = getattr(RESPONSE, "status_code", None)
+    def _write_downloaded_content(
+        self,
+        RESPONSE: Any,
+        LOCAL_PATH: Path,
+        CLOSE_RESPONSE: bool = True,
+    ) -> bool:
+        try:
+            TEMP_PATH = self._temporary_download_path(LOCAL_PATH)
+            STATUS_CODE = getattr(RESPONSE, "status_code", None)
 
-        if isinstance(STATUS_CODE, int) and STATUS_CODE >= 400:
+            if isinstance(STATUS_CODE, int) and STATUS_CODE >= 400:
+                return False
+
+            if hasattr(RESPONSE, "iter_content"):
+                return self._write_iter_content(RESPONSE, LOCAL_PATH, TEMP_PATH)
+
+            RAW = getattr(RESPONSE, "raw", None)
+
+            if RAW is not None:
+                return self._write_raw_content(RAW, LOCAL_PATH, TEMP_PATH)
+
+            CONTENT = getattr(RESPONSE, "content", None)
+
+            if CONTENT is not None:
+                return self._write_byte_content(CONTENT, LOCAL_PATH, TEMP_PATH)
+
+            if hasattr(RESPONSE, "read"):
+                return self._write_readable_content(RESPONSE, LOCAL_PATH, TEMP_PATH)
+
+            if isinstance(RESPONSE, (bytes, bytearray, memoryview, str)):
+                return self._write_byte_content(RESPONSE, LOCAL_PATH, TEMP_PATH)
+
             return False
+        finally:
+            if CLOSE_RESPONSE:
+                self._close_download_response(RESPONSE)
 
-        if hasattr(RESPONSE, "iter_content"):
-            return self._write_iter_content(RESPONSE, LOCAL_PATH, TEMP_PATH)
+    # --------------------------------------------------------------------------
+    # This function closes download response objects and nested raw streams.
+    #
+    # 1. "RESPONSE" is the download response or readable stream object.
+    #
+    # Returns: None.
+    # --------------------------------------------------------------------------
+    def _close_download_response(self, RESPONSE: Any) -> None:
+        CLOSE_METHOD = getattr(RESPONSE, "close", None)
+
+        if callable(CLOSE_METHOD):
+            try:
+                CLOSE_METHOD()
+            except OSError:
+                pass
 
         RAW = getattr(RESPONSE, "raw", None)
 
-        if RAW is not None:
-            return self._write_raw_content(RAW, LOCAL_PATH, TEMP_PATH)
+        if RAW is None or RAW is RESPONSE:
+            return
 
-        CONTENT = getattr(RESPONSE, "content", None)
+        RAW_CLOSE_METHOD = getattr(RAW, "close", None)
 
-        if CONTENT is not None:
-            return self._write_byte_content(CONTENT, LOCAL_PATH, TEMP_PATH)
+        if not callable(RAW_CLOSE_METHOD):
+            return
 
-        if hasattr(RESPONSE, "read"):
-            return self._write_readable_content(RESPONSE, LOCAL_PATH, TEMP_PATH)
-
-        if isinstance(RESPONSE, (bytes, bytearray, memoryview, str)):
-            return self._write_byte_content(RESPONSE, LOCAL_PATH, TEMP_PATH)
-
-        return False
+        try:
+            RAW_CLOSE_METHOD()
+        except OSError:
+            pass
 
     # --------------------------------------------------------------------------
     # This function writes byte-oriented response content atomically.

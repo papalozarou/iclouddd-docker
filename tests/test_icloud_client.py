@@ -700,8 +700,9 @@ class TestICloudClientDownloads(unittest.TestCase):
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_icloud(TMPDIR)
             CLIENT = ICloudDriveClient(CONFIG)
+            RAW_STREAM = BytesIO(b"raw-data")
             FILE_NODE = SimpleNamespace()
-            RESPONSE = SimpleNamespace(raw=BytesIO(b"raw-data"))
+            RESPONSE = SimpleNamespace(raw=RAW_STREAM)
             FILE_NODE.open = Mock(return_value=RESPONSE)
 
             CLIENT.api = Mock()
@@ -711,6 +712,7 @@ class TestICloudClientDownloads(unittest.TestCase):
 
             self.assertTrue(RESULT.is_success)
             self.assertEqual(LOCAL_PATH.read_bytes(), b"raw-data")
+            self.assertTrue(RAW_STREAM.closed)
 
     def test_download_file_handles_open_errors(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
@@ -889,6 +891,36 @@ class TestICloudClientDownloads(unittest.TestCase):
             self.assertEqual(LOCAL_PATH.read_bytes(), b"from-open")
             RESPONSE.close.assert_called_once()
 
+    def test_download_file_closes_stream_and_cleans_temp_file_after_write_failure(self) -> None:
+        class FailingReadableStream:
+            def __init__(self) -> None:
+                self._reads = 0
+                self.close = Mock()
+
+            def read(self, _SIZE: int) -> bytes:
+                self._reads += 1
+                if self._reads == 1:
+                    return b"abc"
+                raise OSError("disk full")
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            STREAM = FailingReadableStream()
+            FILE_NODE = SimpleNamespace(open=Mock(return_value=STREAM))
+
+            CLIENT.api = Mock()
+            with patch.object(CLIENT, "_resolve_file_object", return_value=FILE_NODE):
+                LOCAL_PATH = Path(TMPDIR) / "downloads" / "failure.bin"
+                TEMP_PATH = CLIENT._temporary_download_path(LOCAL_PATH)
+                RESULT = CLIENT.download_file("docs/failure.bin", LOCAL_PATH)
+
+            self.assertFalse(RESULT.is_success)
+            self.assertEqual(RESULT.failure_reason, "write_failed")
+            self.assertFalse(LOCAL_PATH.exists())
+            self.assertFalse(TEMP_PATH.exists())
+            STREAM.close.assert_called_once()
+
     def test_download_file_fails_when_no_open_api_exists(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_icloud(TMPDIR)
@@ -931,6 +963,7 @@ class TestICloudClientDownloads(unittest.TestCase):
 
             self.assertTrue(RESULT)
             self.assertEqual(LOCAL_PATH.read_bytes(), b"streamed")
+            self.assertTrue(RESPONSE.closed)
 
     def test_write_downloaded_content_rejects_http_error_responses(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:

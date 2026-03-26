@@ -298,12 +298,23 @@ def poll_command_batch(
     USERNAME: str,
     UPDATE_OFFSET: int | None,
 ) -> command_runtime.CommandPollBatch:
+    FETCH_UPDATES_FN = fetch_updates
+
+    if UPDATE_OFFSET is not None and UPDATE_OFFSET < 0:
+        FETCH_UPDATES_FN = (
+            lambda TELEGRAM_CONFIG, OFFSET: fetch_updates(
+                TELEGRAM_CONFIG,
+                OFFSET,
+                TIMEOUT=0,
+            )
+        )
+
     return command_runtime.poll_command_batch(
         TELEGRAM,
         USERNAME,
         UPDATE_OFFSET,
         DEPS=command_runtime.CommandPollingDeps(
-            fetch_updates_fn=fetch_updates,
+            fetch_updates_fn=FETCH_UPDATES_FN,
             parse_command_fn=parse_command,
         ),
     )

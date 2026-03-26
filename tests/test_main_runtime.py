@@ -26,6 +26,7 @@ from app.main import (
     notify,
     notify_container_stopped,
     parse_iso,
+    poll_command_batch,
     process_reauth_reminders,
     process_commands,
     run_backup,
@@ -585,6 +586,21 @@ class TestMainRuntimeHelpers(unittest.TestCase):
 
         self.assertEqual(COMMANDS, [("backup", "")])
         self.assertEqual(OFFSET, 8)
+
+# --------------------------------------------------------------------------
+# This test confirms startup cutover polling uses short polling so worker
+# startup does not block on long polling.
+# --------------------------------------------------------------------------
+    def test_poll_command_batch_uses_short_poll_for_startup_cutover(self) -> None:
+        TELEGRAM = TelegramConfig("token", "12345")
+
+        with patch("app.main.fetch_updates", return_value=[]) as FETCH_UPDATES:
+            with patch("app.main.parse_command", return_value=None):
+                RESULT = poll_command_batch(TELEGRAM, "alice", -1)
+
+        self.assertEqual(RESULT.commands, [])
+        self.assertIsNone(RESULT.next_update_offset)
+        FETCH_UPDATES.assert_called_once_with(TELEGRAM, -1, TIMEOUT=0)
 
 # --------------------------------------------------------------------------
 # This test confirms run_backup sends start/end notifications and logs.

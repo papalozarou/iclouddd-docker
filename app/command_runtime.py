@@ -42,6 +42,13 @@ class CommandPollingDeps:
 
 
 # ------------------------------------------------------------------------------
+# This constant asks Telegram to discard the visible command backlog and return
+# only the latest currently queued update for cutover cursor capture.
+# ------------------------------------------------------------------------------
+STARTUP_CUTOVER_OFFSET = -1
+
+
+# ------------------------------------------------------------------------------
 # This data class returns one polled Telegram update batch plus cursor state.
 # ------------------------------------------------------------------------------
 @dataclass(frozen=True)
@@ -100,7 +107,8 @@ def poll_command_batch(
     UPDATES = RUNTIME_DEPS.fetch_updates_fn(TELEGRAM, UPDATE_OFFSET)
 
     if not UPDATES:
-        return CommandPollBatch([], UPDATE_OFFSET, 0)
+        NEXT_UPDATE_OFFSET = None if UPDATE_OFFSET is not None and UPDATE_OFFSET < 0 else UPDATE_OFFSET
+        return CommandPollBatch([], NEXT_UPDATE_OFFSET, 0)
 
     COMMANDS: list[CommandEvent] = []
     MAX_UPDATE = UPDATE_OFFSET or 0

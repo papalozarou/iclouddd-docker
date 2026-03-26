@@ -9,7 +9,11 @@ import time
 from typing import Any, Callable, Protocol
 
 from app.auth_runtime import AuthAttemptResult
-from app.command_runtime import CommandHandleResult, CommandPollBatch
+from app.command_runtime import (
+    CommandHandleResult,
+    CommandPollBatch,
+    STARTUP_CUTOVER_OFFSET,
+)
 from app.backup_runtime import BackupRunResult
 from app.runtime_context import WorkerRuntimeContext
 from app.state import AuthState
@@ -130,7 +134,7 @@ def capture_startup_command_polling_state(
     BATCH = DEPS.poll_command_batch_fn(
         RUNTIME_CONTEXT.TELEGRAM,
         RUNTIME_CONTEXT.CONFIG.container_username,
-        None,
+        STARTUP_CUTOVER_OFFSET,
     )
     return CommandPollingState(
         phase="live_polling",

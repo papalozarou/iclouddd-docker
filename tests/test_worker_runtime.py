@@ -15,7 +15,11 @@ from tests._stubs import install_dependency_stubs
 install_dependency_stubs()
 
 from app.auth_runtime import AuthAttemptResult
-from app.command_runtime import CommandHandleResult, CommandPollBatch
+from app.command_runtime import (
+    CommandHandleResult,
+    CommandPollBatch,
+    STARTUP_CUTOVER_OFFSET,
+)
 from app.backup_runtime import BackupRunResult
 from app.config import AppConfig
 from app.runtime_context import WorkerRuntimeContext
@@ -310,11 +314,14 @@ class TestWorkerRuntime(unittest.TestCase):
             ),
         )
         self.assertEqual(PROCESS_COMMANDS.call_count, 1)
-        self.assertEqual(PROCESS_COMMANDS.call_args_list[0].args[2], None)
+        self.assertEqual(
+            PROCESS_COMMANDS.call_args_list[0].args[2],
+            STARTUP_CUTOVER_OFFSET,
+        )
         PROCESS_COMMANDS.assert_called_once_with(
             RUNTIME_CONTEXT.TELEGRAM,
             RUNTIME_CONTEXT.CONFIG.container_username,
-            None,
+            STARTUP_CUTOVER_OFFSET,
         )
 
 # --------------------------------------------------------------------------
@@ -342,6 +349,101 @@ class TestWorkerRuntime(unittest.TestCase):
 
         self.assertEqual(RESULT, CommandPollingState(phase="live_polling", next_update_offset=42))
         self.assertEqual(PROCESS_COMMANDS.call_count, 1)
+
+# --------------------------------------------------------------------------
+# This test confirms startup cutover completes immediately when Telegram has
+# no visible backlog to discard.
+# --------------------------------------------------------------------------
+    def test_capture_startup_command_polling_state_handles_empty_backlog(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, _AUTH_STATE = self.build_runtime_context(TMPDIR)
+            PROCESS_COMMANDS = Mock(return_value=CommandPollBatch([], None, 0))
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
+                HANDLE_COMMAND_FN=Mock(),
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=Mock(),
+            )
+
+            RESULT = capture_startup_command_polling_state(
+                RUNTIME_CONTEXT,
+                DEPS,
+            )
+
+        self.assertEqual(
+            RESULT,
+            CommandPollingState(
+                phase="live_polling",
+                next_update_offset=None,
+            ),
+        )
+        PROCESS_COMMANDS.assert_called_once_with(
+            RUNTIME_CONTEXT.TELEGRAM,
+            RUNTIME_CONTEXT.CONFIG.container_username,
+            STARTUP_CUTOVER_OFFSET,
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms startup cutover discards the visible backlog and leaves
+# later live commands available from the returned cursor.
+# --------------------------------------------------------------------------
+    def test_capture_startup_command_polling_state_discards_backlog_and_keeps_live_cursor(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, _AUTH_STATE = self.build_runtime_context(TMPDIR)
+            BACKLOG_EVENT = CommandEvent(
+                command="backup",
+                args="",
+                update_id=500,
+                message_epoch=100,
+            )
+            LIVE_EVENT = CommandEvent(
+                command="auth",
+                args="123456",
+                update_id=501,
+                message_epoch=101,
+            )
+            PROCESS_COMMANDS = Mock(
+                side_effect=[
+                    CommandPollBatch([BACKLOG_EVENT], 501, 100),
+                    CommandPollBatch([LIVE_EVENT], 502, 101),
+                ]
+            )
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
+                HANDLE_COMMAND_FN=Mock(),
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=Mock(),
+            )
+
+            POLLING_STATE = capture_startup_command_polling_state(
+                RUNTIME_CONTEXT,
+                DEPS,
+            )
+            READ_RESULT = read_command_batch(
+                RUNTIME_CONTEXT,
+                POLLING_STATE,
+                DEPS,
+            )
+
+        self.assertEqual(
+            POLLING_STATE,
+            CommandPollingState(
+                phase="live_polling",
+                next_update_offset=501,
+            ),
+        )
+        self.assertEqual(READ_RESULT.commands, [("auth", "123456")])
+        self.assertEqual(
+            READ_RESULT.polling_state,
+            CommandPollingState(
+                phase="live_polling",
+                next_update_offset=502,
+            ),
+        )
+        self.assertEqual(PROCESS_COMMANDS.call_args_list[0].args[2], STARTUP_CUTOVER_OFFSET)
+        self.assertEqual(PROCESS_COMMANDS.call_args_list[1].args[2], 501)
 
 # --------------------------------------------------------------------------
 # This test confirms command batch reads advance and reuse one polling state.
@@ -782,7 +884,7 @@ class TestWorkerRuntime(unittest.TestCase):
         PROCESS_COMMANDS.assert_called_once_with(
             RUNTIME_CONTEXT.TELEGRAM,
             RUNTIME_CONTEXT.CONFIG.container_username,
-            None,
+            STARTUP_CUTOVER_OFFSET,
         )
         ATTEMPT_AUTH.assert_called_once()
         self.assertEqual(RUN_LOOP.call_args.args[3], CommandPollingState(phase="live_polling", next_update_offset=9))

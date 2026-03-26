@@ -370,6 +370,42 @@ class TestICloudClientTraversal(unittest.TestCase):
             self.assertEqual(STATS["directories_completed"], 2)
             self.assertEqual(STATS["directories_pending"], 0)
 
+    def test_walk_node_parallel_raises_controlled_failure_when_worker_stalls(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = AppConfig(**(build_config_for_icloud(TMPDIR).__dict__ | {"traversal_workers": 2}))
+            CLIENT = ICloudDriveClient(CONFIG)
+
+            def fake_wait(PENDING, timeout, return_when):
+                _ = return_when
+                self.assertEqual(timeout, 30.0)
+                return set(), set(PENDING)
+
+            with patch.object(
+                CLIENT,
+                "_walk_node_shallow",
+                return_value=([], []),
+            ):
+                with patch("app.icloud_client.wait", side_effect=fake_wait):
+                    with self.assertRaises(RuntimeError) as ERROR:
+                        CLIENT._walk_node_parallel(object(), "")
+
+            self.assertIn("Traversal worker stalled while reading / after 30.0s.", str(ERROR.exception))
+            STATS = CLIENT.get_traversal_stats_snapshot()
+            self.assertEqual(STATS["dir_hard_failures"], 1)
+            self.assertEqual(STATS["directories_completed"], 0)
+            self.assertEqual(STATS["directories_pending"], 1)
+            self.assertEqual(STATS["workers_active"], 1)
+            self.assertEqual(
+                STATS["dir_failure_samples"],
+                [
+                    {
+                        "path": "/",
+                        "status": "hard_failure",
+                        "reason": "worker_timeout_after_30.0s",
+                    }
+                ],
+            )
+
     def test_walk_node_shallow_prefers_name_payloads(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))

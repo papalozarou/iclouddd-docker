@@ -23,6 +23,7 @@ DIR_RETRY_MAX_DELAY_SECONDS = 0.40
 TRAVERSAL_SLOW_DIR_SECONDS = 5.0
 TRAVERSAL_SLOW_DIR_LIMIT = 5
 TRAVERSAL_FAILURE_SAMPLE_LIMIT = 5
+TRAVERSAL_WORKER_WAIT_TIMEOUT_SECONDS = 30.0
 
 
 # ------------------------------------------------------------------------------
@@ -320,6 +321,27 @@ class ICloudDriveClient:
         self._traversal_stats["dir_failure_samples"] = FAILURE_SAMPLES
 
     # --------------------------------------------------------------------------
+    # This function records one traversal worker stall as a hard failure.
+    #
+    # 1. "CURRENT_PATH" is the stalled directory path.
+    # 2. "WAIT_SECONDS" is the worker wait timeout threshold.
+    #
+    # Returns: None.
+    # --------------------------------------------------------------------------
+    def _record_traversal_worker_timeout(
+        self,
+        CURRENT_PATH: str,
+        WAIT_SECONDS: float,
+    ) -> None:
+        with self._stats_lock:
+            self._traversal_stats["dir_hard_failures"] += 1
+            self._record_directory_failure_sample(
+                CURRENT_PATH,
+                "hard_failure",
+                f"worker_timeout_after_{WAIT_SECONDS:.1f}s",
+            )
+
+    # --------------------------------------------------------------------------
     # This function aligns cookie and session paths with an
     # icloudpd-compatible folder layout.
     #
@@ -502,7 +524,31 @@ class ICloudDriveClient:
             )
 
             while FUTURES:
-                DONE_FUTURES, _ = wait(FUTURES.keys(), return_when=FIRST_COMPLETED)
+                DONE_FUTURES, _ = wait(
+                    FUTURES.keys(),
+                    timeout=TRAVERSAL_WORKER_WAIT_TIMEOUT_SECONDS,
+                    return_when=FIRST_COMPLETED,
+                )
+
+                if not DONE_FUTURES:
+                    STALLED_PATH = sorted(
+                        CURRENT_PATH or "/"
+                        for CURRENT_PATH in FUTURES.values()
+                    )[0]
+                    self._record_traversal_worker_timeout(
+                        STALLED_PATH,
+                        TRAVERSAL_WORKER_WAIT_TIMEOUT_SECONDS,
+                    )
+                    self._record_traversal_queue_state(
+                        DIRECTORIES_COMPLETED,
+                        len(FUTURES),
+                        min(len(FUTURES), self.config.traversal_workers),
+                    )
+                    raise RuntimeError(
+                        "Traversal worker stalled while reading "
+                        f"{STALLED_PATH} after "
+                        f"{TRAVERSAL_WORKER_WAIT_TIMEOUT_SECONDS:.1f}s."
+                    )
 
                 for FUTURE in DONE_FUTURES:
                     del FUTURES[FUTURE]

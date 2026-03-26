@@ -55,7 +55,6 @@ STARTUP_CUTOVER_OFFSET = -1
 class CommandPollBatch:
     commands: list[CommandEvent]
     next_update_offset: int | None
-    max_message_epoch: int
 
 
 # ------------------------------------------------------------------------------
@@ -108,26 +107,22 @@ def poll_command_batch(
 
     if not UPDATES:
         NEXT_UPDATE_OFFSET = None if UPDATE_OFFSET is not None and UPDATE_OFFSET < 0 else UPDATE_OFFSET
-        return CommandPollBatch([], NEXT_UPDATE_OFFSET, 0)
+        return CommandPollBatch([], NEXT_UPDATE_OFFSET)
 
     COMMANDS: list[CommandEvent] = []
     MAX_UPDATE = UPDATE_OFFSET or 0
-    MAX_MESSAGE_EPOCH = 0
 
     for UPDATE in UPDATES:
         EVENT = RUNTIME_DEPS.parse_command_fn(UPDATE, USERNAME, TELEGRAM.chat_id)
         UPDATE_ID = int(UPDATE.get("update_id", 0))
         MAX_UPDATE = max(MAX_UPDATE, UPDATE_ID + 1)
-        MESSAGE = UPDATE.get("message")
-        if isinstance(MESSAGE, dict):
-            MAX_MESSAGE_EPOCH = max(MAX_MESSAGE_EPOCH, int(MESSAGE.get("date", 0)))
 
         if EVENT is None:
             continue
 
         COMMANDS.append(EVENT)
 
-    return CommandPollBatch(COMMANDS, MAX_UPDATE, MAX_MESSAGE_EPOCH)
+    return CommandPollBatch(COMMANDS, MAX_UPDATE)
 
 
 # ------------------------------------------------------------------------------

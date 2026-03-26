@@ -191,7 +191,6 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                         return_value=SimpleNamespace(
                             commands=[],
                             next_update_offset=None,
-                            max_message_epoch=0,
                         )
                     ),
                     handle_command_fn=Mock(),
@@ -1363,7 +1362,6 @@ class TestMainEntrypoint(unittest.TestCase):
                                                             return_value=SimpleNamespace(
                                                                 commands=[],
                                                                 next_update_offset=None,
-                                                                max_message_epoch=0,
                                                             ),
                                                         ):
                                                             with patch(
@@ -1404,7 +1402,6 @@ class TestMainEntrypoint(unittest.TestCase):
                                                         return_value=SimpleNamespace(
                                                             commands=[],
                                                             next_update_offset=None,
-                                                            max_message_epoch=0,
                                                         ),
                                                     ):
                                                         with patch("app.main.get_next_run_epoch", return_value=160):
@@ -1446,7 +1443,6 @@ class TestMainEntrypoint(unittest.TestCase):
                                                         return_value=SimpleNamespace(
                                                             commands=[],
                                                             next_update_offset=None,
-                                                            max_message_epoch=0,
                                                         ),
                                                     ):
                                                         with patch("app.main.get_next_run_epoch", return_value=160):
@@ -1488,7 +1484,6 @@ class TestMainEntrypoint(unittest.TestCase):
                                                         return_value=SimpleNamespace(
                                                             commands=[],
                                                             next_update_offset=None,
-                                                            max_message_epoch=0,
                                                         ),
                                                     ):
                                                         with patch("app.main.get_next_run_epoch", return_value=160):
@@ -1531,7 +1526,6 @@ class TestMainEntrypoint(unittest.TestCase):
                                                         return_value=SimpleNamespace(
                                                             commands=[],
                                                             next_update_offset=None,
-                                                            max_message_epoch=0,
                                                         ),
                                                     ):
                                                         with patch("app.main.get_next_run_epoch", return_value=160):

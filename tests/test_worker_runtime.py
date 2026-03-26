@@ -125,7 +125,6 @@ class TestWorkerRuntime(unittest.TestCase):
 #
 # 1. "COMMANDS" is a list of "(command, args, message_epoch)" tuples.
 # 2. "NEXT_UPDATE_OFFSET" is the next polling cursor.
-# 3. "MAX_MESSAGE_EPOCH" optionally overrides the batch max message epoch.
 #
 # Returns: "CommandPollBatch" fixture.
 # --------------------------------------------------------------------------
@@ -133,8 +132,6 @@ class TestWorkerRuntime(unittest.TestCase):
         self,
         COMMANDS: list[tuple[str, str, int]],
         NEXT_UPDATE_OFFSET: int | None,
-        *,
-        MAX_MESSAGE_EPOCH: int | None = None,
     ) -> CommandPollBatch:
         EVENTS = [
             CommandEvent(
@@ -145,9 +142,7 @@ class TestWorkerRuntime(unittest.TestCase):
             )
             for INDEX, (COMMAND, ARGS, MESSAGE_EPOCH) in enumerate(COMMANDS)
         ]
-        if MAX_MESSAGE_EPOCH is None:
-            MAX_MESSAGE_EPOCH = max((EVENT.message_epoch for EVENT in EVENTS), default=0)
-        return CommandPollBatch(EVENTS, NEXT_UPDATE_OFFSET, MAX_MESSAGE_EPOCH)
+        return CommandPollBatch(EVENTS, NEXT_UPDATE_OFFSET)
 
 # --------------------------------------------------------------------------
 # This function builds worker-loop dependencies with controllable callbacks.
@@ -331,9 +326,7 @@ class TestWorkerRuntime(unittest.TestCase):
     def test_capture_startup_command_polling_state_handles_non_command_updates(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             RUNTIME_CONTEXT, _TELEGRAM, _AUTH_STATE = self.build_runtime_context(TMPDIR)
-            PROCESS_COMMANDS = Mock(
-                return_value=self.build_command_batch([], 42, MAX_MESSAGE_EPOCH=100)
-            )
+            PROCESS_COMMANDS = Mock(return_value=self.build_command_batch([], 42))
             DEPS = self.build_deps(
                 PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
                 HANDLE_COMMAND_FN=Mock(),
@@ -357,7 +350,7 @@ class TestWorkerRuntime(unittest.TestCase):
     def test_capture_startup_command_polling_state_handles_empty_backlog(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             RUNTIME_CONTEXT, _TELEGRAM, _AUTH_STATE = self.build_runtime_context(TMPDIR)
-            PROCESS_COMMANDS = Mock(return_value=CommandPollBatch([], None, 0))
+            PROCESS_COMMANDS = Mock(return_value=CommandPollBatch([], None))
             DEPS = self.build_deps(
                 PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
                 HANDLE_COMMAND_FN=Mock(),
@@ -405,8 +398,8 @@ class TestWorkerRuntime(unittest.TestCase):
             )
             PROCESS_COMMANDS = Mock(
                 side_effect=[
-                    CommandPollBatch([BACKLOG_EVENT], 501, 100),
-                    CommandPollBatch([LIVE_EVENT], 502, 101),
+                    CommandPollBatch([BACKLOG_EVENT], 501),
+                    CommandPollBatch([LIVE_EVENT], 502),
                 ]
             )
             DEPS = self.build_deps(

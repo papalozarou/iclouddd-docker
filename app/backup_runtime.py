@@ -282,7 +282,7 @@ def run_backup(
         LOG_FILE,
         BACKUP_DELETE_REMOVED=CONFIG.backup_delete_removed,
     )
-    DELETE_ERRORS = max(int(getattr(SUMMARY, "delete_errors", 0)), 0)
+    DELETE_ERRORS = max(int(SUMMARY.delete_errors), 0)
     TOTAL_ERRORS = max(int(SUMMARY.error_files), 0) + DELETE_ERRORS
     DEPS.log_line_fn(
         LOG_FILE,
@@ -297,9 +297,9 @@ def run_backup(
         f"total_errors={TOTAL_ERRORS}, "
         f"manifest_entries={len(NEW_MANIFEST)}",
     )
-    TRAVERSAL_COMPLETE = bool(getattr(SUMMARY, "traversal_complete", True))
-    TRAVERSAL_HARD_FAILURES = max(int(getattr(SUMMARY, "traversal_hard_failures", 0)), 0)
-    DELETE_PHASE_SKIPPED = bool(getattr(SUMMARY, "delete_phase_skipped", False))
+    TRAVERSAL_COMPLETE = bool(SUMMARY.traversal_complete)
+    TRAVERSAL_HARD_FAILURES = max(int(SUMMARY.traversal_hard_failures), 0)
+    DELETE_PHASE_SKIPPED = bool(SUMMARY.delete_phase_skipped)
 
     if TRAVERSAL_COMPLETE:
         DEPS.save_manifest_fn(CONFIG.manifest_path, NEW_MANIFEST)
@@ -330,8 +330,8 @@ def run_backup(
         [
             f"Transferred: {SUMMARY.transferred_files}/{SUMMARY.total_files}",
             format_deleted_summary(
-                getattr(SUMMARY, "deleted_files", 0),
-                getattr(SUMMARY, "deleted_directories", 0),
+                SUMMARY.deleted_files,
+                SUMMARY.deleted_directories,
             ),
             f"Skipped: {SUMMARY.skipped_files}",
             f"Errors: {TOTAL_ERRORS}",

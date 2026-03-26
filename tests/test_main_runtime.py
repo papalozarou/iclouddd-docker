@@ -35,6 +35,7 @@ from app.main import (
 )
 from app.worker_runtime import CommandPollingState, WorkerAuthState, wait_for_one_shot_auth
 from app.state import AuthState
+from app.syncer import SyncResult
 from app.telegram_bot import CommandEvent, TelegramConfig
 
 
@@ -610,13 +611,13 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             TELEGRAM = TelegramConfig("token", "12345")
             LOG_FILE = CONFIG.logs_dir / "pyiclodoc-drive-worker.log"
             CLIENT = Mock()
-            SUMMARY = SimpleNamespace(
+            SUMMARY = SyncResult(
+                total_files=3,
                 transferred_files=2,
                 transferred_bytes=2097152,
                 deleted_files=0,
                 deleted_directories=0,
                 delete_errors=0,
-                total_files=3,
                 skipped_files=1,
                 error_files=0,
             )
@@ -678,12 +679,13 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             TELEGRAM = TelegramConfig("token", "12345")
             LOG_FILE = CONFIG.logs_dir / "pyiclodoc-drive-worker.log"
             CLIENT = Mock()
-            SUMMARY = SimpleNamespace(
+            SUMMARY = SyncResult(
+                total_files=3,
                 transferred_files=0,
                 transferred_bytes=0,
                 deleted_files=0,
                 deleted_directories=0,
-                total_files=3,
+                delete_errors=0,
                 skipped_files=3,
                 error_files=0,
             )
@@ -709,13 +711,13 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             TELEGRAM = TelegramConfig("token", "12345")
             LOG_FILE = CONFIG.logs_dir / "pyiclodoc-drive-worker.log"
             CLIENT = Mock()
-            SUMMARY = SimpleNamespace(
+            SUMMARY = SyncResult(
+                total_files=3,
                 transferred_files=1,
                 transferred_bytes=1024,
                 deleted_files=0,
                 deleted_directories=0,
                 delete_errors=0,
-                total_files=3,
                 skipped_files=1,
                 error_files=1,
                 traversal_complete=False,
@@ -762,13 +764,13 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             TELEGRAM = TelegramConfig("token", "12345")
             LOG_FILE = CONFIG.logs_dir / "pyiclodoc-drive-worker.log"
             CLIENT = Mock()
-            SUMMARY = SimpleNamespace(
+            SUMMARY = SyncResult(
+                total_files=3,
                 transferred_files=2,
                 transferred_bytes=2048,
                 deleted_files=3,
                 deleted_directories=1,
                 delete_errors=0,
-                total_files=3,
                 skipped_files=1,
                 error_files=0,
             )
@@ -795,13 +797,13 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             TELEGRAM = TelegramConfig("token", "12345")
             LOG_FILE = CONFIG.logs_dir / "pyiclodoc-drive-worker.log"
             CLIENT = Mock()
-            SUMMARY = SimpleNamespace(
+            SUMMARY = SyncResult(
+                total_files=3,
                 transferred_files=1,
                 transferred_bytes=1024,
                 deleted_files=2,
                 deleted_directories=0,
                 delete_errors=3,
-                total_files=3,
                 skipped_files=1,
                 error_files=1,
             )
@@ -826,6 +828,34 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 LOG_LINE.call_args_list[-1].args[2],
                 "Backup complete. Transferred 1/3, skipped 1, errors 4.",
             )
+
+# --------------------------------------------------------------------------
+# This test confirms malformed sync summary shapes fail loudly instead of
+# being silently coerced through fallback field defaults.
+# --------------------------------------------------------------------------
+    def test_run_backup_raises_when_sync_summary_shape_is_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_runtime(TMPDIR)
+            TELEGRAM = TelegramConfig("token", "12345")
+            LOG_FILE = CONFIG.logs_dir / "pyiclodoc-drive-worker.log"
+            CLIENT = Mock()
+            SUMMARY = SimpleNamespace(
+                total_files=3,
+                transferred_files=1,
+                transferred_bytes=1024,
+                deleted_files=0,
+                deleted_directories=0,
+                skipped_files=1,
+                error_files=0,
+            )
+
+            with patch("app.main.load_manifest", return_value={"/a": {"etag": "1"}}):
+                with patch("app.main.perform_incremental_sync", return_value=(SUMMARY, {"/a": {"etag": "1"}})):
+                    with patch("app.main.save_manifest"):
+                        with patch("app.main.notify"):
+                            with patch("app.main.log_line"):
+                                with self.assertRaises(AttributeError):
+                                    run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE, "scheduled")
 
 # --------------------------------------------------------------------------
 # This test confirms two-day reauth reminder sends a required action prompt.

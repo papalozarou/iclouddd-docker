@@ -32,7 +32,7 @@ jobs:
       # Enable Docker Buildx for reproducible image builds.
       # ------------------------------------------------------------------------
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # ------------------------------------------------------------------------
       # Read pinned build arguments from ".env.example" and derive image names.

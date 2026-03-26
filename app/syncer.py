@@ -397,7 +397,6 @@ def perform_incremental_sync(
     ensure_directories(OUTPUT_DIR, DIRECTORIES, LOG_FILE)
     NEW_MANIFEST: dict[str, dict[str, Any]] = {}
     TRANSFER_CANDIDATES: list[RemoteEntry] = []
-    TRANSFER_CANDIDATE_METADATA: dict[str, dict[str, Any]] = {}
     USE_LOCAL_RECONCILIATION = len(MANIFEST) == 0
     LOCAL_FILE_INDEX: dict[str, tuple[int, float]] = {}
 
@@ -431,7 +430,6 @@ def perform_incremental_sync(
 
         if SHOULD_TRANSFER:
             TRANSFER_CANDIDATES.append(ENTRY)
-            TRANSFER_CANDIDATE_METADATA[ENTRY.path] = ENTRY_METADATA
             if LOG_FILE is not None:
                 log_line(
                     LOG_FILE,
@@ -542,7 +540,7 @@ def perform_incremental_sync(
                                 TRANSFER_RESULT.outcome,
                             )
                         else:
-                            NEW_MANIFEST[ENTRY.path] = TRANSFER_CANDIDATE_METADATA[ENTRY.path]
+                            NEW_MANIFEST[ENTRY.path] = entry_metadata(ENTRY)
                         if LOG_FILE is not None:
                             if TRANSFER_RESULT.attempt_count > 1:
                                 log_line(
@@ -552,31 +550,27 @@ def perform_incremental_sync(
                                     f"(attempts={TRANSFER_RESULT.attempt_count}, "
                                     f"{max(ENTRY.size, 0)} bytes)",
                                 )
-                                continue
-
-                            if TRANSFER_RESULT.outcome == "package":
+                            elif TRANSFER_RESULT.outcome == "package":
                                 log_line(
                                     LOG_FILE,
                                     "debug",
                                     f"Package transferred: {ENTRY.path} "
                                     f"({max(ENTRY.size, 0)} bytes)",
                                 )
-                                continue
-                            if TRANSFER_RESULT.outcome == "package_reconciled":
+                            elif TRANSFER_RESULT.outcome == "package_reconciled":
                                 log_line(
                                     LOG_FILE,
                                     "debug",
                                     "Package reconciled from existing local "
                                     f"directory: {ENTRY.path}",
                                 )
-                                continue
-
-                            log_line(
-                                LOG_FILE,
-                                "debug",
-                                f"File transferred: {ENTRY.path} "
-                                f"({max(ENTRY.size, 0)} bytes)",
-                            )
+                            else:
+                                log_line(
+                                    LOG_FILE,
+                                    "debug",
+                                    f"File transferred: {ENTRY.path} "
+                                    f"({max(ENTRY.size, 0)} bytes)",
+                                )
                         continue
 
                     ERRORS += 1

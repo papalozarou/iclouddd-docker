@@ -29,9 +29,10 @@ class KeyringBootstrap:
 # Returns: "KeyringBootstrap" describing the applied bootstrap path.
 #
 # N.B.
-# This bootstrap keeps keyring setup backend-local. The file path stays
-# explicit, but no broader XDG or home-directory state is changed for the
-# process.
+# This bootstrap sets the "PYTHON_KEYRING_FILENAME" environment variable for
+# the current process and points the plaintext backend at the same file. The
+# file path stays explicit, but no broader XDG or home-directory state is
+# changed for the process.
 #
 # Notes: File keyring keeps credentials in mounted container volumes.
 # ------------------------------------------------------------------------------

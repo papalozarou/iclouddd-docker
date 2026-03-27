@@ -13,7 +13,7 @@ from tests._stubs import install_dependency_stubs
 
 install_dependency_stubs()
 
-from app.auth_runtime import AuthAttemptResult
+from app.auth_runtime import AuthAttemptResult, parse_iso
 from app.backup_runtime import BackupRunResult, format_deleted_summary
 from app.command_runtime import CommandHandleResult
 from app.config import AppConfig
@@ -24,7 +24,6 @@ from app.main import (
     handle_command,
     notify,
     notify_container_stopped,
-    parse_iso,
     poll_command_batch,
     process_reauth_reminders,
     run_backup,

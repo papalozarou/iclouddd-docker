@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
 from pathlib import Path
 import threading
 
@@ -71,17 +70,6 @@ def start_heartbeat_updater(PATH: Path) -> threading.Event:
     THREAD = threading.Thread(target=run_heartbeat_loop, daemon=True)
     THREAD.start()
     return STOP_EVENT
-
-
-# ------------------------------------------------------------------------------
-# This function parses an ISO timestamp with a strict epoch fallback.
-#
-# 1. "VALUE" is an ISO-formatted timestamp string.
-#
-# Returns: Offset-aware datetime; Unix epoch when parsing fails.
-# ------------------------------------------------------------------------------
-def parse_iso(VALUE: str) -> datetime:
-    return auth_runtime.parse_iso(VALUE)
 
 
 # ------------------------------------------------------------------------------

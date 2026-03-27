@@ -133,19 +133,6 @@ def parse_env_workers(NAME: str, DEFAULT: int = 0) -> tuple[int, str | None]:
 
 
 # ------------------------------------------------------------------------------
-# This function parses transfer worker count with "auto" fallback support.
-#
-# 1. "NAME" is the environment key.
-# 2. "DEFAULT" is used when the value is unset or invalid.
-#
-# The function returns 0 for "auto" mode, otherwise a positive integer.
-# ------------------------------------------------------------------------------
-def env_workers(NAME: str, DEFAULT: int = 0) -> int:
-    VALUE, _ = parse_env_workers(NAME, DEFAULT)
-    return VALUE
-
-
-# ------------------------------------------------------------------------------
 # This function parses an environment variable as a boolean.
 #
 # 1. "NAME" is the environment key.

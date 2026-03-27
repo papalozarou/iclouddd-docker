@@ -240,7 +240,7 @@ def parse_command(
     CHAT = MESSAGE.get("chat", {})
     CHAT_ID = str(CHAT.get("id", ""))
 
-    if EXPECTED_CHAT_ID and CHAT_ID != EXPECTED_CHAT_ID:
+    if CHAT_ID != EXPECTED_CHAT_ID:
         return None
 
     TEXT = str(MESSAGE.get("text", "")).strip()

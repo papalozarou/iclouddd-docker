@@ -846,7 +846,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             TELEGRAM = TelegramConfig("token", "12345")
             AUTH_STATE = AuthState("2026-03-01T00:00:00+00:00", False, False, "alert5")
 
-            with patch("app.main.reauth_days_left", return_value=2):
+            with patch("app.auth_runtime.reauth_days_left", return_value=2):
                 with patch("app.main.notify") as NOTIFY:
                     NEW_STATE = process_reauth_reminders(
                         AUTH_STATE,
@@ -872,7 +872,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             TELEGRAM = TelegramConfig("token", "12345")
             AUTH_STATE = AuthState("2026-03-01T00:00:00+00:00", False, False, "none")
 
-            with patch("app.main.reauth_days_left", return_value=5):
+            with patch("app.auth_runtime.reauth_days_left", return_value=5):
                 with patch("app.main.notify") as NOTIFY:
                     NEW_STATE = process_reauth_reminders(
                         AUTH_STATE,
@@ -899,7 +899,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             TELEGRAM = TelegramConfig("token", "12345")
             AUTH_STATE = AuthState("2026-03-01T00:00:00+00:00", False, False, "none")
 
-            with patch("app.main.reauth_days_left", return_value=8):
+            with patch("app.auth_runtime.reauth_days_left", return_value=8):
                 with patch("app.main.save_auth_state") as SAVE:
                     with patch("app.main.notify") as NOTIFY:
                         NEW_STATE = process_reauth_reminders(

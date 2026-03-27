@@ -73,18 +73,6 @@ def start_heartbeat_updater(PATH: Path) -> threading.Event:
 
 
 # ------------------------------------------------------------------------------
-# This function calculates remaining whole days before reauthentication.
-#
-# 1. "LAST_AUTH_UTC" is stored offset-aware auth timestamp.
-# 2. "INTERVAL_DAYS" is the reauthentication interval in days.
-#
-# Returns: Remaining whole days before reauthentication should complete.
-# ------------------------------------------------------------------------------
-def reauth_days_left(LAST_AUTH_UTC: str, INTERVAL_DAYS: int) -> int:
-    return auth_runtime.reauth_days_left(LAST_AUTH_UTC, INTERVAL_DAYS)
-
-
-# ------------------------------------------------------------------------------
 # This function executes authentication and persists updated auth state.
 #
 # 1. "CLIENT" is iCloud client wrapper.
@@ -157,40 +145,8 @@ def process_reauth_reminders(
             save_auth_state_fn=save_auth_state,
             notify_fn=notify,
         ),
-        REAUTH_DAYS_LEFT_FN=reauth_days_left,
+        REAUTH_DAYS_LEFT_FN=auth_runtime.reauth_days_left,
     )
-
-
-# ------------------------------------------------------------------------------
-# This function formats elapsed seconds as "HH:MM:SS".
-#
-# 1. "TOTAL_SECONDS" is elapsed duration in seconds.
-#
-# Returns: Zero-padded duration string.
-# ------------------------------------------------------------------------------
-def format_duration_clock(TOTAL_SECONDS: int) -> str:
-    return backup_runtime.format_duration_clock(TOTAL_SECONDS)
-
-
-# ------------------------------------------------------------------------------
-# This function formats average transfer speed using binary megabytes per second.
-#
-# 1. "TRANSFERRED_BYTES" is successful download byte total.
-# 2. "DURATION_SECONDS" is elapsed run duration in seconds.
-#
-# Returns: Human-readable transfer speed string.
-# ------------------------------------------------------------------------------
-def format_average_speed(TRANSFERRED_BYTES: int, DURATION_SECONDS: int) -> str:
-    return backup_runtime.format_average_speed(TRANSFERRED_BYTES, DURATION_SECONDS)
-
-
-# ------------------------------------------------------------------------------
-# This function returns runtime build metadata for startup diagnostics.
-#
-# Returns: Mapping with app build ref and pyicloud package version.
-# ------------------------------------------------------------------------------
-def get_build_detail() -> dict[str, str]:
-    return backup_runtime.get_build_detail()
 
 
 # ------------------------------------------------------------------------------
@@ -305,9 +261,9 @@ def run_backup(
             save_manifest_fn=save_manifest,
             log_line_fn=log_line,
             notify_fn=notify,
-            get_build_detail_fn=get_build_detail,
-            format_duration_fn=format_duration_clock,
-            format_speed_fn=format_average_speed,
+            get_build_detail_fn=backup_runtime.get_build_detail,
+            format_duration_fn=backup_runtime.format_duration_clock,
+            format_speed_fn=backup_runtime.format_average_speed,
             perform_sync_fn=perform_incremental_sync,
         ),
     )

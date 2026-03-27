@@ -20,7 +20,6 @@ from app.config import AppConfig
 from app.main import (
     attempt_auth,
     enforce_safety_net,
-    get_monthly_weekday_day,
     get_next_run_epoch,
     handle_command,
     notify,
@@ -32,6 +31,7 @@ from app.main import (
     start_heartbeat_updater,
     update_heartbeat,
 )
+from app.scheduler import get_monthly_weekday_day
 from app.worker_runtime import CommandPollingState, WorkerAuthState, wait_for_one_shot_auth
 from app.state import AuthState
 from app.syncer import SyncResult

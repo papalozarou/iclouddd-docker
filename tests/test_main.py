@@ -16,9 +16,13 @@ from tests._stubs import install_dependency_stubs
 
 install_dependency_stubs()
 
+from app.auth_runtime import reauth_days_left
 from app.config import AppConfig
 from app.config_validation import validate_config
 from app.main import (
+    process_reauth_reminders,
+)
+from app.scheduler import (
     calculate_next_daily_run_epoch,
     calculate_next_monthly_run_epoch,
     calculate_next_twice_weekly_run_epoch,
@@ -27,8 +31,6 @@ from app.main import (
     parse_daily,
     parse_weekday,
     parse_weekday_list,
-    process_reauth_reminders,
-    reauth_days_left,
 )
 from app.state import AuthState
 from app.telegram_bot import TelegramConfig

@@ -50,8 +50,10 @@ def configure_keyring(CONFIG_DIR: Path) -> KeyringBootstrap:
 
 # ------------------------------------------------------------------------------
 # This function reads credentials from keyring storage.
+#
 # 1. "service_name" scopes credentials.
 # 2. "username" identifies the account key prefix.
+#
 # Returns: Tuple "(email, password)" with empty-string fallbacks.
 # ------------------------------------------------------------------------------
 def load_credentials(SERVICE_NAME: str, USERNAME: str) -> tuple[str, str]:
@@ -62,9 +64,11 @@ def load_credentials(SERVICE_NAME: str, USERNAME: str) -> tuple[str, str]:
 
 # ------------------------------------------------------------------------------
 # This function writes credentials to keyring storage when values are available.
+#
 # 1. "service_name" scopes credentials.
 # 2. "username" identifies keys.
 # 3. "email" and "password" are values to store.
+#
 # Returns: "None".
 # ------------------------------------------------------------------------------
 def save_credentials(

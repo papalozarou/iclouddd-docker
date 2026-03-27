@@ -20,17 +20,8 @@ from app.icloud_client import ICloudDriveClient
 from app.logger import log_line
 from app.runtime_helpers import format_apple_id_label, notify
 from app.scheduler import (
-    calculate_next_daily_run_epoch,
-    calculate_next_monthly_run_epoch,
-    calculate_next_twice_weekly_run_epoch,
-    calculate_next_weekly_run_epoch,
-    format_schedule_description,
     format_schedule_line,
-    get_monthly_weekday_day,
     get_next_run_epoch,
-    parse_daily,
-    parse_weekday,
-    parse_weekday_list,
 )
 from app.runtime_context import WorkerRuntimeContext
 from app.state import AuthState, load_auth_state, load_manifest, now_iso, save_auth_state, save_manifest
@@ -331,23 +322,6 @@ def run_backup(
             format_speed_fn=format_average_speed,
             perform_sync_fn=perform_incremental_sync,
         ),
-    )
-
-
-# ------------------------------------------------------------------------------
-# This function logs effective non-secret backup settings for debug runs.
-#
-# 1. "CONFIG" is runtime configuration.
-# 2. "LOG_FILE" is worker log destination.
-#
-# Returns: None.
-# ------------------------------------------------------------------------------
-def log_effective_backup_settings(CONFIG: AppConfig, LOG_FILE: Path) -> None:
-    return backup_runtime.log_effective_backup_settings(
-        CONFIG,
-        LOG_FILE,
-        LOG_LINE_FN=log_line,
-        GET_BUILD_DETAIL_FN=get_build_detail,
     )
 
 

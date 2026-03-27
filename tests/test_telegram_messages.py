@@ -17,7 +17,6 @@ from app.telegram_messages import (
     build_container_stopped_message,
     build_one_shot_waiting_for_auth_message,
     build_reauth_reminder_message,
-    build_reauthentication_required_for_apple_id_message,
     build_reauthentication_required_message,
     build_safety_net_blocked_message,
     get_auth_command_lines,
@@ -65,14 +64,6 @@ class TestTelegramMessages(unittest.TestCase):
         self.assertIn("🔑 PCD Drive - Reauthentication required", MESSAGE)
         self.assertIn("Reauthentication is due within two days.", MESSAGE)
         self.assertIn('Send "alice auth 123456"', MESSAGE)
-
-    def test_build_reauthentication_required_for_apple_id_message(self) -> None:
-        MESSAGE = build_reauthentication_required_for_apple_id_message(
-            "alice@example.com", "alice"
-        )
-        self.assertIn("🔑 PCD Drive - Reauthentication required", MESSAGE)
-        self.assertIn("Reauthentication required for Apple ID alice@example.com.", MESSAGE)
-        self.assertIn('Or "alice reauth 123456"', MESSAGE)
 
     def test_build_reauth_reminder_message(self) -> None:
         MESSAGE = build_reauth_reminder_message("alice")

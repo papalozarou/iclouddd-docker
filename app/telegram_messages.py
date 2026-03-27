@@ -139,25 +139,6 @@ def build_reauthentication_required_message(USERNAME: str) -> str:
 
 
 # ------------------------------------------------------------------------------
-# This function builds an on-demand reauthentication required message.
-#
-# 1. "APPLE_ID_LABEL" is the formatted Apple ID label.
-# 2. "USERNAME" is the configured command prefix.
-#
-# Returns: Rendered Telegram message body.
-# ------------------------------------------------------------------------------
-def build_reauthentication_required_for_apple_id_message(
-    APPLE_ID_LABEL: str, USERNAME: str
-) -> str:
-    return format_telegram_event(
-        "🔑",
-        "Reauthentication required",
-        f"Reauthentication required for Apple ID {APPLE_ID_LABEL}.",
-        get_auth_command_lines(USERNAME),
-    )
-
-
-# ------------------------------------------------------------------------------
 # This function builds the five-day reauthentication reminder message.
 #
 # 1. "USERNAME" is the configured command prefix.

@@ -16,7 +16,7 @@ from app.telegram_bot import TelegramConfig
 # ------------------------------------------------------------------------------
 @dataclass(frozen=True)
 class WorkerRuntimeContext:
-    CONFIG: AppConfig
-    TELEGRAM: TelegramConfig
-    LOG_FILE: Path
-    APPLE_ID_LABEL: str
+    config: AppConfig
+    telegram: TelegramConfig
+    log_file: Path
+    apple_id_label: str

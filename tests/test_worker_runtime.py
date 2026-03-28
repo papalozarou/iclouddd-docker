@@ -113,10 +113,10 @@ class TestWorkerRuntime(unittest.TestCase):
             "none",
         )
         RUNTIME_CONTEXT = WorkerRuntimeContext(
-            CONFIG=CONFIG,
-            TELEGRAM=TELEGRAM,
-            LOG_FILE=CONFIG.logs_dir / "pyiclodoc-drive-worker.log",
-            APPLE_ID_LABEL="alice@example.com",
+            config=CONFIG,
+            telegram=TELEGRAM,
+            log_file=CONFIG.logs_dir / "pyiclodoc-drive-worker.log",
+            apple_id_label="alice@example.com",
         )
         return RUNTIME_CONTEXT, TELEGRAM, AUTH_STATE
 
@@ -314,8 +314,8 @@ class TestWorkerRuntime(unittest.TestCase):
             STARTUP_CUTOVER_OFFSET,
         )
         PROCESS_COMMANDS.assert_called_once_with(
-            RUNTIME_CONTEXT.TELEGRAM,
-            RUNTIME_CONTEXT.CONFIG.container_username,
+            RUNTIME_CONTEXT.telegram,
+            RUNTIME_CONTEXT.config.container_username,
             STARTUP_CUTOVER_OFFSET,
         )
 
@@ -372,8 +372,8 @@ class TestWorkerRuntime(unittest.TestCase):
             ),
         )
         PROCESS_COMMANDS.assert_called_once_with(
-            RUNTIME_CONTEXT.TELEGRAM,
-            RUNTIME_CONTEXT.CONFIG.container_username,
+            RUNTIME_CONTEXT.telegram,
+            RUNTIME_CONTEXT.config.container_username,
             STARTUP_CUTOVER_OFFSET,
         )
 
@@ -531,11 +531,11 @@ class TestWorkerRuntime(unittest.TestCase):
         HANDLE_COMMAND.assert_called_once_with(
             "auth",
             "123456",
-            RUNTIME_CONTEXT.CONFIG,
+            RUNTIME_CONTEXT.config,
             unittest.mock.ANY,
             AUTH_STATE,
             False,
-            RUNTIME_CONTEXT.TELEGRAM,
+            RUNTIME_CONTEXT.telegram,
         )
 
 # --------------------------------------------------------------------------
@@ -875,8 +875,8 @@ class TestWorkerRuntime(unittest.TestCase):
                 )
 
         PROCESS_COMMANDS.assert_called_once_with(
-            RUNTIME_CONTEXT.TELEGRAM,
-            RUNTIME_CONTEXT.CONFIG.container_username,
+            RUNTIME_CONTEXT.telegram,
+            RUNTIME_CONTEXT.config.container_username,
             STARTUP_CUTOVER_OFFSET,
         )
         ATTEMPT_AUTH.assert_called_once()

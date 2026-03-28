@@ -355,10 +355,10 @@ def main() -> int:
             icloud_password=CONFIG.icloud_password or STORED_PASSWORD,
         )
         RUNTIME_CONTEXT = WorkerRuntimeContext(
-            CONFIG=CONFIG,
-            TELEGRAM=TELEGRAM,
-            LOG_FILE=LOG_FILE,
-            APPLE_ID_LABEL=format_apple_id_label(CONFIG.icloud_email),
+            config=CONFIG,
+            telegram=TELEGRAM,
+            log_file=LOG_FILE,
+            apple_id_label=format_apple_id_label(CONFIG.icloud_email),
         )
 
         ERRORS = validate_config(CONFIG)
@@ -372,12 +372,12 @@ def main() -> int:
         HEARTBEAT_STOP_EVENT = start_heartbeat_updater(CONFIG.heartbeat_path)
 
         notify(
-            RUNTIME_CONTEXT.TELEGRAM,
-            build_container_started_message(RUNTIME_CONTEXT.APPLE_ID_LABEL),
+            RUNTIME_CONTEXT.telegram,
+            build_container_started_message(RUNTIME_CONTEXT.apple_id_label),
         )
 
-        CLIENT = ICloudDriveClient(RUNTIME_CONTEXT.CONFIG)
-        AUTH_STATE = load_auth_state(RUNTIME_CONTEXT.CONFIG.auth_state_path)
+        CLIENT = ICloudDriveClient(RUNTIME_CONTEXT.config)
+        AUTH_STATE = load_auth_state(RUNTIME_CONTEXT.config.auth_state_path)
         RUNTIME_RESULT = worker_runtime.run_worker_runtime(
             RUNTIME_CONTEXT,
             CLIENT,
@@ -413,8 +413,8 @@ def main() -> int:
             notify_container_stopped(TELEGRAM, APPLE_ID_LABEL, STOP_STATUS)
         else:
             notify_container_stopped(
-                RUNTIME_CONTEXT.TELEGRAM,
-                RUNTIME_CONTEXT.APPLE_ID_LABEL,
+                RUNTIME_CONTEXT.telegram,
+                RUNTIME_CONTEXT.apple_id_label,
                 STOP_STATUS,
             )
         if HEARTBEAT_STOP_EVENT is not None:

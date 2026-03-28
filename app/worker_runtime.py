@@ -132,8 +132,8 @@ def capture_startup_command_polling_state(
     DEPS: WorkerRuntimeDeps,
 ) -> CommandPollingState:
     BATCH = DEPS.poll_command_batch_fn(
-        RUNTIME_CONTEXT.TELEGRAM,
-        RUNTIME_CONTEXT.CONFIG.container_username,
+        RUNTIME_CONTEXT.telegram,
+        RUNTIME_CONTEXT.config.container_username,
         STARTUP_CUTOVER_OFFSET,
     )
     return CommandPollingState(
@@ -157,8 +157,8 @@ def read_command_batch(
     DEPS: WorkerRuntimeDeps,
 ) -> CommandBatchReadResult:
     BATCH = DEPS.poll_command_batch_fn(
-        RUNTIME_CONTEXT.TELEGRAM,
-        RUNTIME_CONTEXT.CONFIG.container_username,
+        RUNTIME_CONTEXT.telegram,
+        RUNTIME_CONTEXT.config.container_username,
         POLLING_STATE.next_update_offset,
     )
     return CommandBatchReadResult(
@@ -214,11 +214,11 @@ def wait_for_one_shot_auth(
             HANDLE_RESULT = DEPS.handle_command_fn(
                 COMMAND,
                 ARGS,
-                RUNTIME_CONTEXT.CONFIG,
+                RUNTIME_CONTEXT.config,
                 CLIENT,
                 AUTH_RUNTIME_STATE.auth_state,
                 AUTH_RUNTIME_STATE.is_authenticated,
-                RUNTIME_CONTEXT.TELEGRAM,
+                RUNTIME_CONTEXT.telegram,
             )
             AUTH_RUNTIME_STATE = WorkerAuthState(
                 auth_state=HANDLE_RESULT.auth_state,
@@ -247,9 +247,9 @@ def log_startup_auth_state(
     AUTH_RESULT: AuthAttemptResult,
     DEPS: WorkerRuntimeDeps,
 ) -> None:
-    DEPS.log_line_fn(RUNTIME_CONTEXT.LOG_FILE, "info", AUTH_RESULT.operator_detail)
+    DEPS.log_line_fn(RUNTIME_CONTEXT.log_file, "info", AUTH_RESULT.operator_detail)
     DEPS.log_line_fn(
-        RUNTIME_CONTEXT.LOG_FILE,
+        RUNTIME_CONTEXT.log_file,
         "debug",
         "Auth state after startup attempt: "
         f"is_authenticated={AUTH_RESULT.is_authenticated}, "
@@ -282,9 +282,9 @@ def run_one_shot_worker(
         or AUTH_RUNTIME_STATE.auth_state.reauth_pending
     ):
         DEPS.notify_fn(
-            RUNTIME_CONTEXT.TELEGRAM,
+            RUNTIME_CONTEXT.telegram,
             DEPS.build_one_shot_waiting_for_auth_message_fn(
-                RUNTIME_CONTEXT.APPLE_ID_LABEL,
+                RUNTIME_CONTEXT.apple_id_label,
                 max(1, RUN_ONCE_AUTH_WAIT_SECONDS // 60),
             ),
         )
@@ -298,9 +298,9 @@ def run_one_shot_worker(
 
     if not AUTH_RUNTIME_STATE.is_authenticated:
         DEPS.notify_fn(
-            RUNTIME_CONTEXT.TELEGRAM,
+            RUNTIME_CONTEXT.telegram,
             DEPS.build_backup_skipped_auth_incomplete_message_fn(
-                RUNTIME_CONTEXT.APPLE_ID_LABEL
+                RUNTIME_CONTEXT.apple_id_label
             ),
         )
         return WorkerRunResult(
@@ -310,9 +310,9 @@ def run_one_shot_worker(
 
     if AUTH_RUNTIME_STATE.auth_state.reauth_pending:
         DEPS.notify_fn(
-            RUNTIME_CONTEXT.TELEGRAM,
+            RUNTIME_CONTEXT.telegram,
             DEPS.build_backup_skipped_reauth_pending_message_fn(
-                RUNTIME_CONTEXT.APPLE_ID_LABEL
+                RUNTIME_CONTEXT.apple_id_label
             ),
         )
         return WorkerRunResult(
@@ -321,9 +321,9 @@ def run_one_shot_worker(
         )
 
     if not DEPS.enforce_safety_net_fn(
-        RUNTIME_CONTEXT.CONFIG,
-        RUNTIME_CONTEXT.TELEGRAM,
-        RUNTIME_CONTEXT.LOG_FILE,
+        RUNTIME_CONTEXT.config,
+        RUNTIME_CONTEXT.telegram,
+        RUNTIME_CONTEXT.log_file,
     ):
         return WorkerRunResult(
             exit_code=4,
@@ -332,9 +332,9 @@ def run_one_shot_worker(
 
     DEPS.run_backup_fn(
         CLIENT,
-        RUNTIME_CONTEXT.CONFIG,
-        RUNTIME_CONTEXT.TELEGRAM,
-        RUNTIME_CONTEXT.LOG_FILE,
+        RUNTIME_CONTEXT.config,
+        RUNTIME_CONTEXT.telegram,
+        RUNTIME_CONTEXT.log_file,
         "one-shot",
     )
     return WorkerRunResult(
@@ -364,11 +364,11 @@ def run_scheduled_worker_loop(
     BACKUP_REQUESTED = False
     INITIAL_EPOCH = int(DEPS.time_fn())
 
-    if RUNTIME_CONTEXT.CONFIG.schedule_mode == "interval":
+    if RUNTIME_CONTEXT.config.schedule_mode == "interval":
         NEXT_RUN_EPOCH = INITIAL_EPOCH
     else:
         NEXT_RUN_EPOCH = DEPS.get_next_run_epoch_fn(
-            RUNTIME_CONTEXT.CONFIG,
+            RUNTIME_CONTEXT.config,
             INITIAL_EPOCH,
         )
 
@@ -376,10 +376,10 @@ def run_scheduled_worker_loop(
         AUTH_RUNTIME_STATE = WorkerAuthState(
             auth_state=DEPS.process_reauth_reminders_fn(
                 AUTH_RUNTIME_STATE.auth_state,
-                RUNTIME_CONTEXT.CONFIG.auth_state_path,
-                RUNTIME_CONTEXT.TELEGRAM,
-                RUNTIME_CONTEXT.CONFIG.container_username,
-                RUNTIME_CONTEXT.CONFIG.reauth_interval_days,
+                RUNTIME_CONTEXT.config.auth_state_path,
+                RUNTIME_CONTEXT.telegram,
+                RUNTIME_CONTEXT.config.container_username,
+                RUNTIME_CONTEXT.config.reauth_interval_days,
             ),
             is_authenticated=AUTH_RUNTIME_STATE.is_authenticated,
         )
@@ -394,11 +394,11 @@ def run_scheduled_worker_loop(
             HANDLE_RESULT = DEPS.handle_command_fn(
                 COMMAND,
                 ARGS,
-                RUNTIME_CONTEXT.CONFIG,
+                RUNTIME_CONTEXT.config,
                 CLIENT,
                 AUTH_RUNTIME_STATE.auth_state,
                 AUTH_RUNTIME_STATE.is_authenticated,
-                RUNTIME_CONTEXT.TELEGRAM,
+                RUNTIME_CONTEXT.telegram,
             )
             AUTH_RUNTIME_STATE = WorkerAuthState(
                 auth_state=HANDLE_RESULT.auth_state,
@@ -414,15 +414,15 @@ def run_scheduled_worker_loop(
             continue
 
         NEXT_RUN_EPOCH = DEPS.get_next_run_epoch_fn(
-            RUNTIME_CONTEXT.CONFIG,
+            RUNTIME_CONTEXT.config,
             NOW_EPOCH,
         )
 
         if not AUTH_RUNTIME_STATE.is_authenticated:
             DEPS.notify_fn(
-                RUNTIME_CONTEXT.TELEGRAM,
+                RUNTIME_CONTEXT.telegram,
                 DEPS.build_backup_skipped_auth_incomplete_message_fn(
-                    RUNTIME_CONTEXT.APPLE_ID_LABEL
+                    RUNTIME_CONTEXT.apple_id_label
                 ),
             )
             BACKUP_REQUESTED = False
@@ -431,9 +431,9 @@ def run_scheduled_worker_loop(
 
         if AUTH_RUNTIME_STATE.auth_state.reauth_pending:
             DEPS.notify_fn(
-                RUNTIME_CONTEXT.TELEGRAM,
+                RUNTIME_CONTEXT.telegram,
                 DEPS.build_backup_skipped_reauth_pending_message_fn(
-                    RUNTIME_CONTEXT.APPLE_ID_LABEL
+                    RUNTIME_CONTEXT.apple_id_label
                 ),
             )
             BACKUP_REQUESTED = False
@@ -441,9 +441,9 @@ def run_scheduled_worker_loop(
             continue
 
         if not DEPS.enforce_safety_net_fn(
-            RUNTIME_CONTEXT.CONFIG,
-            RUNTIME_CONTEXT.TELEGRAM,
-            RUNTIME_CONTEXT.LOG_FILE,
+            RUNTIME_CONTEXT.config,
+            RUNTIME_CONTEXT.telegram,
+            RUNTIME_CONTEXT.log_file,
         ):
             BACKUP_REQUESTED = False
             DEPS.sleep_fn(30)
@@ -452,9 +452,9 @@ def run_scheduled_worker_loop(
         BACKUP_TRIGGER = "manual" if BACKUP_REQUESTED else "scheduled"
         DEPS.run_backup_fn(
             CLIENT,
-            RUNTIME_CONTEXT.CONFIG,
-            RUNTIME_CONTEXT.TELEGRAM,
-            RUNTIME_CONTEXT.LOG_FILE,
+            RUNTIME_CONTEXT.config,
+            RUNTIME_CONTEXT.telegram,
+            RUNTIME_CONTEXT.log_file,
             BACKUP_TRIGGER,
         )
         BACKUP_REQUESTED = False
@@ -484,10 +484,10 @@ def run_worker_runtime(
     AUTH_RESULT = DEPS.attempt_auth_fn(
         CLIENT,
         AUTH_STATE,
-        RUNTIME_CONTEXT.CONFIG.auth_state_path,
-        RUNTIME_CONTEXT.TELEGRAM,
-        RUNTIME_CONTEXT.CONFIG.container_username,
-        RUNTIME_CONTEXT.CONFIG.icloud_email,
+        RUNTIME_CONTEXT.config.auth_state_path,
+        RUNTIME_CONTEXT.telegram,
+        RUNTIME_CONTEXT.config.container_username,
+        RUNTIME_CONTEXT.config.icloud_email,
         "",
     )
     log_startup_auth_state(
@@ -500,7 +500,7 @@ def run_worker_runtime(
         is_authenticated=AUTH_RESULT.is_authenticated,
     )
 
-    if RUNTIME_CONTEXT.CONFIG.run_once:
+    if RUNTIME_CONTEXT.config.run_once:
         return run_one_shot_worker(
             RUNTIME_CONTEXT,
             CLIENT,

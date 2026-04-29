@@ -53,6 +53,32 @@ class TestState(unittest.TestCase):
             self.assertTrue(any("Corrupt JSON state ignored" in CALL.args[0] for CALL in PRINT.call_args_list))
 
 # --------------------------------------------------------------------------
+# This test confirms corrupt JSON reads emit debug diagnostics without raw
+# parser detail.
+# --------------------------------------------------------------------------
+    def test_read_json_logs_corrupt_json_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "broken.json"
+            LOG_FILE = Path(TMPDIR) / "worker.log"
+            PATH.write_text("{not-valid", encoding="utf-8")
+
+            with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                with patch("builtins.print"):
+                    with patch("app.state.log_line") as LOG_LINE:
+                        RESULT = read_json(PATH, LOG_FILE)
+
+        self.assertEqual(RESULT, {})
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in LOG_LINE.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(any("State read failed:" in LINE for LINE in DEBUG_LINES))
+        self.assertTrue(any("reason=corrupt_json" in LINE for LINE in DEBUG_LINES))
+        self.assertTrue(any("Corrupt state quarantined:" in LINE for LINE in DEBUG_LINES))
+        self.assertFalse(any("Expecting" in LINE for LINE in DEBUG_LINES))
+
+# --------------------------------------------------------------------------
 # This test confirms read failures fall back safely to an empty payload.
 # --------------------------------------------------------------------------
     def test_read_json_returns_empty_dict_when_open_fails(self) -> None:
@@ -85,6 +111,27 @@ class TestState(unittest.TestCase):
         self.assertEqual(WRITTEN, PAYLOAD)
 
 # --------------------------------------------------------------------------
+# This test confirms JSON writes emit debug diagnostics for successful
+# persistence.
+# --------------------------------------------------------------------------
+    def test_write_json_logs_successful_persistence(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "data.json"
+            LOG_FILE = Path(TMPDIR) / "worker.log"
+            PAYLOAD = {"a": 1, "b": {"c": 2}}
+
+            with patch("app.state.log_line") as LOG_LINE:
+                write_json(PATH, PAYLOAD, LOG_FILE)
+
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in LOG_LINE.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(any("State write completed:" in LINE for LINE in DEBUG_LINES))
+        self.assertTrue(any("keys=2" in LINE for LINE in DEBUG_LINES))
+
+# --------------------------------------------------------------------------
 # This test confirms write failures warn and leave the destination untouched.
 # --------------------------------------------------------------------------
     def test_write_json_warns_when_open_fails(self) -> None:
@@ -98,6 +145,33 @@ class TestState(unittest.TestCase):
 
             self.assertFalse(PATH.exists())
             self.assertTrue(any("State write failed" in CALL.args[0] for CALL in PRINT.call_args_list))
+
+# --------------------------------------------------------------------------
+# This test confirms write failures emit debug diagnostics without raw
+# exception text.
+# --------------------------------------------------------------------------
+    def test_write_json_logs_failure_without_raw_exception_text(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "data.json"
+            LOG_FILE = Path(TMPDIR) / "worker.log"
+
+            with patch.object(Path, "open", side_effect=OSError("disk secret")):
+                with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                    with patch("builtins.print"):
+                        with patch("app.state.log_line") as LOG_LINE:
+                            write_json(PATH, {"a": 1}, LOG_FILE)
+
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in LOG_LINE.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(any("State write failed:" in LINE for LINE in DEBUG_LINES))
+        self.assertTrue(any("reason=OSError" in LINE for LINE in DEBUG_LINES))
+        self.assertTrue(
+            any("Temporary state cleanup skipped:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertFalse(any("disk secret" in LINE for LINE in DEBUG_LINES))
 
 # --------------------------------------------------------------------------
 # This test confirms replace failures warn and remove the temporary file.
@@ -201,6 +275,36 @@ class TestState(unittest.TestCase):
         self.assertEqual(OUTPUT_STATE, INPUT_STATE)
 
 # --------------------------------------------------------------------------
+# This test confirms auth-state load and save emit state-specific debug
+# diagnostics.
+# --------------------------------------------------------------------------
+    def test_auth_state_logs_persistence_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "auth_state.json"
+            LOG_FILE = Path(TMPDIR) / "worker.log"
+            INPUT_STATE = AuthState(
+                last_auth_utc="2026-03-09T09:00:00+00:00",
+                auth_pending=True,
+                reauth_pending=False,
+                reminder_stage="alert5",
+            )
+
+            with patch("app.state.log_line") as LOG_LINE:
+                save_auth_state(PATH, INPUT_STATE, LOG_FILE)
+                OUTPUT_STATE = load_auth_state(PATH, LOG_FILE)
+
+        self.assertEqual(OUTPUT_STATE, INPUT_STATE)
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in LOG_LINE.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(any("Auth state save requested:" in LINE for LINE in DEBUG_LINES))
+        self.assertTrue(
+            any("Auth state loaded from persistence:" in LINE for LINE in DEBUG_LINES)
+        )
+
+# --------------------------------------------------------------------------
 # This test confirms manifest loading keeps only dictionary entries.
 # --------------------------------------------------------------------------
     def test_load_manifest_filters_invalid_payload_items(self) -> None:
@@ -256,6 +360,32 @@ class TestState(unittest.TestCase):
             WRITTEN = json.loads(PATH.read_text(encoding="utf-8"))
 
         self.assertEqual(WRITTEN, PAYLOAD)
+
+# --------------------------------------------------------------------------
+# This test confirms manifest load and save emit entry-count diagnostics.
+# --------------------------------------------------------------------------
+    def test_manifest_logs_persistence_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "manifest.json"
+            LOG_FILE = Path(TMPDIR) / "worker.log"
+            PAYLOAD = {"/a": {"etag": "1"}, "/bad": "ignored"}
+            PATH.write_text(json.dumps(PAYLOAD), encoding="utf-8")
+
+            with patch("app.state.log_line") as LOG_LINE:
+                MANIFEST = load_manifest(PATH, LOG_FILE)
+                save_manifest(PATH, MANIFEST, LOG_FILE)
+
+        self.assertEqual(MANIFEST, {"/a": {"etag": "1"}})
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in LOG_LINE.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(
+            any("Manifest loaded from persistence:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertTrue(any("valid_entries=1" in LINE for LINE in DEBUG_LINES))
+        self.assertTrue(any("Manifest save requested:" in LINE for LINE in DEBUG_LINES))
 
 # --------------------------------------------------------------------------
 # This test confirms now_iso delegates to now_local_iso.

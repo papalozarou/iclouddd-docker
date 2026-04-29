@@ -123,6 +123,7 @@ def attempt_auth(
     APPLE_ID: str,
     PROVIDED_CODE: str,
 ) -> auth_runtime.AuthAttemptResult:
+    LOG_FILE = getattr(CLIENT.config, "worker_log_path", None)
     AUTH_RESULT = auth_runtime.attempt_auth(
         CLIENT,
         AUTH_STATE,
@@ -133,10 +134,12 @@ def attempt_auth(
         PROVIDED_CODE,
         DEPS=auth_runtime.AuthRuntimeDeps(
             now_iso_fn=now_iso,
-            save_auth_state_fn=save_auth_state,
+            save_auth_state_fn=(
+                lambda PATH, STATE: save_auth_state(PATH, STATE, LOG_FILE)
+            ),
             notify_fn=notify,
             log_line_fn=log_line,
-            log_file_path=getattr(CLIENT.config, "worker_log_path", None),
+            log_file_path=LOG_FILE,
         ),
     )
     if AUTH_RESULT.is_authenticated:
@@ -166,6 +169,7 @@ def process_reauth_reminders(
     TELEGRAM: TelegramConfig,
     USERNAME: str,
     INTERVAL_DAYS: int,
+    LOG_FILE: Path | None = None,
 ) -> AuthState:
     return auth_runtime.process_reauth_reminders(
         AUTH_STATE,
@@ -174,8 +178,12 @@ def process_reauth_reminders(
         USERNAME,
         INTERVAL_DAYS,
         DEPS=auth_runtime.AuthRuntimeDeps(
-            save_auth_state_fn=save_auth_state,
+            save_auth_state_fn=(
+                lambda PATH, STATE: save_auth_state(PATH, STATE, LOG_FILE)
+            ),
             notify_fn=notify,
+            log_line_fn=log_line,
+            log_file_path=LOG_FILE,
         ),
         REAUTH_DAYS_LEFT_FN=auth_runtime.reauth_days_left,
     )
@@ -344,8 +352,12 @@ def run_backup(
         APPLE_ID_LABEL,
         SCHEDULE_LINE,
         DEPS=backup_runtime.BackupRuntimeDeps(
-            load_manifest_fn=load_manifest,
-            save_manifest_fn=save_manifest,
+            load_manifest_fn=lambda PATH: load_manifest(PATH, LOG_FILE),
+            save_manifest_fn=lambda PATH, MANIFEST: save_manifest(
+                PATH,
+                MANIFEST,
+                LOG_FILE,
+            ),
             log_line_fn=log_line,
             notify_fn=notify,
             get_build_detail_fn=backup_runtime.get_build_detail,
@@ -391,7 +403,13 @@ def handle_command(
         DEPS=command_runtime.CommandRuntimeDeps(
             attempt_auth_fn=attempt_auth,
             notify_fn=notify,
-            save_auth_state_fn=save_auth_state,
+            save_auth_state_fn=(
+                lambda PATH, STATE: save_auth_state(
+                    PATH,
+                    STATE,
+                    CONFIG.worker_log_path,
+                )
+            ),
             log_line_fn=log_line,
             log_file_path=CONFIG.worker_log_path,
         ),
@@ -497,7 +515,7 @@ def main() -> int:
 
         log_line(LOG_FILE, "debug", "Creating iCloud client.")
         CLIENT = ICloudDriveClient(RUNTIME_CONTEXT.config)
-        AUTH_STATE = load_auth_state(RUNTIME_CONTEXT.config.auth_state_path)
+        AUTH_STATE = load_auth_state(RUNTIME_CONTEXT.config.auth_state_path, LOG_FILE)
         log_line(
             LOG_FILE,
             "debug",
@@ -513,7 +531,18 @@ def main() -> int:
             AUTH_STATE,
             worker_runtime.WorkerRuntimeDeps(
                 attempt_auth_fn=attempt_auth,
-                process_reauth_reminders_fn=process_reauth_reminders,
+                process_reauth_reminders_fn=(
+                    lambda AUTH_STATE, AUTH_STATE_PATH, TELEGRAM, USERNAME, DAYS: (
+                        process_reauth_reminders(
+                            AUTH_STATE,
+                            AUTH_STATE_PATH,
+                            TELEGRAM,
+                            USERNAME,
+                            DAYS,
+                            LOG_FILE,
+                        )
+                    )
+                ),
                 poll_command_batch_fn=(
                     lambda TELEGRAM_CONFIG, USERNAME, UPDATE_OFFSET: poll_command_batch(
                         TELEGRAM_CONFIG,

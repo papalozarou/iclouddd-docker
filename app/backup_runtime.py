@@ -109,7 +109,8 @@ def format_duration_clock(TOTAL_SECONDS: int) -> str:
 
 
 # ------------------------------------------------------------------------------
-# This function formats average transfer speed using binary megabytes per second.
+# This function formats average transfer speed using binary megabytes per
+# second.
 #
 # 1. "TRANSFERRED_BYTES" is successful download byte total.
 # 2. "DURATION_SECONDS" is elapsed run duration in seconds.
@@ -260,6 +261,15 @@ def run_backup(
     SCHEDULE_LINE: str,
     DEPS: BackupRuntimeDeps,
 ) -> BackupRunResult:
+    DEPS.log_line_fn(
+        LOG_FILE,
+        "debug",
+        "Backup run started: "
+        f"apple_id_label={APPLE_ID_LABEL}, "
+        f"schedule_line={SCHEDULE_LINE}, "
+        f"manifest_path={CONFIG.manifest_path.as_posix()}, "
+        f"output_dir={CONFIG.output_dir.as_posix()}",
+    )
     log_effective_backup_settings(
         CONFIG,
         LOG_FILE,
@@ -303,11 +313,28 @@ def run_backup(
 
     if TRAVERSAL_COMPLETE:
         DEPS.save_manifest_fn(CONFIG.manifest_path, NEW_MANIFEST)
+        DEPS.log_line_fn(
+            LOG_FILE,
+            "debug",
+            "Manifest save detail: "
+            f"path={CONFIG.manifest_path.as_posix()}, "
+            f"entries={len(NEW_MANIFEST)}, "
+            "reason=traversal_complete",
+        )
     else:
         DEPS.log_line_fn(
             LOG_FILE,
             "error",
             "Manifest save skipped because traversal was incomplete.",
+        )
+        DEPS.log_line_fn(
+            LOG_FILE,
+            "debug",
+            "Manifest save detail: "
+            f"path={CONFIG.manifest_path.as_posix()}, "
+            f"candidate_entries={len(NEW_MANIFEST)}, "
+            f"traversal_hard_failures={TRAVERSAL_HARD_FAILURES}, "
+            "reason=traversal_incomplete",
         )
 
     DURATION_SECONDS = int(time.time()) - RUN_START_EPOCH
@@ -345,6 +372,14 @@ def run_backup(
     if SUMMARY.transferred_files > 0:
         STATUS_LINES.append(f"Average speed: {AVERAGE_SPEED}")
 
+    DEPS.log_line_fn(
+        LOG_FILE,
+        "debug",
+        "Backup completion detail: "
+        f"duration_seconds={DURATION_SECONDS}, "
+        f"average_speed={AVERAGE_SPEED}, "
+        f"status_lines={len(STATUS_LINES)}",
+    )
     COMPLETION_MESSAGE = build_backup_complete_message(APPLE_ID_LABEL, STATUS_LINES)
     COMPLETION_LOG_PREFIX = (
         "Backup complete."

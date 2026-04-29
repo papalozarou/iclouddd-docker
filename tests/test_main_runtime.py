@@ -640,8 +640,11 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
             self.assertTrue(any("Build detail:" in LINE for LINE in DEBUG_LINES))
             self.assertTrue(any("Effective backup settings detail:" in LINE for LINE in DEBUG_LINES))
+            self.assertTrue(any("Backup run started:" in LINE for LINE in DEBUG_LINES))
             self.assertTrue(any("Loaded manifest entries:" in LINE for LINE in DEBUG_LINES))
             self.assertTrue(any("Sync summary detail:" in LINE for LINE in DEBUG_LINES))
+            self.assertTrue(any("Manifest save detail:" in LINE for LINE in DEBUG_LINES))
+            self.assertTrue(any("Backup completion detail:" in LINE for LINE in DEBUG_LINES))
             self.assertTrue(
                 any(
                     "transfer_errors=0, delete_errors=0, total_errors=0" in LINE
@@ -744,6 +747,10 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                     and "Manifest save skipped because traversal was incomplete." in CALL.args[2]
                     for CALL in LOG_LINE.call_args_list
                 )
+            )
+            DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
+            self.assertTrue(
+                any("reason=traversal_incomplete" in LINE for LINE in DEBUG_LINES)
             )
             self.assertEqual(
                 LOG_LINE.call_args_list[-1].args[2],

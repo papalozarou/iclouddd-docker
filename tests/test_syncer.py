@@ -903,6 +903,7 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertTrue(any("File skipped unchanged: docs/unchanged.txt" in LINE for LINE in DEBUG_LINES))
         self.assertTrue(any("Transfer planning detail:" in LINE for LINE in DEBUG_LINES))
         self.assertTrue(any("Transfer execution detail:" in LINE for LINE in DEBUG_LINES))
+        self.assertTrue(any("Delete phase decision: enabled=False" in LINE for LINE in DEBUG_LINES))
 
 # --------------------------------------------------------------------------
 # This test confirms failed transfers emit aggregated failure reason
@@ -922,6 +923,7 @@ class TestSyncerHelpers(unittest.TestCase):
                 perform_incremental_sync(CLIENT, Path(TMPDIR), {}, 0, LOG_FILE)
 
         DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
+        self.assertTrue(any("Reconciliation detail:" in LINE for LINE in DEBUG_LINES))
         self.assertTrue(
             any("Transfer failure reason detail: download_failed=1" in LINE for LINE in DEBUG_LINES)
         )
@@ -1228,15 +1230,24 @@ class TestSyncerHelpers(unittest.TestCase):
             (ROOT_DIR / "docs" / "stale.txt").write_text("stale", encoding="utf-8")
 
             with patch("app.syncer.delete_removed_local_paths", return_value=(1, 0, 2)):
-                SUMMARY, _ = perform_incremental_sync(
-                    CLIENT,
-                    ROOT_DIR,
-                    MANIFEST,
-                    BACKUP_DELETE_REMOVED=True,
-                )
+                with patch("app.syncer.log_line") as LOG_LINE:
+                    SUMMARY, _ = perform_incremental_sync(
+                        CLIENT,
+                        ROOT_DIR,
+                        MANIFEST,
+                        LOG_FILE=ROOT_DIR / "worker.log",
+                        BACKUP_DELETE_REMOVED=True,
+                    )
 
         self.assertEqual(SUMMARY.error_files, 0)
         self.assertEqual(SUMMARY.delete_errors, 2)
+        DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
+        self.assertTrue(
+            any(
+                "Delete phase decision: enabled=True, will_run=True" in LINE
+                for LINE in DEBUG_LINES
+            )
+        )
 
 # --------------------------------------------------------------------------
 # This test confirms non-empty directory delete errors are treated as benign.

@@ -155,7 +155,8 @@ def get_auto_worker_count() -> int:
 # ------------------------------------------------------------------------------
 # This function resolves effective transfer worker count.
 #
-# 1. "SYNC_DOWNLOAD_WORKERS" uses 0 for auto mode and positive values for overrides.
+# 1. "SYNC_DOWNLOAD_WORKERS" uses 0 for auto mode and positive values for
+# overrides.
 #
 # Returns: Bounded worker count for concurrent file download tasks.
 # ------------------------------------------------------------------------------
@@ -409,6 +410,14 @@ def perform_incremental_sync(
     if USE_LOCAL_RECONCILIATION:
         if LOG_FILE is not None:
             log_line(LOG_FILE, "info", "Reconciliation started for first run.")
+            log_line(
+                LOG_FILE,
+                "debug",
+                "Reconciliation detail: "
+                f"manifest_entries={len(MANIFEST)}, "
+                f"output_dir={OUTPUT_DIR.as_posix()}, "
+                "reason=empty_manifest",
+            )
 
         LOCAL_FILE_INDEX = build_local_file_index(OUTPUT_DIR)
 
@@ -465,7 +474,14 @@ def perform_incremental_sync(
             LOG_FILE,
             "debug",
             "Transfer planning detail: "
-            f"candidates={len(TRANSFER_CANDIDATES)}, skipped_unchanged={SKIPPED}",
+            f"files={len(FILES)}, "
+            f"directories={len(DIRECTORIES)}, "
+            f"manifest_entries={len(MANIFEST)}, "
+            f"local_reconciliation={USE_LOCAL_RECONCILIATION}, "
+            f"candidates={len(TRANSFER_CANDIDATES)}, "
+            f"skipped_unchanged={SKIPPED}, "
+            f"delete_removed={BACKUP_DELETE_REMOVED}, "
+            f"traversal_complete={TRAVERSAL_COMPLETE}",
         )
 
     if TRANSFER_CANDIDATES:
@@ -481,7 +497,9 @@ def perform_incremental_sync(
             log_line(
                 LOG_FILE,
                 "debug",
-                f"Transfer execution detail: workers={WORKER_COUNT}, sync_workers={SYNC_DOWNLOAD_WORKERS}",
+                "Transfer execution detail: "
+                f"workers={WORKER_COUNT}, "
+                f"sync_workers={SYNC_DOWNLOAD_WORKERS}",
             )
 
         with ThreadPoolExecutor(max_workers=WORKER_COUNT) as EXECUTOR:
@@ -653,12 +671,34 @@ def perform_incremental_sync(
     if DELETE_PHASE_SKIPPED and LOG_FILE is not None:
         log_line(
             LOG_FILE,
+            "debug",
+            "Delete phase decision: "
+            "enabled=True, will_run=False, reason=traversal_incomplete.",
+        )
+        log_line(
+            LOG_FILE,
             "info",
             "Delete phase skipped because traversal was incomplete.",
         )
 
+    if (
+        not BACKUP_DELETE_REMOVED
+        and LOG_FILE is not None
+    ):
+        log_line(
+            LOG_FILE,
+            "debug",
+            "Delete phase decision: enabled=False, will_run=False, reason=disabled.",
+        )
+
     if BACKUP_DELETE_REMOVED and TRAVERSAL_COMPLETE:
         if LOG_FILE is not None:
+            log_line(
+                LOG_FILE,
+                "debug",
+                "Delete phase decision: enabled=True, will_run=True, "
+                "reason=traversal_complete.",
+            )
             log_line(LOG_FILE, "info", "Delete phase started.")
 
         DELETED_FILES, DELETED_DIRS, DELETE_ERRORS = delete_removed_local_paths(

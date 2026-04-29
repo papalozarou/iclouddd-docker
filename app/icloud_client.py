@@ -16,6 +16,7 @@ import time
 from pyicloud import PyiCloudService
 
 from app.config import AppConfig
+from app.logger import log_line
 
 DIR_RETRY_ATTEMPTS = 4
 DIR_RETRY_BASE_DELAY_SECONDS = 0.05
@@ -105,6 +106,21 @@ class ICloudDriveClient:
         self.api: PyiCloudService | None = None
         self._stats_lock = threading.Lock()
         self._traversal_stats = self._build_empty_traversal_stats()
+
+    # --------------------------------------------------------------------------
+    # This function writes iCloud client debug detail to the worker log.
+    #
+    # 1. "MESSAGE" is the already-redacted diagnostic message to write.
+    #
+    # Returns: None.
+    #
+    # N.B.
+    # This helper deliberately centralises low-level iCloud diagnostics so auth
+    # credentials, MFA codes, cookies, and raw Apple response payloads stay out
+    # of call-site log messages.
+    # --------------------------------------------------------------------------
+    def _log_debug(self, MESSAGE: str) -> None:
+        log_line(self.config.worker_log_path, "debug", MESSAGE)
 
     # --------------------------------------------------------------------------
     # This function creates a clean traversal telemetry dictionary.
@@ -410,6 +426,10 @@ class ICloudDriveClient:
             "cookie_directory": str(self.config.cookie_dir),
         }
 
+        self._log_debug(
+            "iCloud service creation started: "
+            f"cookie_directory={self.config.cookie_dir.as_posix()}."
+        )
         return PyiCloudService(
             self.config.icloud_email,
             self.config.icloud_password,
@@ -424,17 +444,30 @@ class ICloudDriveClient:
     def start_authentication(self) -> tuple[bool, str]:
         self.prepare_compat_paths()
         self.api = self._create_service()
+        REQUIRES_2FA = bool(getattr(self.api, "requires_2fa", False))
+        REQUIRES_2SA = bool(getattr(self.api, "requires_2sa", False))
+        TRUSTED_SESSION = bool(getattr(self.api, "is_trusted_session", False))
+        self._log_debug(
+            "iCloud authentication state: "
+            f"requires_2fa={REQUIRES_2FA}, "
+            f"requires_2sa={REQUIRES_2SA}, "
+            f"is_trusted_session={TRUSTED_SESSION}."
+        )
 
-        if self.api.requires_2fa:
+        if REQUIRES_2FA:
+            self._log_debug("iCloud authentication blocked: reason=requires_2fa.")
             return False, "Two-factor code is required."
 
-        if getattr(self.api, "requires_2sa", False):
+        if REQUIRES_2SA:
+            self._log_debug("iCloud authentication blocked: reason=requires_2sa.")
             return False, "Two-step authentication is required; use app-specific passwords where possible."
 
+        self._log_debug("iCloud authentication completed without MFA challenge.")
         return True, "Authenticated successfully."
 
     # --------------------------------------------------------------------------
-    # This function completes a pending authentication challenge with an MFA code.
+    # This function completes a pending authentication challenge with an MFA
+    # code.
     #
     # 1. "CODE" is the MFA code to validate.
     #
@@ -442,29 +475,38 @@ class ICloudDriveClient:
     # --------------------------------------------------------------------------
     def complete_authentication(self, CODE: str) -> tuple[bool, str]:
         if self.api is None:
+            self._log_debug("iCloud MFA completion failed: reason=session_missing.")
             return False, "Authentication session is not initialised."
 
         CODE = CODE.strip()
 
         if not CODE:
+            self._log_debug("iCloud MFA completion failed: reason=code_missing.")
             return False, "Two-factor code is required."
 
         if not self.api.requires_2fa:
+            self._log_debug("iCloud MFA completion skipped: reason=challenge_absent.")
             return True, "Authenticated successfully."
 
+        self._log_debug("iCloud MFA validation started: code_present=True.")
         IS_VALID = self.api.validate_2fa_code(CODE)
 
         if not IS_VALID:
+            self._log_debug("iCloud MFA validation failed: reason=apple_rejected_code.")
             return False, "Two-factor code was rejected by Apple."
 
         if self.api.is_trusted_session:
+            self._log_debug("iCloud MFA validation completed: trusted_session=True.")
             return True, "Authenticated successfully with 2FA."
 
+        self._log_debug("iCloud trust-session request started.")
         IS_TRUSTED = self.api.trust_session()
 
         if not IS_TRUSTED:
+            self._log_debug("iCloud trust-session request failed.")
             return False, "Two-factor code was accepted, but Apple did not trust this session."
 
+        self._log_debug("iCloud MFA validation completed: trusted_session=True.")
         return True, "Authenticated successfully with trusted 2FA session."
 
     # --------------------------------------------------------------------------
@@ -491,18 +533,35 @@ class ICloudDriveClient:
     # --------------------------------------------------------------------------
     def list_entries(self) -> list[RemoteEntry]:
         if self.api is None:
+            self._log_debug("iCloud traversal skipped: reason=not_authenticated.")
             return []
 
         self._reset_traversal_stats()
         DRIVE_ROOT = self.api.drive
 
         if self.config.traversal_workers == 1:
-            return self._walk_node(DRIVE_ROOT, "")
+            self._log_debug("iCloud traversal started: mode=serial, workers=1.")
+            ENTRIES = self._walk_node(DRIVE_ROOT, "")
+            self._log_debug(
+                "iCloud traversal completed: "
+                f"mode=serial, entries={len(ENTRIES)}."
+            )
+            return ENTRIES
 
-        return self._walk_node_parallel(DRIVE_ROOT, "")
+        self._log_debug(
+            "iCloud traversal started: "
+            f"mode=parallel, workers={self.config.traversal_workers}."
+        )
+        ENTRIES = self._walk_node_parallel(DRIVE_ROOT, "")
+        self._log_debug(
+            "iCloud traversal completed: "
+            f"mode=parallel, entries={len(ENTRIES)}."
+        )
+        return ENTRIES
 
     # --------------------------------------------------------------------------
-    # This function traverses iCloud Drive using bounded parallel directory reads.
+    # This function traverses iCloud Drive using bounded parallel directory
+    # reads.
     #
     # 1. "ROOT_NODE" is the iCloud Drive root node.
     # 2. "ROOT_PATH" is the relative path prefix for the root node.
@@ -570,7 +629,8 @@ class ICloudDriveClient:
         return sorted(RESULT, key=lambda ENTRY: ENTRY.path)
 
     # --------------------------------------------------------------------------
-    # This function returns one-level entries and child directories for traversal.
+    # This function returns one-level entries and child directories for
+    # traversal.
     #
     # 1. "NODE" is the current drive node.
     # 2. "CURRENT_PATH" is the current relative path prefix.
@@ -704,6 +764,11 @@ class ICloudDriveClient:
                     IS_RETRY,
                     "non_directory",
                 )
+                self._log_debug(
+                    "iCloud directory read skipped: "
+                    f"path={CURRENT_PATH or '/'}, "
+                    "reason=non_directory."
+                )
                 return None
             except ValueError:
                 self._record_directory_read(
@@ -712,6 +777,11 @@ class ICloudDriveClient:
                     IS_RETRY,
                     "hard_failure",
                     "ValueError",
+                )
+                self._log_debug(
+                    "iCloud directory read failed: "
+                    f"path={CURRENT_PATH or '/'}, "
+                    "reason=value_error."
                 )
                 return None
             except Exception as ERROR:
@@ -728,8 +798,20 @@ class ICloudDriveClient:
                 )
 
                 if IS_FINAL_ATTEMPT:
+                    self._log_debug(
+                        "iCloud directory read failed: "
+                        f"path={CURRENT_PATH or '/'}, "
+                        "reason=retry_limit_reached, "
+                        f"error_type={type(ERROR).__name__}."
+                    )
                     return None
 
+                self._log_debug(
+                    "iCloud directory read retrying: "
+                    f"path={CURRENT_PATH or '/'}, "
+                    f"attempt={ATTEMPT}, "
+                    f"error_type={type(ERROR).__name__}."
+                )
                 time.sleep(self._retry_delay_seconds(ATTEMPT))
 
         return None
@@ -1170,17 +1252,36 @@ class ICloudDriveClient:
     # --------------------------------------------------------------------------
     def download_file(self, REMOTE_PATH: str, LOCAL_PATH: Path) -> DownloadResult:
         if self.api is None:
+            self._log_debug(
+                "iCloud file download skipped: reason=not_authenticated."
+            )
             return DownloadResult(False, "not_authenticated")
 
+        self._log_debug(
+            "iCloud file download started: "
+            f"remote_path={REMOTE_PATH}, "
+            f"local_path={LOCAL_PATH.as_posix()}."
+        )
         FILE_OBJ = self._resolve_file_object(REMOTE_PATH)
 
         if FILE_OBJ is None:
+            self._log_debug(
+                "iCloud file download failed: reason=path_not_found."
+            )
             return DownloadResult(False, "path_not_found")
 
         if self._child_is_dir(FILE_OBJ):
+            self._log_debug(
+                "iCloud file download failed: reason=directory_node."
+            )
             return DownloadResult(False, "directory_node")
 
         IS_SUCCESS, FAILURE_REASON = self._download_file_object(FILE_OBJ, LOCAL_PATH)
+        self._log_debug(
+            "iCloud file download completed: "
+            f"is_success={IS_SUCCESS}, "
+            f"failure_reason={FAILURE_REASON or 'none'}."
+        )
         return DownloadResult(IS_SUCCESS, FAILURE_REASON)
 
     # --------------------------------------------------------------------------
@@ -1193,32 +1294,73 @@ class ICloudDriveClient:
     # --------------------------------------------------------------------------
     def download_package_tree(self, REMOTE_PATH: str, LOCAL_PATH: Path) -> DownloadResult:
         if self.api is None:
+            self._log_debug(
+                "iCloud package download skipped: reason=not_authenticated."
+            )
             return DownloadResult(False, "not_authenticated")
 
+        self._log_debug(
+            "iCloud package download started: "
+            f"remote_path={REMOTE_PATH}, "
+            f"local_path={LOCAL_PATH.as_posix()}."
+        )
         ROOT_NODE = self._resolve_file_object(REMOTE_PATH)
         if ROOT_NODE is None:
+            self._log_debug(
+                "iCloud package download failed: reason=path_not_found."
+            )
             return DownloadResult(False, "path_not_found")
 
         if not self._child_is_dir(ROOT_NODE):
+            self._log_debug(
+                "iCloud package download fallback started: "
+                "reason=direct_node_not_directory."
+            )
             RESULT = self._download_package_tree_from_parent_metadata(
                 REMOTE_PATH,
                 LOCAL_PATH,
             )
             if RESULT.is_success:
+                self._log_debug(
+                    "iCloud package download completed: "
+                    "method=parent_metadata, "
+                    "is_success=True."
+                )
                 return RESULT
 
             if RESULT.failure_reason:
+                self._log_debug(
+                    "iCloud package download failed: "
+                    "method=parent_metadata, "
+                    f"failure_reason={RESULT.failure_reason}."
+                )
                 return RESULT
 
+            self._log_debug(
+                "iCloud package download failed: reason=not_directory_node."
+            )
             return DownloadResult(False, "not_directory_node")
 
         RESULT = self._download_package_node(ROOT_NODE, LOCAL_PATH)
         if RESULT.is_success:
+            self._log_debug(
+                "iCloud package download completed: "
+                "method=node_walk, "
+                "is_success=True."
+            )
             return RESULT
 
         if RESULT.failure_reason:
+            self._log_debug(
+                "iCloud package download failed: "
+                "method=node_walk, "
+                f"failure_reason={RESULT.failure_reason}."
+            )
             return RESULT
 
+        self._log_debug(
+            "iCloud package download failed: reason=package_download_failed."
+        )
         return DownloadResult(False, "package_download_failed")
 
     # --------------------------------------------------------------------------
@@ -1235,19 +1377,27 @@ class ICloudDriveClient:
         try:
             OPEN_RESULT = self._open_file_object(FILE_OBJ)
         except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+            self._log_debug(
+                "iCloud file object open failed: reason=open_exception."
+            )
             return False, "open_failed"
 
         if OPEN_RESULT is None:
+            self._log_debug(
+                "iCloud file object open failed: reason=open_unavailable."
+            )
             return False, "open_unavailable"
 
         IS_SUCCESS = self._write_open_result(OPEN_RESULT, LOCAL_PATH)
         if not IS_SUCCESS:
+            self._log_debug("iCloud file write failed: reason=write_failed.")
             return False, "write_failed"
 
         return True, ""
 
     # --------------------------------------------------------------------------
-    # This function recursively exports package directory content to local paths.
+    # This function recursively exports package directory content to local
+    # paths.
     #
     # 1. "NODE" is current package node.
     # 2. "LOCAL_PATH" is local path for this node.

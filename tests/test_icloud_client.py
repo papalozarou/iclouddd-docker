@@ -153,6 +153,39 @@ class TestICloudClientAuth(unittest.TestCase):
             self.assertIn("Authenticated successfully", DETAILS)
             SERVICE.assert_called_once()
 
+    def test_authentication_emits_redacted_debug_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            API = Mock()
+            API.requires_2fa = True
+            API.validate_2fa_code.return_value = True
+            API.is_trusted_session = False
+            API.trust_session.return_value = True
+
+            with patch("app.icloud_client.log_line") as LOG_LINE:
+                with patch("app.icloud_client.PyiCloudService", return_value=API):
+                    IS_AUTHENTICATED, DETAILS = CLIENT.start_authentication()
+                CLIENT.complete_authentication("123456")
+
+        self.assertFalse(IS_AUTHENTICATED)
+        self.assertIn("Two-factor code is required", DETAILS)
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in LOG_LINE.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(
+            any("iCloud service creation started:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertTrue(
+            any("requires_2fa=True" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertTrue(
+            any("iCloud MFA validation started:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertFalse(any("123456" in LINE for LINE in DEBUG_LINES))
+
     def test_authenticate_two_step_returns_failure(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_icloud(TMPDIR)
@@ -293,6 +326,28 @@ class TestICloudClientTraversal(unittest.TestCase):
 
             SERIAL_WALK.assert_called_once()
 
+    def test_list_entries_emits_debug_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            CLIENT.api = Mock(drive=FakeNode([]))
+
+            with patch("app.icloud_client.log_line") as LOG_LINE:
+                ENTRIES = CLIENT.list_entries()
+
+        self.assertEqual(ENTRIES, [])
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in LOG_LINE.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(
+            any("iCloud traversal started: mode=serial" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertTrue(
+            any("iCloud traversal completed: mode=serial" in LINE for LINE in DEBUG_LINES)
+        )
+
     def test_record_traversal_queue_state_clamps_negative_values(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
@@ -341,6 +396,28 @@ class TestICloudClientTraversal(unittest.TestCase):
 
             STATS = CLIENT.get_traversal_stats_snapshot()
             self.assertEqual(len(STATS["dir_failure_samples"]), 5)
+
+    def test_directory_read_retry_emits_debug_without_raw_error_text(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
+            NODE = Mock()
+            NODE.dir.side_effect = [RuntimeError("temporary secret detail"), []]
+
+            with patch("app.icloud_client.time.sleep"):
+                with patch("app.icloud_client.log_line") as LOG_LINE:
+                    PAYLOAD = CLIENT._read_dir_payload_with_retry(NODE, "docs")
+
+        self.assertEqual(PAYLOAD, [])
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in LOG_LINE.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(
+            any("iCloud directory read retrying:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertTrue(any("error_type=RuntimeError" in LINE for LINE in DEBUG_LINES))
+        self.assertFalse(any("temporary secret detail" in LINE for LINE in DEBUG_LINES))
 
     def test_walk_node_parallel_collects_and_sorts_entries(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
@@ -695,6 +772,34 @@ class TestICloudClientDownloads(unittest.TestCase):
             self.assertTrue(RESULT.is_success)
             self.assertEqual(LOCAL_PATH.read_bytes(), b"abcdef")
             RESPONSE.iter_content.assert_called_once_with(chunk_size=4 * 1024 * 1024)
+
+    def test_download_file_emits_debug_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            FILE_NODE = SimpleNamespace()
+            RESPONSE = Mock()
+            RESPONSE.iter_content.return_value = [b"abc"]
+            FILE_NODE.open = Mock(return_value=RESPONSE)
+
+            CLIENT.api = Mock()
+            with patch.object(CLIENT, "_resolve_file_object", return_value=FILE_NODE):
+                with patch("app.icloud_client.log_line") as LOG_LINE:
+                    LOCAL_PATH = Path(TMPDIR) / "downloads" / "file.bin"
+                    RESULT = CLIENT.download_file("docs/file.bin", LOCAL_PATH)
+
+        self.assertTrue(RESULT.is_success)
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in LOG_LINE.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(
+            any("iCloud file download started:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertTrue(
+            any("iCloud file download completed:" in LINE for LINE in DEBUG_LINES)
+        )
 
     def test_download_file_success_with_raw_stream(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:

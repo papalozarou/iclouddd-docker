@@ -22,6 +22,7 @@ from app.main import (
     enforce_safety_net,
     get_next_run_epoch,
     handle_command,
+    HeartbeatUpdater,
     notify,
     notify_container_stopped,
     poll_command_batch,
@@ -154,8 +155,8 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertTrue(HEARTBEAT_PATH.exists())
 
 # --------------------------------------------------------------------------
-# This test confirms heartbeat updater starts a daemon thread and returns
-# a stop event.
+# This test confirms heartbeat updater starts a daemon thread and returns a
+# lifecycle controller.
 # --------------------------------------------------------------------------
     def test_start_heartbeat_updater_starts_daemon_thread(self) -> None:
         HEARTBEAT_PATH = Path("/tmp/pyiclodoc-drive-heartbeat.txt")
@@ -164,12 +165,27 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             THREAD_INSTANCE = Mock()
             THREAD.return_value = THREAD_INSTANCE
 
-            STOP_EVENT = start_heartbeat_updater(HEARTBEAT_PATH)
+            UPDATER = start_heartbeat_updater(HEARTBEAT_PATH)
 
         THREAD.assert_called_once()
         self.assertEqual(THREAD.call_args.kwargs.get("daemon"), True)
         THREAD_INSTANCE.start.assert_called_once()
-        self.assertFalse(STOP_EVENT.is_set())
+        self.assertFalse(UPDATER.stop_event.is_set())
+        self.assertIs(UPDATER.thread, THREAD_INSTANCE)
+
+# --------------------------------------------------------------------------
+# This test confirms heartbeat updater shutdown sets the stop signal and waits
+# for the writer thread to finish.
+# --------------------------------------------------------------------------
+    def test_heartbeat_updater_stop_joins_thread(self) -> None:
+        STOP_EVENT = Mock()
+        THREAD = Mock()
+        UPDATER = HeartbeatUpdater(stop_event=STOP_EVENT, thread=THREAD)
+
+        UPDATER.stop()
+
+        STOP_EVENT.set.assert_called_once()
+        THREAD.join.assert_called_once()
 
 # --------------------------------------------------------------------------
 # This test confirms one-shot auth wait returns immediately when ready.
@@ -1333,6 +1349,53 @@ class TestMainEntrypoint(unittest.TestCase):
             self.assertTrue(
                 any("Auth state after startup attempt:" in CALL.args[2] for CALL in DEBUG_LINES)
             )
+
+# --------------------------------------------------------------------------
+# This test confirms main stops and joins the heartbeat updater before exit.
+# --------------------------------------------------------------------------
+    def test_main_stops_heartbeat_updater_before_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = AppConfig(
+                **(build_config_for_runtime(TMPDIR).__dict__ | {"run_once": True})
+            )
+            STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
+            HEARTBEAT_UPDATER = Mock()
+
+            with patch("app.main.load_config", return_value=CONFIG):
+                with patch("app.main.configure_keyring"):
+                    with patch("app.main.load_credentials", return_value=("", "")):
+                        with patch("app.main.validate_config", return_value=[]):
+                            with patch(
+                                "app.main.start_heartbeat_updater",
+                                return_value=HEARTBEAT_UPDATER,
+                            ):
+                                with patch("app.main.save_credentials"):
+                                    with patch("app.main.ICloudDriveClient", return_value=Mock()):
+                                        with patch("app.main.load_auth_state", return_value=STATE):
+                                            with patch(
+                                                "app.main.attempt_auth",
+                                                return_value=AuthAttemptResult(
+                                                    auth_state=STATE,
+                                                    is_authenticated=False,
+                                                    reason_code="auth_failed",
+                                                    operator_detail="fail",
+                                                ),
+                                            ):
+                                                with patch(
+                                                    "app.worker_runtime.wait_for_one_shot_auth",
+                                                    return_value=WorkerAuthState(
+                                                        auth_state=STATE,
+                                                        is_authenticated=False,
+                                                    ),
+                                                ):
+                                                    with patch("app.main.notify"):
+                                                        RESULT = __import__(
+                                                            "app.main",
+                                                            fromlist=["main"],
+                                                        ).main()
+
+            self.assertEqual(RESULT, 2)
+            HEARTBEAT_UPDATER.stop.assert_called_once()
 
 # --------------------------------------------------------------------------
 # This test confirms loop sleeps and continues when not due and no request.

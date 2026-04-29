@@ -1016,6 +1016,9 @@ def delete_removed_local_paths(
 ) -> tuple[int, int, int]:
     REMOTE_FILE_PATHS = {ENTRY.path for ENTRY in FILES}
     REMOTE_DIR_PATHS = {ENTRY.path for ENTRY in DIRECTORIES}
+    PROTECTED_PACKAGE_ROOTS = {
+        ENTRY.path for ENTRY in FILES if is_known_package_path(ENTRY.path)
+    }
     DELETED_FILES = 0
     DELETED_DIRS = 0
     ERRORS = 0
@@ -1024,7 +1027,11 @@ def delete_removed_local_paths(
     for FILE_PATH in LOCAL_FILES:
         RELATIVE_PATH = FILE_PATH.relative_to(OUTPUT_DIR).as_posix()
 
-        if RELATIVE_PATH in REMOTE_FILE_PATHS:
+        if is_delete_protected_file_path(
+            RELATIVE_PATH,
+            REMOTE_FILE_PATHS,
+            PROTECTED_PACKAGE_ROOTS,
+        ):
             continue
 
         try:
@@ -1045,7 +1052,11 @@ def delete_removed_local_paths(
     for DIR_PATH in LOCAL_DIRS:
         RELATIVE_PATH = DIR_PATH.relative_to(OUTPUT_DIR).as_posix()
 
-        if RELATIVE_PATH in REMOTE_DIR_PATHS:
+        if is_delete_protected_directory_path(
+            RELATIVE_PATH,
+            REMOTE_DIR_PATHS,
+            PROTECTED_PACKAGE_ROOTS,
+        ):
             continue
 
         try:
@@ -1076,6 +1087,67 @@ def delete_removed_local_paths(
                 )
 
     return DELETED_FILES, DELETED_DIRS, ERRORS
+
+
+# ------------------------------------------------------------------------------
+# This function reports whether one local file path must be preserved.
+#
+# 1. "RELATIVE_PATH" is local path relative to the output root.
+# 2. "REMOTE_FILE_PATHS" is the exact current remote file path set.
+# 3. "PROTECTED_PACKAGE_ROOTS" is the set of directory-backed package roots.
+#
+# Returns: True when delete-removed must preserve the file path.
+# ------------------------------------------------------------------------------
+def is_delete_protected_file_path(
+    RELATIVE_PATH: str,
+    REMOTE_FILE_PATHS: set[str],
+    PROTECTED_PACKAGE_ROOTS: set[str],
+) -> bool:
+    if RELATIVE_PATH in REMOTE_FILE_PATHS:
+        return True
+
+    return is_protected_package_descendant(RELATIVE_PATH, PROTECTED_PACKAGE_ROOTS)
+
+
+# ------------------------------------------------------------------------------
+# This function reports whether one local directory path must be preserved.
+#
+# 1. "RELATIVE_PATH" is local path relative to the output root.
+# 2. "REMOTE_DIR_PATHS" is the exact current remote directory path set.
+# 3. "PROTECTED_PACKAGE_ROOTS" is the set of directory-backed package roots.
+#
+# Returns: True when delete-removed must preserve the directory path.
+# ------------------------------------------------------------------------------
+def is_delete_protected_directory_path(
+    RELATIVE_PATH: str,
+    REMOTE_DIR_PATHS: set[str],
+    PROTECTED_PACKAGE_ROOTS: set[str],
+) -> bool:
+    if RELATIVE_PATH in REMOTE_DIR_PATHS:
+        return True
+
+    if RELATIVE_PATH in PROTECTED_PACKAGE_ROOTS:
+        return True
+
+    return is_protected_package_descendant(RELATIVE_PATH, PROTECTED_PACKAGE_ROOTS)
+
+
+# ------------------------------------------------------------------------------
+# This function reports whether one path is nested inside a live package root.
+#
+# 1. "RELATIVE_PATH" is local path relative to the output root.
+# 2. "PROTECTED_PACKAGE_ROOTS" is the set of directory-backed package roots.
+#
+# Returns: True when the path is a descendant of a protected package root.
+# ------------------------------------------------------------------------------
+def is_protected_package_descendant(
+    RELATIVE_PATH: str,
+    PROTECTED_PACKAGE_ROOTS: set[str],
+) -> bool:
+    return any(
+        RELATIVE_PATH.startswith(f"{PACKAGE_ROOT}/")
+        for PACKAGE_ROOT in PROTECTED_PACKAGE_ROOTS
+    )
 
 
 # ------------------------------------------------------------------------------

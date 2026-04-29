@@ -247,12 +247,37 @@ def handle_command(
             operator_detail=AUTH_RESULT.operator_detail,
         )
 
-    if COMMAND == "reauth" and not ARGS:
+    if COMMAND == "reauth":
+        REAUTH_STATE = replace(AUTH_STATE, reauth_pending=True)
+
+        if not ARGS:
+            log_command_debug(
+                DEPS,
+                "Reauth command received without code; requesting a fresh Apple challenge.",
+            )
+            AUTH_RESULT = DEPS.attempt_auth_fn(
+                CLIENT,
+                REAUTH_STATE,
+                CONFIG.auth_state_path,
+                TELEGRAM,
+                CONFIG.container_username,
+                CONFIG.icloud_email,
+                "",
+            )
+            log_auth_command_result(DEPS, AUTH_RESULT)
+
+            return CommandHandleResult(
+                auth_state=AUTH_RESULT.auth_state,
+                is_authenticated=AUTH_RESULT.is_authenticated,
+                backup_requested=False,
+                reason_code=AUTH_RESULT.reason_code,
+                operator_detail=AUTH_RESULT.operator_detail,
+            )
+
         log_command_debug(
             DEPS,
-            "Reauth command received without code; requesting a fresh Apple challenge.",
+            "Reauth code command received; submitting redacted code to Apple.",
         )
-        REAUTH_STATE = replace(AUTH_STATE, reauth_pending=True)
         AUTH_RESULT = DEPS.attempt_auth_fn(
             CLIENT,
             REAUTH_STATE,
@@ -260,7 +285,7 @@ def handle_command(
             TELEGRAM,
             CONFIG.container_username,
             CONFIG.icloud_email,
-            "",
+            ARGS,
         )
         log_auth_command_result(DEPS, AUTH_RESULT)
 

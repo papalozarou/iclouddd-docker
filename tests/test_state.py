@@ -269,9 +269,10 @@ class TestState(unittest.TestCase):
                 reauth_pending=False,
                 reminder_stage="alert5",
             )
-            save_auth_state(PATH, INPUT_STATE)
+            IS_SAVED = save_auth_state(PATH, INPUT_STATE)
             OUTPUT_STATE = load_auth_state(PATH)
 
+        self.assertTrue(IS_SAVED)
         self.assertEqual(OUTPUT_STATE, INPUT_STATE)
 
 # --------------------------------------------------------------------------
@@ -356,10 +357,29 @@ class TestState(unittest.TestCase):
         with tempfile.TemporaryDirectory() as TMPDIR:
             PATH = Path(TMPDIR) / "manifest.json"
             PAYLOAD = {"/a": {"etag": "1"}, "/b": {"etag": "2"}}
-            save_manifest(PATH, PAYLOAD)
+            IS_SAVED = save_manifest(PATH, PAYLOAD)
             WRITTEN = json.loads(PATH.read_text(encoding="utf-8"))
 
+        self.assertTrue(IS_SAVED)
         self.assertEqual(WRITTEN, PAYLOAD)
+
+# --------------------------------------------------------------------------
+# This test confirms manifest save reports failure when the destination
+# parent path cannot behave as a directory.
+# --------------------------------------------------------------------------
+    def test_save_manifest_returns_false_when_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            BLOCKING_PATH = ROOT_DIR / "manifest.json"
+            BLOCKING_PATH.write_text("occupied", encoding="utf-8")
+            PATH = BLOCKING_PATH / "child.json"
+
+            with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                with patch("builtins.print"):
+                    IS_SAVED = save_manifest(PATH, {"/a": {"etag": "1"}})
+
+        self.assertFalse(IS_SAVED)
+        self.assertFalse(PATH.exists())
 
 # --------------------------------------------------------------------------
 # This test confirms manifest load and save emit entry-count diagnostics.

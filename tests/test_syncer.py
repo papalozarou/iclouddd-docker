@@ -1300,6 +1300,44 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertTrue(any("Directory delete error:" in CALL.args[2] for CALL in LOG_LINE.call_args_list))
 
 # --------------------------------------------------------------------------
+# This test confirms delete-removed mode preserves live package roots and
+# descendants while still deleting stale siblings.
+# --------------------------------------------------------------------------
+    def test_delete_removed_local_paths_preserves_live_package_directories(self) -> None:
+        FILES = [
+            RemoteEntry("docs/archive.bundle", False, 10, "2026-03-11T00:00:00Z"),
+            RemoteEntry("docs/notes.pages", False, 20, "2026-03-11T00:00:00Z"),
+            RemoteEntry("docs/keep.txt", False, 4, "2026-03-11T00:00:00Z"),
+        ]
+        DIRECTORIES = [RemoteEntry("docs", True, 0, "2026-03-11T00:00:00Z")]
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            (ROOT_DIR / "docs" / "archive.bundle" / "nested").mkdir(parents=True, exist_ok=True)
+            (ROOT_DIR / "docs" / "notes.pages").mkdir(parents=True, exist_ok=True)
+            (ROOT_DIR / "docs" / "notes.pages" / "index.xml").write_text("live", encoding="utf-8")
+            (ROOT_DIR / "docs" / "archive.bundle" / "nested" / "asset.bin").write_text("live", encoding="utf-8")
+            (ROOT_DIR / "docs" / "keep.txt").write_text("keep", encoding="utf-8")
+            (ROOT_DIR / "docs" / "stale.txt").write_text("stale", encoding="utf-8")
+            (ROOT_DIR / "docs" / "stale_dir").mkdir(parents=True, exist_ok=True)
+            (ROOT_DIR / "docs" / "stale_dir" / "old.txt").write_text("old", encoding="utf-8")
+
+            DELETED_FILES, DELETED_DIRS, ERRORS = delete_removed_local_paths(
+                ROOT_DIR,
+                FILES,
+                DIRECTORIES,
+            )
+
+            self.assertEqual(DELETED_FILES, 2)
+            self.assertEqual(DELETED_DIRS, 1)
+            self.assertEqual(ERRORS, 0)
+            self.assertTrue((ROOT_DIR / "docs" / "archive.bundle").exists())
+            self.assertTrue((ROOT_DIR / "docs" / "archive.bundle" / "nested" / "asset.bin").exists())
+            self.assertTrue((ROOT_DIR / "docs" / "notes.pages" / "index.xml").exists())
+            self.assertFalse((ROOT_DIR / "docs" / "stale.txt").exists())
+            self.assertFalse((ROOT_DIR / "docs" / "stale_dir").exists())
+
+# --------------------------------------------------------------------------
 # This test confirms reconciled package entries persist package metadata in
 # the manifest for future transfer decisions.
 # --------------------------------------------------------------------------

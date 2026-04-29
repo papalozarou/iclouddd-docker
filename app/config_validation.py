@@ -79,6 +79,9 @@ def validate_config(CONFIG: AppConfig) -> list[str]:
     if CONFIG.reauth_interval_days < 1:
         ERRORS.append("REAUTH_INTERVAL_DAYS must be an integer of at least 1.")
 
+    if CONFIG.heartbeat_max_age_seconds < 1:
+        ERRORS.append("HEALTHCHECK_MAX_AGE_SECONDS must be an integer of at least 1.")
+
     if CONFIG.safety_net_sample_size < 1:
         ERRORS.append("SAFETY_NET_SAMPLE_SIZE must be an integer of at least 1.")
 

@@ -32,7 +32,7 @@ class LoadManifestFn(Protocol):
 # This protocol saves manifest state to disk after a successful run.
 # ------------------------------------------------------------------------------
 class SaveManifestFn(Protocol):
-    def __call__(self, PATH: Path, MANIFEST: ManifestDict) -> None:
+    def __call__(self, PATH: Path, MANIFEST: ManifestDict) -> bool:
         ...
 
 
@@ -310,17 +310,25 @@ def run_backup(
     TRAVERSAL_COMPLETE = bool(SUMMARY.traversal_complete)
     TRAVERSAL_HARD_FAILURES = max(int(SUMMARY.traversal_hard_failures), 0)
     DELETE_PHASE_SKIPPED = bool(SUMMARY.delete_phase_skipped)
+    MANIFEST_UPDATED = False
 
     if TRAVERSAL_COMPLETE:
-        DEPS.save_manifest_fn(CONFIG.manifest_path, NEW_MANIFEST)
+        MANIFEST_UPDATED = DEPS.save_manifest_fn(CONFIG.manifest_path, NEW_MANIFEST)
+        MANIFEST_REASON = "save_succeeded" if MANIFEST_UPDATED else "save_failed"
         DEPS.log_line_fn(
             LOG_FILE,
             "debug",
             "Manifest save detail: "
             f"path={CONFIG.manifest_path.as_posix()}, "
             f"entries={len(NEW_MANIFEST)}, "
-            "reason=traversal_complete",
+            f"reason={MANIFEST_REASON}",
         )
+        if not MANIFEST_UPDATED:
+            DEPS.log_line_fn(
+                LOG_FILE,
+                "error",
+                "Manifest save failed after traversal completed.",
+            )
     else:
         DEPS.log_line_fn(
             LOG_FILE,
@@ -352,6 +360,8 @@ def run_backup(
 
         if DELETE_PHASE_SKIPPED:
             STATUS_LINES.append("Delete removed: Skipped because traversal was incomplete")
+    elif not MANIFEST_UPDATED:
+        STATUS_LINES.append("Manifest: Save failed after traversal completed")
 
     STATUS_LINES.extend(
         [
@@ -383,8 +393,12 @@ def run_backup(
     COMPLETION_MESSAGE = build_backup_complete_message(APPLE_ID_LABEL, STATUS_LINES)
     COMPLETION_LOG_PREFIX = (
         "Backup complete."
-        if TRAVERSAL_COMPLETE
-        else "Backup completed with incomplete traversal."
+        if TRAVERSAL_COMPLETE and MANIFEST_UPDATED
+        else (
+            "Backup completed with incomplete traversal."
+            if not TRAVERSAL_COMPLETE
+            else "Backup completed but manifest save failed."
+        )
     )
     COMPLETION_LOG_MESSAGE = (
         f"{COMPLETION_LOG_PREFIX} "
@@ -394,12 +408,12 @@ def run_backup(
     DEPS.notify_fn(TELEGRAM, COMPLETION_MESSAGE)
     DEPS.log_line_fn(
         LOG_FILE,
-        "info" if TRAVERSAL_COMPLETE else "error",
+        "info" if TRAVERSAL_COMPLETE and MANIFEST_UPDATED else "error",
         COMPLETION_LOG_MESSAGE,
     )
     return BackupRunResult(
         summary=SUMMARY,
-        manifest_updated=TRAVERSAL_COMPLETE,
+        manifest_updated=MANIFEST_UPDATED,
         total_errors=TOTAL_ERRORS,
         completion_message=COMPLETION_MESSAGE,
         completion_log_message=COMPLETION_LOG_MESSAGE,

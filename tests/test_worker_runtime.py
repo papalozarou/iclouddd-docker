@@ -349,6 +349,48 @@ class TestWorkerRuntime(unittest.TestCase):
         )
 
 # --------------------------------------------------------------------------
+# This test confirms startup heartbeat failure still uses structured runtime
+# abort handling.
+# --------------------------------------------------------------------------
+    def test_run_worker_runtime_aborts_on_startup_heartbeat_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=Mock(return_value=([], None)),
+                HANDLE_COMMAND_FN=Mock(),
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=Mock(),
+            )
+            DEPS.check_runtime_liveness_fn = Mock(
+                return_value=(
+                    "heartbeat_startup_failed: age_seconds=70, "
+                    "detail=PermissionError: denied."
+                )
+            )
+
+            RESULT = run_worker_runtime(
+                RUNTIME_CONTEXT,
+                Mock(),
+                AUTH_STATE,
+                SimpleNamespace(
+                    **DEPS.__dict__,
+                    attempt_auth_fn=Mock(
+                        return_value=AuthAttemptResult(
+                            auth_state=AUTH_STATE,
+                            is_authenticated=False,
+                            reason_code="mfa_required",
+                            operator_detail="mfa",
+                        )
+                    ),
+                    build_one_shot_waiting_for_auth_message_fn=lambda *_: "wait",
+                ),
+            )
+
+        self.assertEqual(RESULT.exit_code, 5)
+        self.assertIn("heartbeat_startup_failed", RESULT.stop_status)
+
+# --------------------------------------------------------------------------
 # This test confirms startup cutover captures one live polling cursor from the
 # current Telegram update snapshot.
 # --------------------------------------------------------------------------

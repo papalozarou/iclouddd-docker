@@ -169,7 +169,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             THREAD_INSTANCE = Mock()
             THREAD.return_value = THREAD_INSTANCE
 
-            UPDATER = start_heartbeat_updater(HEARTBEAT_PATH, LOG_FILE)
+            UPDATER = start_heartbeat_updater(HEARTBEAT_PATH, LOG_FILE, 65)
 
         THREAD.assert_called_once()
         self.assertEqual(THREAD.call_args.kwargs.get("daemon"), True)
@@ -177,6 +177,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
         self.assertFalse(UPDATER.stop_event.is_set())
         self.assertIs(UPDATER.thread, THREAD_INSTANCE)
         self.assertIsInstance(UPDATER.telemetry, HeartbeatTelemetry)
+        self.assertEqual(UPDATER.max_age_seconds, 65)
 
 # --------------------------------------------------------------------------
 # This test confirms heartbeat updater shutdown sets the stop signal and waits
@@ -189,6 +190,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             stop_event=STOP_EVENT,
             thread=THREAD,
             telemetry=HeartbeatTelemetry(),
+            max_age_seconds=65,
         )
 
         UPDATER.stop()
@@ -207,6 +209,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             stop_event=Mock(),
             thread=THREAD,
             telemetry=TELEMETRY,
+            max_age_seconds=65,
         )
 
         RESULT = UPDATER.get_liveness_failure(100)
@@ -220,6 +223,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
         THREAD = Mock()
         THREAD.is_alive.return_value = True
         TELEMETRY = HeartbeatTelemetry(
+            first_attempt_epoch=10,
             last_success_epoch=10,
             last_failure_detail="touch_failed",
         )
@@ -227,12 +231,60 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             stop_event=Mock(),
             thread=THREAD,
             telemetry=TELEMETRY,
+            max_age_seconds=65,
         )
 
         RESULT = UPDATER.get_liveness_failure(100)
 
         self.assertIn("heartbeat_stale", RESULT)
         self.assertIn("touch_failed", RESULT)
+
+# --------------------------------------------------------------------------
+# This test confirms heartbeat liveness fails after repeated startup write
+# failures when no successful heartbeat was ever recorded.
+# --------------------------------------------------------------------------
+    def test_heartbeat_updater_reports_startup_failure_after_budget_expires(self) -> None:
+        THREAD = Mock()
+        THREAD.is_alive.return_value = True
+        TELEMETRY = HeartbeatTelemetry(
+            first_attempt_epoch=10,
+            last_attempt_epoch=70,
+            last_failure_detail="PermissionError: denied",
+        )
+        UPDATER = HeartbeatUpdater(
+            stop_event=Mock(),
+            thread=THREAD,
+            telemetry=TELEMETRY,
+            max_age_seconds=65,
+        )
+
+        RESULT = UPDATER.get_liveness_failure(100)
+
+        self.assertIn("heartbeat_startup_failed", RESULT)
+        self.assertIn("PermissionError: denied", RESULT)
+
+# --------------------------------------------------------------------------
+# This test confirms heartbeat liveness allows a short startup grace window
+# before the first successful heartbeat is written.
+# --------------------------------------------------------------------------
+    def test_heartbeat_updater_allows_short_startup_failure_window(self) -> None:
+        THREAD = Mock()
+        THREAD.is_alive.return_value = True
+        TELEMETRY = HeartbeatTelemetry(
+            first_attempt_epoch=10,
+            last_attempt_epoch=40,
+            last_failure_detail="PermissionError: denied",
+        )
+        UPDATER = HeartbeatUpdater(
+            stop_event=Mock(),
+            thread=THREAD,
+            telemetry=TELEMETRY,
+            max_age_seconds=65,
+        )
+
+        RESULT = UPDATER.get_liveness_failure(60)
+
+        self.assertIsNone(RESULT)
 
 # --------------------------------------------------------------------------
 # This test confirms one-shot auth wait returns immediately when ready.
@@ -703,7 +755,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                     with patch("app.main.save_manifest") as SAVE_MANIFEST:
                         with patch("app.main.notify") as NOTIFY:
                             with patch("app.main.log_line") as LOG_LINE:
-                                run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE, "scheduled")
+                                RESULT = run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE, "scheduled")
 
             SAVE_MANIFEST.assert_called_once()
             SYNC.assert_called_once_with(
@@ -744,6 +796,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertIn("Errors: 0", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Duration:", NOTIFY.call_args_list[1].args[1])
             self.assertIn("Average speed:", NOTIFY.call_args_list[1].args[1])
+            self.assertTrue(RESULT.manifest_updated)
             self.assertEqual(
                 LOG_LINE.call_args_list[-1].args[2],
                 "Backup complete. Transferred 2/3, skipped 1, errors 0.",
@@ -836,6 +889,49 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 LOG_LINE.call_args_list[-1].args[2],
                 "Backup completed with incomplete traversal. Transferred 1/3, skipped 1, errors 1.",
             )
+
+# --------------------------------------------------------------------------
+# This test confirms manifest save failure stays visible in backup result,
+# completion output, and error logging.
+# --------------------------------------------------------------------------
+    def test_run_backup_reports_manifest_save_failure_after_successful_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_runtime(TMPDIR)
+            TELEGRAM = TelegramConfig("token", "12345")
+            LOG_FILE = CONFIG.logs_dir / "pyiclodoc-drive-worker.log"
+            CLIENT = Mock()
+            SUMMARY = SyncResult(
+                total_files=3,
+                transferred_files=2,
+                transferred_bytes=2048,
+                deleted_files=0,
+                deleted_directories=0,
+                delete_errors=0,
+                skipped_files=1,
+                error_files=0,
+            )
+
+            with patch("app.main.load_manifest", return_value={"/a": {"etag": "1"}}):
+                with patch("app.main.perform_incremental_sync", return_value=(SUMMARY, {"/b": {"etag": "2"}})):
+                    with patch("app.main.save_manifest", return_value=False) as SAVE_MANIFEST:
+                        with patch("app.main.notify") as NOTIFY:
+                            with patch("app.main.log_line") as LOG_LINE:
+                                RESULT = run_backup(CLIENT, CONFIG, TELEGRAM, LOG_FILE, "scheduled")
+
+        SAVE_MANIFEST.assert_called_once()
+        self.assertFalse(RESULT.manifest_updated)
+        self.assertIn("Manifest: Save failed after traversal completed", NOTIFY.call_args_list[1].args[1])
+        self.assertEqual(
+            LOG_LINE.call_args_list[-1].args[2],
+            "Backup completed but manifest save failed. Transferred 2/3, skipped 1, errors 0.",
+        )
+        self.assertTrue(
+            any(
+                CALL.args[1] == "error"
+                and "Manifest save failed after traversal completed." in CALL.args[2]
+                for CALL in LOG_LINE.call_args_list
+            )
+        )
 
 # --------------------------------------------------------------------------
 # This test confirms backup completion surfaces deleted file and directory
@@ -1196,6 +1292,52 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertTrue(RESULT.is_authenticated)
             self.assertFalse(RESULT.backup_requested)
             self.assertEqual(RESULT.reason_code, "authenticated")
+
+# --------------------------------------------------------------------------
+# This test confirms handle_command reauth with a code uses reauth state
+# rather than the plain auth path.
+# --------------------------------------------------------------------------
+    def test_handle_command_reauth_with_code_uses_reauth_state(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_runtime(TMPDIR)
+            TELEGRAM = TelegramConfig("token", "12345")
+            AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
+            EXPECTED_STATE = AuthState("2026-03-09T12:00:00+00:00", False, False, "none")
+
+            with patch(
+                "app.main.attempt_auth",
+                return_value=AuthAttemptResult(
+                    auth_state=EXPECTED_STATE,
+                    is_authenticated=True,
+                    reason_code="authenticated",
+                    operator_detail="ok",
+                ),
+            ) as ATTEMPT:
+                with patch("app.main.log_line") as LOG:
+                    RESULT = handle_command(
+                        "reauth",
+                        "123456",
+                        CONFIG,
+                        Mock(),
+                        AUTH_STATE,
+                        True,
+                        TELEGRAM,
+                    )
+
+        self.assertTrue(ATTEMPT.call_args[0][1].reauth_pending)
+        self.assertEqual(ATTEMPT.call_args[0][6], "123456")
+        self.assertEqual(RESULT.auth_state, EXPECTED_STATE)
+        self.assertTrue(RESULT.is_authenticated)
+        self.assertFalse(RESULT.backup_requested)
+        self.assertEqual(RESULT.reason_code, "authenticated")
+        LOG_MESSAGES = [CALL.args[2] for CALL in LOG.call_args_list]
+        self.assertTrue(
+            any("command=reauth, args_present=True" in MESSAGE for MESSAGE in LOG_MESSAGES)
+        )
+        self.assertTrue(
+            any("Reauth code command received" in MESSAGE for MESSAGE in LOG_MESSAGES)
+        )
+        self.assertFalse(any("123456" in MESSAGE for MESSAGE in LOG_MESSAGES))
 
 
 # ------------------------------------------------------------------------------

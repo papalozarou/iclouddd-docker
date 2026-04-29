@@ -23,6 +23,7 @@ x-env:
   LOG_ROTATE_DAILY: ${C_LOG_ROTATE_DAILY}
   LOG_ROTATE_MAX_MIB: ${C_LOG_ROTATE_MAX_MIB}
   LOG_ROTATE_KEEP_DAYS: ${C_LOG_ROTATE_KEEP_DAYS}
+  HEALTHCHECK_MAX_AGE_SECONDS: ${C_HEALTHCHECK_MAX_AGE_SECONDS}
 
 # ------------------------------------------------------------------------------
 # Define shared security settings used by all worker services.

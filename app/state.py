@@ -159,7 +159,7 @@ def quarantine_corrupt_json(PATH: Path, LOG_FILE: Path | None = None) -> None:
 # 2. "PAYLOAD" is the dictionary to persist.
 # 3. "LOG_FILE" is the optional worker log destination.
 #
-# Returns: None.
+# Returns: True when the state file was written successfully.
 #
 # Notes: Atomic replace avoids partial writes during interruption.
 # ------------------------------------------------------------------------------
@@ -167,7 +167,7 @@ def write_json(
     PATH: Path,
     PAYLOAD: dict[str, Any],
     LOG_FILE: Path | None = None,
-) -> None:
+) -> bool:
     TEMPORARY_PATH = PATH.with_suffix(PATH.suffix + ".tmp")
 
     try:
@@ -181,6 +181,7 @@ def write_json(
             f"path={PATH.as_posix()}, "
             f"keys={len(PAYLOAD)}.",
         )
+        return True
     except OSError as ERROR:
         warn_state_issue(
             f"State write failed at {PATH}: {type(ERROR).__name__}: {ERROR}",
@@ -192,6 +193,7 @@ def write_json(
             f"reason={type(ERROR).__name__}.",
         )
         cleanup_temporary_state_file(TEMPORARY_PATH, LOG_FILE)
+        return False
 
 
 # ------------------------------------------------------------------------------
@@ -288,13 +290,13 @@ def load_auth_state(PATH: Path, LOG_FILE: Path | None = None) -> AuthState:
 # 2. "STATE" is the model to persist.
 # 3. "LOG_FILE" is the optional worker log destination.
 #
-# Returns: None.
+# Returns: True when the auth state was written successfully.
 # ------------------------------------------------------------------------------
 def save_auth_state(
     PATH: Path,
     STATE: AuthState,
     LOG_FILE: Path | None = None,
-) -> None:
+) -> bool:
     PAYLOAD = {
         "last_auth_utc": STATE.last_auth_utc,
         "auth_pending": STATE.auth_pending,
@@ -309,7 +311,7 @@ def save_auth_state(
         f"reauth_pending={STATE.reauth_pending}, "
         f"reminder_stage={STATE.reminder_stage}.",
     )
-    write_json(PATH, PAYLOAD, LOG_FILE)
+    return write_json(PATH, PAYLOAD, LOG_FILE)
 
 
 # ------------------------------------------------------------------------------
@@ -355,17 +357,17 @@ def load_manifest(
 # 2. "MANIFEST" is the payload to persist.
 # 3. "LOG_FILE" is the optional worker log destination.
 #
-# Returns: None.
+# Returns: True when the manifest was written successfully.
 # ------------------------------------------------------------------------------
 def save_manifest(
     PATH: Path,
     MANIFEST: dict[str, dict[str, Any]],
     LOG_FILE: Path | None = None,
-) -> None:
+) -> bool:
     log_state_debug(
         LOG_FILE,
         "Manifest save requested: "
         f"path={PATH.as_posix()}, "
         f"entries={len(MANIFEST)}.",
     )
-    write_json(PATH, MANIFEST, LOG_FILE)
+    return write_json(PATH, MANIFEST, LOG_FILE)

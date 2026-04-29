@@ -6,6 +6,11 @@
 - Health checks use `parallel` from the microcheck toolbox image.
 - A background heartbeat updater refreshes `/logs/pyiclodoc-drive-heartbeat.txt` every 30
   seconds in both recurring and one-shot execution paths.
+- `HEALTHCHECK_MAX_AGE_SECONDS` sets the shared heartbeat liveness budget used
+  by both the worker self-check and the container healthcheck.
+- If heartbeat writes fail from startup and no successful heartbeat is ever
+  recorded within that budget, the worker exits non-zero instead of waiting
+  indefinitely for Docker to notice later.
 - Telegram commands are ignored unless they come from `H_TGM_CHAT_ID`.
 - If `H_TGM_CHAT_ID` is unset, Telegram command polling stays disabled.
 - On startup, the worker captures one Telegram update cursor snapshot and

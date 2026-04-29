@@ -48,6 +48,7 @@ class AppConfig:
     session_dir: Path
     icloudpd_compat_dir: Path
     safety_net_sample_size: int
+    heartbeat_max_age_seconds: int = 65
     config_parse_errors: tuple[str, ...] = field(default_factory=tuple)
 
     # --------------------------------------------------------------------------
@@ -197,6 +198,10 @@ def load_config() -> AppConfig:
         "REAUTH_INTERVAL_DAYS",
         30,
     )
+    HEARTBEAT_MAX_AGE_SECONDS, HEARTBEAT_MAX_AGE_ERROR = parse_env_int(
+        "HEALTHCHECK_MAX_AGE_SECONDS",
+        65,
+    )
     SAFETY_NET_SAMPLE_SIZE, SAFETY_NET_SAMPLE_ERROR = parse_env_int(
         "SAFETY_NET_SAMPLE_SIZE",
         200,
@@ -208,6 +213,7 @@ def load_config() -> AppConfig:
         SYNC_WORKERS_ERROR,
         DOWNLOAD_CHUNK_ERROR,
         REAUTH_INTERVAL_ERROR,
+        HEARTBEAT_MAX_AGE_ERROR,
         SAFETY_NET_SAMPLE_ERROR,
     ):
         if ERROR is not None:
@@ -231,6 +237,7 @@ def load_config() -> AppConfig:
         sync_workers=SYNC_WORKERS,
         download_chunk_mib=DOWNLOAD_CHUNK_MIB,
         reauth_interval_days=REAUTH_INTERVAL_DAYS,
+        heartbeat_max_age_seconds=HEARTBEAT_MAX_AGE_SECONDS,
         output_dir=OUTPUT_DIR,
         config_dir=CONFIG_DIR,
         logs_dir=LOGS_DIR,

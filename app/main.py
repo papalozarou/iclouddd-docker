@@ -33,19 +33,20 @@ from app.telegram_messages import (
 )
 
 HEARTBEAT_TOUCH_INTERVAL_SECONDS = 30
-HEARTBEAT_STALE_SECONDS = 65
 
 
 # ------------------------------------------------------------------------------
 # This data class stores mutable heartbeat telemetry for runtime liveness.
 #
-# 1. "last_success_epoch" stores the last successful touch epoch.
-# 2. "last_attempt_epoch" stores the last attempted touch epoch.
-# 3. "last_failure_detail" stores the last write failure detail.
-# 4. "loop_exit_reason" stores why the heartbeat thread stopped.
+# 1. "first_attempt_epoch" stores the first attempted touch epoch.
+# 2. "last_success_epoch" stores the last successful touch epoch.
+# 3. "last_attempt_epoch" stores the last attempted touch epoch.
+# 4. "last_failure_detail" stores the last write failure detail.
+# 5. "loop_exit_reason" stores why the heartbeat thread stopped.
 # ------------------------------------------------------------------------------
 @dataclass
 class HeartbeatTelemetry:
+    first_attempt_epoch: float = 0.0
     last_success_epoch: float = 0.0
     last_attempt_epoch: float = 0.0
     last_failure_detail: str = ""
@@ -57,6 +58,8 @@ class HeartbeatTelemetry:
 #
 # 1. "stop_event" is the signal watched by the updater loop.
 # 2. "thread" is the background writer that touches the heartbeat file.
+# 3. "telemetry" stores live heartbeat status for runtime checks.
+# 4. "max_age_seconds" is the shared worker and healthcheck liveness budget.
 #
 # N.B.
 # The worker must join this thread during shutdown. Setting the stop event alone
@@ -68,6 +71,7 @@ class HeartbeatUpdater:
     stop_event: threading.Event
     thread: threading.Thread
     telemetry: HeartbeatTelemetry
+    max_age_seconds: int
 
     # --------------------------------------------------------------------------
     # This method stops the heartbeat loop and waits for the writer to exit.
@@ -100,10 +104,17 @@ class HeartbeatUpdater:
 
         LAST_SUCCESS_EPOCH = self.telemetry.last_success_epoch
         if LAST_SUCCESS_EPOCH <= 0:
+            if self.is_startup_failure_ready(NOW_EPOCH):
+                return (
+                    "heartbeat_startup_failed: "
+                    f"age_seconds={self.first_failure_age_seconds(NOW_EPOCH)}, "
+                    f"detail={self.telemetry.last_failure_detail}."
+                )
+
             return None
 
         STALE_SECONDS = int(max(NOW_EPOCH - LAST_SUCCESS_EPOCH, 0))
-        if STALE_SECONDS <= HEARTBEAT_STALE_SECONDS:
+        if STALE_SECONDS <= self.max_age_seconds:
             return None
 
         FAILURE_DETAIL = self.telemetry.last_failure_detail or "heartbeat_not_advanced"
@@ -120,6 +131,33 @@ class HeartbeatUpdater:
     # --------------------------------------------------------------------------
     def loop_stopped_due_to_shutdown(self) -> bool:
         return self.telemetry.loop_exit_reason == "stop_requested"
+
+    # --------------------------------------------------------------------------
+    # This method reports whether failed startup heartbeats have aged out.
+    #
+    # 1. "NOW_EPOCH" is current wall-clock epoch seconds.
+    #
+    # Returns: True when startup failures must now trip runtime liveness.
+    # --------------------------------------------------------------------------
+    def is_startup_failure_ready(self, NOW_EPOCH: float) -> bool:
+        if not self.telemetry.last_failure_detail:
+            return False
+
+        FIRST_ATTEMPT_EPOCH = self.telemetry.first_attempt_epoch
+        if FIRST_ATTEMPT_EPOCH <= 0:
+            return False
+
+        return self.first_failure_age_seconds(NOW_EPOCH) > self.max_age_seconds
+
+    # --------------------------------------------------------------------------
+    # This method returns startup failure age from the first heartbeat attempt.
+    #
+    # 1. "NOW_EPOCH" is current wall-clock epoch seconds.
+    #
+    # Returns: Non-negative whole seconds since first heartbeat attempt.
+    # --------------------------------------------------------------------------
+    def first_failure_age_seconds(self, NOW_EPOCH: float) -> int:
+        return int(max(NOW_EPOCH - self.telemetry.first_attempt_epoch, 0))
 
 
 # ------------------------------------------------------------------------------
@@ -144,10 +182,15 @@ def update_heartbeat(PATH: Path) -> tuple[bool, str]:
 #
 # 1. "PATH" is the heartbeat file path.
 # 2. "LOG_FILE" is the worker log destination used for failure lines.
+# 3. "MAX_AGE_SECONDS" is the shared worker and healthcheck liveness budget.
 #
 # Returns: Heartbeat updater controller used for clean process shutdown.
 # ------------------------------------------------------------------------------
-def start_heartbeat_updater(PATH: Path, LOG_FILE: Path) -> HeartbeatUpdater:
+def start_heartbeat_updater(
+    PATH: Path,
+    LOG_FILE: Path,
+    MAX_AGE_SECONDS: int,
+) -> HeartbeatUpdater:
     STOP_EVENT = threading.Event()
     TELEMETRY = HeartbeatTelemetry()
 
@@ -160,6 +203,8 @@ def start_heartbeat_updater(PATH: Path, LOG_FILE: Path) -> HeartbeatUpdater:
         try:
             while True:
                 TELEMETRY.last_attempt_epoch = worker_runtime.time.time()
+                if TELEMETRY.first_attempt_epoch <= 0:
+                    TELEMETRY.first_attempt_epoch = TELEMETRY.last_attempt_epoch
                 IS_SUCCESS, FAILURE_DETAIL = update_heartbeat(PATH)
 
                 if IS_SUCCESS:
@@ -194,6 +239,7 @@ def start_heartbeat_updater(PATH: Path, LOG_FILE: Path) -> HeartbeatUpdater:
         stop_event=STOP_EVENT,
         thread=THREAD,
         telemetry=TELEMETRY,
+        max_age_seconds=MAX_AGE_SECONDS,
     )
 
 
@@ -596,7 +642,11 @@ def main() -> int:
 
             return 1
 
-        HEARTBEAT_UPDATER = start_heartbeat_updater(CONFIG.heartbeat_path, LOG_FILE)
+        HEARTBEAT_UPDATER = start_heartbeat_updater(
+            CONFIG.heartbeat_path,
+            LOG_FILE,
+            CONFIG.heartbeat_max_age_seconds,
+        )
         log_line(
             LOG_FILE,
             "debug",

@@ -191,6 +191,7 @@ class TestWorkerRuntime(unittest.TestCase):
             build_backup_skipped_reauth_pending_message_fn=lambda APPLE_ID_LABEL: (
                 f"reauth pending for {APPLE_ID_LABEL}"
             ),
+            check_runtime_liveness_fn=lambda: None,
             time_fn=lambda: 100,
             sleep_fn=SLEEP_FN,
         )
@@ -300,6 +301,52 @@ class TestWorkerRuntime(unittest.TestCase):
             any("One-shot auth wait completed after command:" in LINE for LINE in DEBUG_LINES)
         )
         self.assertFalse(any("123456" in LINE for LINE in DEBUG_LINES))
+
+# --------------------------------------------------------------------------
+# This test confirms one-shot auth wait aborts when runtime liveness fails.
+# --------------------------------------------------------------------------
+    def test_wait_for_one_shot_auth_aborts_on_runtime_liveness_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=Mock(return_value=([], None)),
+                HANDLE_COMMAND_FN=Mock(),
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=Mock(),
+            )
+            DEPS.check_runtime_liveness_fn = Mock(
+                return_value="heartbeat_stale: age_seconds=120, detail=touch_failed."
+            )
+
+            RESULT = run_worker_runtime(
+                RUNTIME_CONTEXT,
+                Mock(),
+                AUTH_STATE,
+                SimpleNamespace(
+                    **DEPS.__dict__,
+                    attempt_auth_fn=Mock(
+                        return_value=AuthAttemptResult(
+                            auth_state=AUTH_STATE,
+                            is_authenticated=False,
+                            reason_code="mfa_required",
+                            operator_detail="mfa",
+                        )
+                    ),
+                    build_one_shot_waiting_for_auth_message_fn=lambda *_: "wait",
+                ),
+            )
+
+        self.assertEqual(RESULT.exit_code, 5)
+        self.assertIn("runtime liveness failed", RESULT.stop_status)
+        ERROR_LINES = [
+            CALL.args[2]
+            for CALL in DEPS.log_line_fn.call_args_list
+            if CALL.args[1] == "error"
+        ]
+        self.assertTrue(
+            any("Runtime liveness failure detected:" in LINE for LINE in ERROR_LINES)
+        )
 
 # --------------------------------------------------------------------------
 # This test confirms startup cutover captures one live polling cursor from the

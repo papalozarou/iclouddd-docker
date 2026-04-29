@@ -33,6 +33,23 @@ from app.telegram_messages import (
 )
 
 HEARTBEAT_TOUCH_INTERVAL_SECONDS = 30
+HEARTBEAT_STALE_SECONDS = 65
+
+
+# ------------------------------------------------------------------------------
+# This data class stores mutable heartbeat telemetry for runtime liveness.
+#
+# 1. "last_success_epoch" stores the last successful touch epoch.
+# 2. "last_attempt_epoch" stores the last attempted touch epoch.
+# 3. "last_failure_detail" stores the last write failure detail.
+# 4. "loop_exit_reason" stores why the heartbeat thread stopped.
+# ------------------------------------------------------------------------------
+@dataclass
+class HeartbeatTelemetry:
+    last_success_epoch: float = 0.0
+    last_attempt_epoch: float = 0.0
+    last_failure_detail: str = ""
+    loop_exit_reason: str = ""
 
 
 # ------------------------------------------------------------------------------
@@ -50,6 +67,7 @@ HEARTBEAT_TOUCH_INTERVAL_SECONDS = 30
 class HeartbeatUpdater:
     stop_event: threading.Event
     thread: threading.Thread
+    telemetry: HeartbeatTelemetry
 
     # --------------------------------------------------------------------------
     # This method stops the heartbeat loop and waits for the writer to exit.
@@ -60,31 +78,78 @@ class HeartbeatUpdater:
         self.stop_event.set()
         self.thread.join()
 
+    # --------------------------------------------------------------------------
+    # This method returns heartbeat liveness failure detail when unhealthy.
+    #
+    # 1. "NOW_EPOCH" is current wall-clock epoch seconds.
+    #
+    # Returns: Redacted failure detail, otherwise None.
+    # --------------------------------------------------------------------------
+    def get_liveness_failure(self, NOW_EPOCH: float) -> str | None:
+        if not self.thread.is_alive():
+            if self.loop_stopped_due_to_shutdown():
+                return None
+
+            if self.telemetry.loop_exit_reason:
+                return (
+                    "heartbeat_thread_stopped: "
+                    f"reason={self.telemetry.loop_exit_reason}."
+                )
+
+            return "heartbeat_thread_stopped: reason=thread_not_alive."
+
+        LAST_SUCCESS_EPOCH = self.telemetry.last_success_epoch
+        if LAST_SUCCESS_EPOCH <= 0:
+            return None
+
+        STALE_SECONDS = int(max(NOW_EPOCH - LAST_SUCCESS_EPOCH, 0))
+        if STALE_SECONDS <= HEARTBEAT_STALE_SECONDS:
+            return None
+
+        FAILURE_DETAIL = self.telemetry.last_failure_detail or "heartbeat_not_advanced"
+        return (
+            "heartbeat_stale: "
+            f"age_seconds={STALE_SECONDS}, "
+            f"detail={FAILURE_DETAIL}."
+        )
+
+    # --------------------------------------------------------------------------
+    # This method reports whether the heartbeat loop stopped on shutdown.
+    #
+    # Returns: True when the stop reason is the expected shutdown path.
+    # --------------------------------------------------------------------------
+    def loop_stopped_due_to_shutdown(self) -> bool:
+        return self.telemetry.loop_exit_reason == "stop_requested"
+
 
 # ------------------------------------------------------------------------------
 # This function updates the healthcheck heartbeat file timestamp.
 #
 # 1. "PATH" is the heartbeat file path.
 #
-# Returns: None.
+# Returns: Tuple of success flag and redacted failure detail.
 # ------------------------------------------------------------------------------
-def update_heartbeat(PATH: Path) -> None:
+def update_heartbeat(PATH: Path) -> tuple[bool, str]:
     try:
         PATH.parent.mkdir(parents=True, exist_ok=True)
         PATH.touch()
-    except OSError:
-        return
+    except OSError as ERROR:
+        return False, f"{type(ERROR).__name__}: {ERROR}"
+
+    return True, ""
 
 
 # ------------------------------------------------------------------------------
 # This function starts a daemon heartbeat updater thread.
 #
 # 1. "PATH" is the heartbeat file path.
+# 2. "LOG_FILE" is the worker log destination used for failure lines.
 #
 # Returns: Heartbeat updater controller used for clean process shutdown.
 # ------------------------------------------------------------------------------
-def start_heartbeat_updater(PATH: Path) -> HeartbeatUpdater:
+def start_heartbeat_updater(PATH: Path, LOG_FILE: Path) -> HeartbeatUpdater:
     STOP_EVENT = threading.Event()
+    TELEMETRY = HeartbeatTelemetry()
 
     # --------------------------------------------------------------------------
     # This function writes heartbeat timestamps until shutdown is requested.
@@ -92,14 +157,44 @@ def start_heartbeat_updater(PATH: Path) -> HeartbeatUpdater:
     # Returns: None.
     # --------------------------------------------------------------------------
     def run_heartbeat_loop() -> None:
-        update_heartbeat(PATH)
+        try:
+            while True:
+                TELEMETRY.last_attempt_epoch = worker_runtime.time.time()
+                IS_SUCCESS, FAILURE_DETAIL = update_heartbeat(PATH)
 
-        while not STOP_EVENT.wait(HEARTBEAT_TOUCH_INTERVAL_SECONDS):
-            update_heartbeat(PATH)
+                if IS_SUCCESS:
+                    TELEMETRY.last_success_epoch = TELEMETRY.last_attempt_epoch
+                    TELEMETRY.last_failure_detail = ""
+                else:
+                    TELEMETRY.last_failure_detail = FAILURE_DETAIL
+                    log_line(
+                        LOG_FILE,
+                        "error",
+                        "Heartbeat update failed: "
+                        f"path={PATH.as_posix()}, "
+                        f"detail={FAILURE_DETAIL}.",
+                    )
+
+                if STOP_EVENT.wait(HEARTBEAT_TOUCH_INTERVAL_SECONDS):
+                    TELEMETRY.loop_exit_reason = "stop_requested"
+                    return
+        except Exception as ERROR:
+            TELEMETRY.loop_exit_reason = f"{type(ERROR).__name__}: {ERROR}"
+            log_line(
+                LOG_FILE,
+                "error",
+                "Heartbeat updater crashed: "
+                f"path={PATH.as_posix()}, "
+                f"detail={TELEMETRY.loop_exit_reason}.",
+            )
 
     THREAD = threading.Thread(target=run_heartbeat_loop, daemon=True)
     THREAD.start()
-    return HeartbeatUpdater(stop_event=STOP_EVENT, thread=THREAD)
+    return HeartbeatUpdater(
+        stop_event=STOP_EVENT,
+        thread=THREAD,
+        telemetry=TELEMETRY,
+    )
 
 
 # ------------------------------------------------------------------------------
@@ -501,7 +596,7 @@ def main() -> int:
 
             return 1
 
-        HEARTBEAT_UPDATER = start_heartbeat_updater(CONFIG.heartbeat_path)
+        HEARTBEAT_UPDATER = start_heartbeat_updater(CONFIG.heartbeat_path, LOG_FILE)
         log_line(
             LOG_FILE,
             "debug",
@@ -565,6 +660,11 @@ def main() -> int:
                 ),
                 build_backup_skipped_reauth_pending_message_fn=(
                     worker_runtime.build_backup_skipped_reauth_pending_message
+                ),
+                check_runtime_liveness_fn=(
+                    lambda: HEARTBEAT_UPDATER.get_liveness_failure(
+                        worker_runtime.time.time()
+                    )
                 ),
                 time_fn=worker_runtime.time.time,
                 sleep_fn=worker_runtime.time.sleep,

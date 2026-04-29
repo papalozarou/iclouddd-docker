@@ -22,6 +22,7 @@ from app.main import (
     enforce_safety_net,
     get_next_run_epoch,
     handle_command,
+    HeartbeatTelemetry,
     HeartbeatUpdater,
     notify,
     notify_container_stopped,
@@ -151,8 +152,10 @@ class TestMainRuntimeHelpers(unittest.TestCase):
     def test_update_heartbeat_creates_file(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             HEARTBEAT_PATH = Path(TMPDIR) / "logs" / "pyiclodoc-drive-heartbeat.txt"
-            update_heartbeat(HEARTBEAT_PATH)
+            IS_SUCCESS, FAILURE_DETAIL = update_heartbeat(HEARTBEAT_PATH)
             self.assertTrue(HEARTBEAT_PATH.exists())
+            self.assertTrue(IS_SUCCESS)
+            self.assertEqual(FAILURE_DETAIL, "")
 
 # --------------------------------------------------------------------------
 # This test confirms heartbeat updater starts a daemon thread and returns a
@@ -160,18 +163,20 @@ class TestMainRuntimeHelpers(unittest.TestCase):
 # --------------------------------------------------------------------------
     def test_start_heartbeat_updater_starts_daemon_thread(self) -> None:
         HEARTBEAT_PATH = Path("/tmp/pyiclodoc-drive-heartbeat.txt")
+        LOG_FILE = Path("/tmp/pyiclodoc-drive-worker.log")
 
         with patch("app.main.threading.Thread") as THREAD:
             THREAD_INSTANCE = Mock()
             THREAD.return_value = THREAD_INSTANCE
 
-            UPDATER = start_heartbeat_updater(HEARTBEAT_PATH)
+            UPDATER = start_heartbeat_updater(HEARTBEAT_PATH, LOG_FILE)
 
         THREAD.assert_called_once()
         self.assertEqual(THREAD.call_args.kwargs.get("daemon"), True)
         THREAD_INSTANCE.start.assert_called_once()
         self.assertFalse(UPDATER.stop_event.is_set())
         self.assertIs(UPDATER.thread, THREAD_INSTANCE)
+        self.assertIsInstance(UPDATER.telemetry, HeartbeatTelemetry)
 
 # --------------------------------------------------------------------------
 # This test confirms heartbeat updater shutdown sets the stop signal and waits
@@ -180,12 +185,54 @@ class TestMainRuntimeHelpers(unittest.TestCase):
     def test_heartbeat_updater_stop_joins_thread(self) -> None:
         STOP_EVENT = Mock()
         THREAD = Mock()
-        UPDATER = HeartbeatUpdater(stop_event=STOP_EVENT, thread=THREAD)
+        UPDATER = HeartbeatUpdater(
+            stop_event=STOP_EVENT,
+            thread=THREAD,
+            telemetry=HeartbeatTelemetry(),
+        )
 
         UPDATER.stop()
 
         STOP_EVENT.set.assert_called_once()
         THREAD.join.assert_called_once()
+
+# --------------------------------------------------------------------------
+# This test confirms heartbeat liveness ignores the expected shutdown path.
+# --------------------------------------------------------------------------
+    def test_heartbeat_updater_ignores_stop_requested_exit(self) -> None:
+        THREAD = Mock()
+        THREAD.is_alive.return_value = False
+        TELEMETRY = HeartbeatTelemetry(loop_exit_reason="stop_requested")
+        UPDATER = HeartbeatUpdater(
+            stop_event=Mock(),
+            thread=THREAD,
+            telemetry=TELEMETRY,
+        )
+
+        RESULT = UPDATER.get_liveness_failure(100)
+
+        self.assertIsNone(RESULT)
+
+# --------------------------------------------------------------------------
+# This test confirms heartbeat liveness reports stale heartbeat age.
+# --------------------------------------------------------------------------
+    def test_heartbeat_updater_reports_stale_heartbeat(self) -> None:
+        THREAD = Mock()
+        THREAD.is_alive.return_value = True
+        TELEMETRY = HeartbeatTelemetry(
+            last_success_epoch=10,
+            last_failure_detail="touch_failed",
+        )
+        UPDATER = HeartbeatUpdater(
+            stop_event=Mock(),
+            thread=THREAD,
+            telemetry=TELEMETRY,
+        )
+
+        RESULT = UPDATER.get_liveness_failure(100)
+
+        self.assertIn("heartbeat_stale", RESULT)
+        self.assertIn("touch_failed", RESULT)
 
 # --------------------------------------------------------------------------
 # This test confirms one-shot auth wait returns immediately when ready.
@@ -1479,6 +1526,8 @@ class TestMainEntrypoint(unittest.TestCase):
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = AppConfig(**(build_config_for_runtime(TMPDIR).__dict__ | {"schedule_mode": "daily"}))
             STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
+            HEARTBEAT_UPDATER = Mock()
+            HEARTBEAT_UPDATER.get_liveness_failure.return_value = None
 
             with patch("app.main.load_config", return_value=CONFIG):
                 with patch("app.main.configure_keyring"):
@@ -1496,28 +1545,32 @@ class TestMainEntrypoint(unittest.TestCase):
                                                 operator_detail="ok",
                                             ),
                                         ):
-                                            with patch("app.main.get_next_run_epoch", return_value=200):
-                                                with patch(
-                                                    "app.worker_runtime.time.time",
-                                                    side_effect=[100, 100, 100],
-                                                ):
+                                            with patch(
+                                                "app.main.start_heartbeat_updater",
+                                                return_value=HEARTBEAT_UPDATER,
+                                            ):
+                                                with patch("app.main.get_next_run_epoch", return_value=200):
                                                     with patch(
-                                                        "app.main.process_reauth_reminders",
-                                                        return_value=STATE,
+                                                        "app.worker_runtime.time.time",
+                                                        side_effect=[100, 100, 100],
                                                     ):
                                                         with patch(
-                                                            "app.main.poll_command_batch",
-                                                            return_value=SimpleNamespace(
-                                                                commands=[],
-                                                                next_update_offset=None,
-                                                            ),
+                                                            "app.main.process_reauth_reminders",
+                                                            return_value=STATE,
                                                         ):
                                                             with patch(
-                                                                "app.worker_runtime.time.sleep",
-                                                                side_effect=SystemExit,
+                                                                "app.main.poll_command_batch",
+                                                                return_value=SimpleNamespace(
+                                                                    commands=[],
+                                                                    next_update_offset=None,
+                                                                ),
                                                             ):
-                                                                with self.assertRaises(SystemExit):
-                                                                    __import__("app.main", fromlist=["main"]).main()
+                                                                with patch(
+                                                                    "app.worker_runtime.time.sleep",
+                                                                    side_effect=SystemExit,
+                                                                ):
+                                                                    with self.assertRaises(SystemExit):
+                                                                        __import__("app.main", fromlist=["main"]).main()
 
 # --------------------------------------------------------------------------
 # This test confirms due loop path skips when auth becomes incomplete.
@@ -1526,6 +1579,8 @@ class TestMainEntrypoint(unittest.TestCase):
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_runtime(TMPDIR)
             STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
+            HEARTBEAT_UPDATER = Mock()
+            HEARTBEAT_UPDATER.get_liveness_failure.return_value = None
 
             with patch("app.main.load_config", return_value=CONFIG):
                 with patch("app.main.configure_keyring"):
@@ -1543,99 +1598,20 @@ class TestMainEntrypoint(unittest.TestCase):
                                                 operator_detail="fail",
                                             ),
                                         ):
-                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
-                                                with patch("app.main.process_reauth_reminders", return_value=STATE):
-                                                    with patch(
-                                                        "app.main.poll_command_batch",
-                                                        return_value=SimpleNamespace(
-                                                            commands=[],
-                                                            next_update_offset=None,
-                                                        ),
-                                                    ):
-                                                        with patch("app.main.get_next_run_epoch", return_value=160):
-                                                            with patch(
-                                                                "app.worker_runtime.time.sleep",
-                                                                side_effect=SystemExit,
-                                                            ):
-                                                                with self.assertRaises(SystemExit):
-                                                                    __import__("app.main", fromlist=["main"]).main()
-
-# --------------------------------------------------------------------------
-# This test confirms due loop path skips when reauth is pending.
-# --------------------------------------------------------------------------
-    def test_main_loop_skips_when_reauth_pending(self) -> None:
-        with tempfile.TemporaryDirectory() as TMPDIR:
-            CONFIG = build_config_for_runtime(TMPDIR)
-            STATE = AuthState("1970-01-01T00:00:00+00:00", False, True, "prompt2")
-
-            with patch("app.main.load_config", return_value=CONFIG):
-                with patch("app.main.configure_keyring"):
-                    with patch("app.main.load_credentials", return_value=("", "")):
-                        with patch("app.main.validate_config", return_value=[]):
-                            with patch("app.main.save_credentials"):
-                                with patch("app.main.ICloudDriveClient", return_value=Mock()):
-                                    with patch("app.main.load_auth_state", return_value=STATE):
-                                        with patch(
-                                            "app.main.attempt_auth",
-                                            return_value=AuthAttemptResult(
-                                                auth_state=STATE,
-                                                is_authenticated=True,
-                                                reason_code="authenticated",
-                                                operator_detail="ok",
-                                            ),
-                                        ):
-                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
-                                                with patch("app.main.process_reauth_reminders", return_value=STATE):
-                                                    with patch(
-                                                        "app.main.poll_command_batch",
-                                                        return_value=SimpleNamespace(
-                                                            commands=[],
-                                                            next_update_offset=None,
-                                                        ),
-                                                    ):
-                                                        with patch("app.main.get_next_run_epoch", return_value=160):
-                                                            with patch(
-                                                                "app.worker_runtime.time.sleep",
-                                                                side_effect=SystemExit,
-                                                            ):
-                                                                with self.assertRaises(SystemExit):
-                                                                    __import__("app.main", fromlist=["main"]).main()
-
-# --------------------------------------------------------------------------
-# This test confirms due loop path sleeps when safety-net blocks.
-# --------------------------------------------------------------------------
-    def test_main_loop_sleeps_when_safety_net_blocks(self) -> None:
-        with tempfile.TemporaryDirectory() as TMPDIR:
-            CONFIG = build_config_for_runtime(TMPDIR)
-            STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
-
-            with patch("app.main.load_config", return_value=CONFIG):
-                with patch("app.main.configure_keyring"):
-                    with patch("app.main.load_credentials", return_value=("", "")):
-                        with patch("app.main.validate_config", return_value=[]):
-                            with patch("app.main.save_credentials"):
-                                with patch("app.main.ICloudDriveClient", return_value=Mock()):
-                                    with patch("app.main.load_auth_state", return_value=STATE):
-                                        with patch(
-                                            "app.main.attempt_auth",
-                                            return_value=AuthAttemptResult(
-                                                auth_state=STATE,
-                                                is_authenticated=True,
-                                                reason_code="authenticated",
-                                                operator_detail="ok",
-                                            ),
-                                        ):
-                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
-                                                with patch("app.main.process_reauth_reminders", return_value=STATE):
-                                                    with patch(
-                                                        "app.main.poll_command_batch",
-                                                        return_value=SimpleNamespace(
-                                                            commands=[],
-                                                            next_update_offset=None,
-                                                        ),
-                                                    ):
-                                                        with patch("app.main.get_next_run_epoch", return_value=160):
-                                                            with patch("app.main.enforce_safety_net", return_value=False):
+                                            with patch(
+                                                "app.main.start_heartbeat_updater",
+                                                return_value=HEARTBEAT_UPDATER,
+                                            ):
+                                                with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
+                                                    with patch("app.main.process_reauth_reminders", return_value=STATE):
+                                                        with patch(
+                                                            "app.main.poll_command_batch",
+                                                            return_value=SimpleNamespace(
+                                                                commands=[],
+                                                                next_update_offset=None,
+                                                            ),
+                                                        ):
+                                                            with patch("app.main.get_next_run_epoch", return_value=160):
                                                                 with patch(
                                                                     "app.worker_runtime.time.sleep",
                                                                     side_effect=SystemExit,
@@ -1644,12 +1620,14 @@ class TestMainEntrypoint(unittest.TestCase):
                                                                         __import__("app.main", fromlist=["main"]).main()
 
 # --------------------------------------------------------------------------
-# This test confirms due loop path runs backup when all checks pass.
+# This test confirms due loop path skips when reauth is pending.
 # --------------------------------------------------------------------------
-    def test_main_loop_runs_backup_when_due_and_allowed(self) -> None:
+    def test_main_loop_skips_when_reauth_pending(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_runtime(TMPDIR)
-            STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
+            STATE = AuthState("1970-01-01T00:00:00+00:00", False, True, "prompt2")
+            HEARTBEAT_UPDATER = Mock()
+            HEARTBEAT_UPDATER.get_liveness_failure.return_value = None
 
             with patch("app.main.load_config", return_value=CONFIG):
                 with patch("app.main.configure_keyring"):
@@ -1667,24 +1645,123 @@ class TestMainEntrypoint(unittest.TestCase):
                                                 operator_detail="ok",
                                             ),
                                         ):
-                                            with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
-                                                with patch("app.main.process_reauth_reminders", return_value=STATE):
-                                                    with patch(
-                                                        "app.main.poll_command_batch",
-                                                        return_value=SimpleNamespace(
-                                                            commands=[],
-                                                            next_update_offset=None,
-                                                        ),
-                                                    ):
-                                                        with patch("app.main.get_next_run_epoch", return_value=160):
-                                                            with patch("app.main.enforce_safety_net", return_value=True):
-                                                                with patch("app.main.run_backup") as RUN_BACKUP:
+                                            with patch(
+                                                "app.main.start_heartbeat_updater",
+                                                return_value=HEARTBEAT_UPDATER,
+                                            ):
+                                                with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
+                                                    with patch("app.main.process_reauth_reminders", return_value=STATE):
+                                                        with patch(
+                                                            "app.main.poll_command_batch",
+                                                            return_value=SimpleNamespace(
+                                                                commands=[],
+                                                                next_update_offset=None,
+                                                            ),
+                                                        ):
+                                                            with patch("app.main.get_next_run_epoch", return_value=160):
+                                                                with patch(
+                                                                    "app.worker_runtime.time.sleep",
+                                                                    side_effect=SystemExit,
+                                                                ):
+                                                                    with self.assertRaises(SystemExit):
+                                                                        __import__("app.main", fromlist=["main"]).main()
+
+# --------------------------------------------------------------------------
+# This test confirms due loop path sleeps when safety-net blocks.
+# --------------------------------------------------------------------------
+    def test_main_loop_sleeps_when_safety_net_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_runtime(TMPDIR)
+            STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
+            HEARTBEAT_UPDATER = Mock()
+            HEARTBEAT_UPDATER.get_liveness_failure.return_value = None
+
+            with patch("app.main.load_config", return_value=CONFIG):
+                with patch("app.main.configure_keyring"):
+                    with patch("app.main.load_credentials", return_value=("", "")):
+                        with patch("app.main.validate_config", return_value=[]):
+                            with patch("app.main.save_credentials"):
+                                with patch("app.main.ICloudDriveClient", return_value=Mock()):
+                                    with patch("app.main.load_auth_state", return_value=STATE):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            return_value=AuthAttemptResult(
+                                                auth_state=STATE,
+                                                is_authenticated=True,
+                                                reason_code="authenticated",
+                                                operator_detail="ok",
+                                            ),
+                                        ):
+                                            with patch(
+                                                "app.main.start_heartbeat_updater",
+                                                return_value=HEARTBEAT_UPDATER,
+                                            ):
+                                                with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
+                                                    with patch("app.main.process_reauth_reminders", return_value=STATE):
+                                                        with patch(
+                                                            "app.main.poll_command_batch",
+                                                            return_value=SimpleNamespace(
+                                                                commands=[],
+                                                                next_update_offset=None,
+                                                            ),
+                                                        ):
+                                                            with patch("app.main.get_next_run_epoch", return_value=160):
+                                                                with patch("app.main.enforce_safety_net", return_value=False):
                                                                     with patch(
                                                                         "app.worker_runtime.time.sleep",
                                                                         side_effect=SystemExit,
                                                                     ):
                                                                         with self.assertRaises(SystemExit):
                                                                             __import__("app.main", fromlist=["main"]).main()
+
+# --------------------------------------------------------------------------
+# This test confirms due loop path runs backup when all checks pass.
+# --------------------------------------------------------------------------
+    def test_main_loop_runs_backup_when_due_and_allowed(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_runtime(TMPDIR)
+            STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
+            HEARTBEAT_UPDATER = Mock()
+            HEARTBEAT_UPDATER.get_liveness_failure.return_value = None
+
+            with patch("app.main.load_config", return_value=CONFIG):
+                with patch("app.main.configure_keyring"):
+                    with patch("app.main.load_credentials", return_value=("", "")):
+                        with patch("app.main.validate_config", return_value=[]):
+                            with patch("app.main.save_credentials"):
+                                with patch("app.main.ICloudDriveClient", return_value=Mock()):
+                                    with patch("app.main.load_auth_state", return_value=STATE):
+                                        with patch(
+                                            "app.main.attempt_auth",
+                                            return_value=AuthAttemptResult(
+                                                auth_state=STATE,
+                                                is_authenticated=True,
+                                                reason_code="authenticated",
+                                                operator_detail="ok",
+                                            ),
+                                        ):
+                                            with patch(
+                                                "app.main.start_heartbeat_updater",
+                                                return_value=HEARTBEAT_UPDATER,
+                                            ):
+                                                with patch("app.worker_runtime.time.time", side_effect=[100, 100, 100]):
+                                                    with patch("app.main.process_reauth_reminders", return_value=STATE):
+                                                        with patch(
+                                                            "app.main.poll_command_batch",
+                                                            return_value=SimpleNamespace(
+                                                                commands=[],
+                                                                next_update_offset=None,
+                                                            ),
+                                                        ):
+                                                            with patch("app.main.get_next_run_epoch", return_value=160):
+                                                                with patch("app.main.enforce_safety_net", return_value=True):
+                                                                    with patch("app.main.run_backup") as RUN_BACKUP:
+                                                                        with patch(
+                                                                            "app.worker_runtime.time.sleep",
+                                                                            side_effect=SystemExit,
+                                                                        ):
+                                                                            with self.assertRaises(SystemExit):
+                                                                                __import__("app.main", fromlist=["main"]).main()
 
             RUN_BACKUP.assert_called_once()
 

@@ -64,6 +64,7 @@ class WorkerRuntimeDeps:
     build_one_shot_waiting_for_auth_message_fn: Callable[..., str]
     build_backup_skipped_auth_incomplete_message_fn: Callable[..., str]
     build_backup_skipped_reauth_pending_message_fn: Callable[..., str]
+    check_runtime_liveness_fn: Callable[[], str | None] | None = None
     time_fn: Callable[[], float] = time.time
     sleep_fn: Callable[[float], None] = time.sleep
 
@@ -114,6 +115,15 @@ class CommandBatchReadResult:
 
 
 # ------------------------------------------------------------------------------
+# This exception aborts worker orchestration with an explicit runtime result.
+# ------------------------------------------------------------------------------
+class WorkerRuntimeAbort(RuntimeError):
+    def __init__(self, RESULT: WorkerRunResult):
+        super().__init__(RESULT.stop_status)
+        self.result = RESULT
+
+
+# ------------------------------------------------------------------------------
 # This function writes a debug line through the injected worker logger.
 #
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
@@ -132,6 +142,47 @@ def log_debug(
         return
 
     LOG_LINE_FN(RUNTIME_CONTEXT.log_file, "debug", MESSAGE)
+
+
+# ------------------------------------------------------------------------------
+# This function checks heartbeat and runtime liveness before loop work.
+#
+# 1. "RUNTIME_CONTEXT" is shared worker runtime state.
+# 2. "DEPS" groups runtime callbacks used by worker orchestration.
+#
+# Returns: None.
+#
+# N.B.
+# This turns container health degradation into an explicit worker failure with
+# operator-visible logs and restart-friendly exit behaviour.
+# ------------------------------------------------------------------------------
+def check_runtime_liveness(
+    RUNTIME_CONTEXT: WorkerRuntimeContext,
+    DEPS: WorkerRuntimeDeps,
+) -> None:
+    CHECK_RUNTIME_LIVENESS_FN = getattr(DEPS, "check_runtime_liveness_fn", None)
+    if CHECK_RUNTIME_LIVENESS_FN is None:
+        return
+
+    FAILURE_DETAIL = CHECK_RUNTIME_LIVENESS_FN()
+    if FAILURE_DETAIL is None:
+        return
+
+    DEPS.log_line_fn(
+        RUNTIME_CONTEXT.log_file,
+        "error",
+        "Runtime liveness failure detected: "
+        f"{FAILURE_DETAIL}",
+    )
+    raise WorkerRuntimeAbort(
+        WorkerRunResult(
+            exit_code=5,
+            stop_status=(
+                "Worker stopped because runtime liveness failed: "
+                f"{FAILURE_DETAIL}"
+            ),
+        )
+    )
 
 
 # ------------------------------------------------------------------------------
@@ -204,6 +255,7 @@ def read_command_batch(
     POLLING_STATE: CommandPollingState,
     DEPS: WorkerRuntimeDeps,
 ) -> CommandBatchReadResult:
+    POLL_STARTED_EPOCH = time.monotonic()
     log_debug(
         RUNTIME_CONTEXT,
         DEPS,
@@ -216,12 +268,14 @@ def read_command_batch(
         RUNTIME_CONTEXT.config.container_username,
         POLLING_STATE.next_update_offset,
     )
+    POLL_DURATION_SECONDS = max(time.monotonic() - POLL_STARTED_EPOCH, 0.0)
     log_debug(
         RUNTIME_CONTEXT,
         DEPS,
         "Telegram command poll result: "
         f"command_count={len(BATCH.commands)}, "
-        f"next_update_offset={BATCH.next_update_offset}.",
+        f"next_update_offset={BATCH.next_update_offset}, "
+        f"elapsed_seconds={POLL_DURATION_SECONDS:.1f}.",
     )
     return CommandBatchReadResult(
         commands=[(EVENT.command, EVENT.args) for EVENT in BATCH.commands],
@@ -261,6 +315,7 @@ def wait_for_one_shot_auth(
     )
 
     while True:
+        check_runtime_liveness(RUNTIME_CONTEXT, DEPS)
         if (
             AUTH_RUNTIME_STATE.is_authenticated
             and not AUTH_RUNTIME_STATE.auth_state.reauth_pending
@@ -344,6 +399,7 @@ def wait_for_one_shot_auth(
                 return AUTH_RUNTIME_STATE
 
         DEPS.sleep_fn(RUN_ONCE_AUTH_POLL_SECONDS)
+        check_runtime_liveness(RUNTIME_CONTEXT, DEPS)
 
 
 # ------------------------------------------------------------------------------
@@ -519,6 +575,7 @@ def run_scheduled_worker_loop(
     )
 
     while True:
+        check_runtime_liveness(RUNTIME_CONTEXT, DEPS)
         AUTH_RUNTIME_STATE = WorkerAuthState(
             auth_state=DEPS.process_reauth_reminders_fn(
                 AUTH_RUNTIME_STATE.auth_state,
@@ -591,6 +648,7 @@ def run_scheduled_worker_loop(
                 "Scheduled loop sleeping: reason=no_due_backup, seconds=5.",
             )
             DEPS.sleep_fn(5)
+            check_runtime_liveness(RUNTIME_CONTEXT, DEPS)
             continue
 
         NEXT_RUN_EPOCH = DEPS.get_next_run_epoch_fn(
@@ -619,6 +677,7 @@ def run_scheduled_worker_loop(
             )
             BACKUP_REQUESTED = False
             DEPS.sleep_fn(5)
+            check_runtime_liveness(RUNTIME_CONTEXT, DEPS)
             continue
 
         if AUTH_RUNTIME_STATE.auth_state.reauth_pending:
@@ -637,6 +696,7 @@ def run_scheduled_worker_loop(
             )
             BACKUP_REQUESTED = False
             DEPS.sleep_fn(5)
+            check_runtime_liveness(RUNTIME_CONTEXT, DEPS)
             continue
 
         if not DEPS.enforce_safety_net_fn(
@@ -652,6 +712,7 @@ def run_scheduled_worker_loop(
             )
             BACKUP_REQUESTED = False
             DEPS.sleep_fn(30)
+            check_runtime_liveness(RUNTIME_CONTEXT, DEPS)
             continue
 
         BACKUP_TRIGGER = "manual" if BACKUP_REQUESTED else "scheduled"
@@ -669,6 +730,7 @@ def run_scheduled_worker_loop(
         )
         BACKUP_REQUESTED = False
         DEPS.sleep_fn(5)
+        check_runtime_liveness(RUNTIME_CONTEXT, DEPS)
 
 
 # ------------------------------------------------------------------------------
@@ -687,51 +749,54 @@ def run_worker_runtime(
     AUTH_STATE: AuthState,
     DEPS: WorkerRuntimeDeps,
 ) -> WorkerRunResult:
-    POLLING_STATE = capture_startup_command_polling_state(
-        RUNTIME_CONTEXT,
-        DEPS,
-    )
-    log_debug(
-        RUNTIME_CONTEXT,
-        DEPS,
-        "Starting startup authentication attempt with Apple.",
-    )
-    AUTH_RESULT = DEPS.attempt_auth_fn(
-        CLIENT,
-        AUTH_STATE,
-        RUNTIME_CONTEXT.config.auth_state_path,
-        RUNTIME_CONTEXT.telegram,
-        RUNTIME_CONTEXT.config.container_username,
-        RUNTIME_CONTEXT.config.icloud_email,
-        "",
-    )
-    log_startup_auth_state(
-        RUNTIME_CONTEXT,
-        AUTH_RESULT,
-        DEPS,
-    )
-    AUTH_RUNTIME_STATE = WorkerAuthState(
-        auth_state=AUTH_RESULT.auth_state,
-        is_authenticated=AUTH_RESULT.is_authenticated,
-    )
+    try:
+        POLLING_STATE = capture_startup_command_polling_state(
+            RUNTIME_CONTEXT,
+            DEPS,
+        )
+        log_debug(
+            RUNTIME_CONTEXT,
+            DEPS,
+            "Starting startup authentication attempt with Apple.",
+        )
+        AUTH_RESULT = DEPS.attempt_auth_fn(
+            CLIENT,
+            AUTH_STATE,
+            RUNTIME_CONTEXT.config.auth_state_path,
+            RUNTIME_CONTEXT.telegram,
+            RUNTIME_CONTEXT.config.container_username,
+            RUNTIME_CONTEXT.config.icloud_email,
+            "",
+        )
+        log_startup_auth_state(
+            RUNTIME_CONTEXT,
+            AUTH_RESULT,
+            DEPS,
+        )
+        AUTH_RUNTIME_STATE = WorkerAuthState(
+            auth_state=AUTH_RESULT.auth_state,
+            is_authenticated=AUTH_RESULT.is_authenticated,
+        )
 
-    if RUNTIME_CONTEXT.config.run_once:
-        return run_one_shot_worker(
+        if RUNTIME_CONTEXT.config.run_once:
+            return run_one_shot_worker(
+                RUNTIME_CONTEXT,
+                CLIENT,
+                AUTH_RUNTIME_STATE,
+                POLLING_STATE,
+                DEPS,
+            )
+
+        run_scheduled_worker_loop(
             RUNTIME_CONTEXT,
             CLIENT,
             AUTH_RUNTIME_STATE,
             POLLING_STATE,
             DEPS,
         )
-
-    run_scheduled_worker_loop(
-        RUNTIME_CONTEXT,
-        CLIENT,
-        AUTH_RUNTIME_STATE,
-        POLLING_STATE,
-        DEPS,
-    )
-    return WorkerRunResult(
-        exit_code=0,
-        stop_status="Worker process exited.",
-    )
+        return WorkerRunResult(
+            exit_code=0,
+            stop_status="Worker process exited.",
+        )
+    except WorkerRuntimeAbort as ERROR:
+        return ERROR.result

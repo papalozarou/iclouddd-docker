@@ -88,6 +88,52 @@ class CommandRuntimeDeps:
 
 
 # ------------------------------------------------------------------------------
+# This function writes a command debug line when a logger is available.
+#
+# 1. "DEPS" groups runtime callbacks used by command handling.
+# 2. "MESSAGE" is the already-redacted debug detail to write.
+#
+# Returns: None.
+# ------------------------------------------------------------------------------
+def log_command_debug(DEPS: CommandRuntimeDeps, MESSAGE: str) -> None:
+    if DEPS.log_line_fn is None or DEPS.log_file_path is None:
+        return
+
+    DEPS.log_line_fn(DEPS.log_file_path, "debug", MESSAGE)
+
+
+# ------------------------------------------------------------------------------
+# This function writes the auth command result at info and debug levels.
+#
+# 1. "DEPS" groups runtime callbacks used by command handling.
+# 2. "AUTH_RESULT" is the completed authentication attempt result.
+#
+# Returns: None.
+# ------------------------------------------------------------------------------
+def log_auth_command_result(
+    DEPS: CommandRuntimeDeps,
+    AUTH_RESULT: AuthAttemptResult,
+) -> None:
+    if DEPS.log_line_fn is None or DEPS.log_file_path is None:
+        return
+
+    DEPS.log_line_fn(
+        DEPS.log_file_path,
+        "info",
+        f"Auth command result: {AUTH_RESULT.operator_detail}",
+    )
+    DEPS.log_line_fn(
+        DEPS.log_file_path,
+        "debug",
+        "Auth command state: "
+        f"reason_code={AUTH_RESULT.reason_code}, "
+        f"is_authenticated={AUTH_RESULT.is_authenticated}, "
+        f"auth_pending={AUTH_RESULT.auth_state.auth_pending}, "
+        f"reauth_pending={AUTH_RESULT.auth_state.reauth_pending}.",
+    )
+
+
+# ------------------------------------------------------------------------------
 # This function polls Telegram and returns parsed command intents.
 #
 # 1. "TELEGRAM" is Telegram configuration.
@@ -106,7 +152,11 @@ def poll_command_batch(
     UPDATES = RUNTIME_DEPS.fetch_updates_fn(TELEGRAM, UPDATE_OFFSET)
 
     if not UPDATES:
-        NEXT_UPDATE_OFFSET = None if UPDATE_OFFSET is not None and UPDATE_OFFSET < 0 else UPDATE_OFFSET
+        NEXT_UPDATE_OFFSET = (
+            None
+            if UPDATE_OFFSET is not None and UPDATE_OFFSET < 0
+            else UPDATE_OFFSET
+        )
         return CommandPollBatch([], NEXT_UPDATE_OFFSET)
 
     COMMANDS: list[CommandEvent] = []
@@ -151,10 +201,20 @@ def handle_command(
     APPLE_ID_LABEL: str,
     DEPS: CommandRuntimeDeps,
 ) -> CommandHandleResult:
+    log_command_debug(
+        DEPS,
+        f"Telegram command handling started: command={COMMAND}, args_present={bool(ARGS)}.",
+    )
+
     if COMMAND == "backup":
         DEPS.notify_fn(
             TELEGRAM,
             build_backup_requested_message(APPLE_ID_LABEL),
+        )
+        log_command_debug(
+            DEPS,
+            "Telegram command handled: "
+            "command=backup, reason_code=backup_requested, backup_requested=True.",
         )
         return CommandHandleResult(
             auth_state=AUTH_STATE,
@@ -164,6 +224,10 @@ def handle_command(
         )
 
     if COMMAND == "auth" and not ARGS:
+        log_command_debug(
+            DEPS,
+            "Auth command received without code; requesting a fresh Apple challenge.",
+        )
         AUTH_RESULT = DEPS.attempt_auth_fn(
             CLIENT,
             AUTH_STATE,
@@ -173,13 +237,7 @@ def handle_command(
             CONFIG.icloud_email,
             "",
         )
-
-        if DEPS.log_line_fn is not None and DEPS.log_file_path is not None:
-            DEPS.log_line_fn(
-                DEPS.log_file_path,
-                "info",
-                f"Auth command result: {AUTH_RESULT.operator_detail}",
-            )
+        log_auth_command_result(DEPS, AUTH_RESULT)
 
         return CommandHandleResult(
             auth_state=AUTH_RESULT.auth_state,
@@ -190,6 +248,10 @@ def handle_command(
         )
 
     if COMMAND == "reauth" and not ARGS:
+        log_command_debug(
+            DEPS,
+            "Reauth command received without code; requesting a fresh Apple challenge.",
+        )
         REAUTH_STATE = replace(AUTH_STATE, reauth_pending=True)
         AUTH_RESULT = DEPS.attempt_auth_fn(
             CLIENT,
@@ -200,13 +262,7 @@ def handle_command(
             CONFIG.icloud_email,
             "",
         )
-
-        if DEPS.log_line_fn is not None and DEPS.log_file_path is not None:
-            DEPS.log_line_fn(
-                DEPS.log_file_path,
-                "info",
-                f"Auth command result: {AUTH_RESULT.operator_detail}",
-            )
+        log_auth_command_result(DEPS, AUTH_RESULT)
 
         return CommandHandleResult(
             auth_state=AUTH_RESULT.auth_state,
@@ -216,6 +272,10 @@ def handle_command(
             operator_detail=AUTH_RESULT.operator_detail,
         )
 
+    log_command_debug(
+        DEPS,
+        "Auth code command received; submitting redacted code to Apple.",
+    )
     AUTH_RESULT = DEPS.attempt_auth_fn(
         CLIENT,
         AUTH_STATE,
@@ -225,13 +285,7 @@ def handle_command(
         CONFIG.icloud_email,
         ARGS,
     )
-
-    if DEPS.log_line_fn is not None and DEPS.log_file_path is not None:
-        DEPS.log_line_fn(
-            DEPS.log_file_path,
-            "info",
-            f"Auth command result: {AUTH_RESULT.operator_detail}",
-        )
+    log_auth_command_result(DEPS, AUTH_RESULT)
 
     return CommandHandleResult(
         auth_state=AUTH_RESULT.auth_state,

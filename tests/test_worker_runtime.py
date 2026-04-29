@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# This test module verifies the worker-loop control flow in "app.worker_runtime".
+# This test module verifies worker-loop control flow in "app.worker_runtime".
 # ------------------------------------------------------------------------------
 
 from __future__ import annotations
@@ -277,6 +277,29 @@ class TestWorkerRuntime(unittest.TestCase):
         self.assertEqual(PROCESS_COMMANDS.call_count, 2)
         HANDLE_COMMAND.assert_called_once()
         DEPS.sleep_fn.assert_called_once()
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in DEPS.log_line_fn.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(
+            any("One-shot auth wait started:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertTrue(
+            any("One-shot auth poll:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertTrue(
+            any(
+                "Telegram command received during auth wait: "
+                "command=auth, args_present=True."
+                in LINE
+                for LINE in DEBUG_LINES
+            )
+        )
+        self.assertTrue(
+            any("One-shot auth wait completed after command:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertFalse(any("123456" in LINE for LINE in DEBUG_LINES))
 
 # --------------------------------------------------------------------------
 # This test confirms startup cutover captures one live polling cursor from the
@@ -791,6 +814,17 @@ class TestWorkerRuntime(unittest.TestCase):
         DEPS.notify_fn.assert_not_called()
         DEPS.enforce_safety_net_fn.assert_not_called()
         DEPS.run_backup_fn.assert_not_called()
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in DEPS.log_line_fn.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(
+            any("Scheduled loop decision:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertTrue(
+            any("Scheduled loop sleeping: reason=no_due_backup" in LINE for LINE in DEBUG_LINES)
+        )
 
 # --------------------------------------------------------------------------
 # This test confirms run_worker_runtime delegates to the scheduled loop and
@@ -837,7 +871,23 @@ class TestWorkerRuntime(unittest.TestCase):
         )
         ATTEMPT_AUTH.assert_called_once()
         RUN_LOOP.assert_called_once()
-        self.assertEqual(DEPS.log_line_fn.call_count, 2)
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in DEPS.log_line_fn.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(
+            any("Capturing startup command cursor:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertTrue(
+            any(
+                "Starting startup authentication attempt with Apple." in LINE
+                for LINE in DEBUG_LINES
+            )
+        )
+        self.assertTrue(
+            any("Auth state after startup attempt:" in LINE for LINE in DEBUG_LINES)
+        )
 
 # --------------------------------------------------------------------------
 # This test confirms runtime captures the startup cursor before auth and
@@ -880,7 +930,10 @@ class TestWorkerRuntime(unittest.TestCase):
             STARTUP_CUTOVER_OFFSET,
         )
         ATTEMPT_AUTH.assert_called_once()
-        self.assertEqual(RUN_LOOP.call_args.args[3], CommandPollingState(phase="live_polling", next_update_offset=9))
+        self.assertEqual(
+            RUN_LOOP.call_args.args[3],
+            CommandPollingState(phase="live_polling", next_update_offset=9),
+        )
 
 
 if __name__ == "__main__":

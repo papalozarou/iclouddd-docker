@@ -29,6 +29,12 @@
   privilege drop works.
 - Set `LOG_LEVEL=debug` in Compose `default-env` for verbose runtime
   diagnostics.
+- Debug logs include worker decisions that are hidden at `info`, including
+  startup command cursor capture, auth attempts, one-shot auth polling,
+  Telegram command handling, schedule due checks, manual backup requests,
+  auth skip reasons, safety-net skips, and selected backup triggers.
+- Debug logs show whether a Telegram command had arguments, but never log MFA
+  codes, passwords, bot tokens, or secret file contents.
 - Backup debug summaries include transfer errors, delete errors, and the
   combined total so debug output matches the completion summary.
 - At `LOG_LEVEL=info`, worker logs include stage boundary markers for

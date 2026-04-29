@@ -1000,7 +1000,16 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             ATTEMPT.assert_called_once()
             self.assertEqual(ATTEMPT.call_args[0][1], AUTH_STATE)
             self.assertEqual(ATTEMPT.call_args[0][6], "")
-            LOG.assert_called_once()
+            LOG_MESSAGES = [CALL.args[2] for CALL in LOG.call_args_list]
+            self.assertTrue(
+                any("command=auth, args_present=False" in MESSAGE for MESSAGE in LOG_MESSAGES)
+            )
+            self.assertTrue(
+                any("requesting a fresh Apple challenge" in MESSAGE for MESSAGE in LOG_MESSAGES)
+            )
+            self.assertTrue(
+                any("reason_code=mfa_required" in MESSAGE for MESSAGE in LOG_MESSAGES)
+            )
 
 # --------------------------------------------------------------------------
 # This test confirms handle_command reauth prompt path starts a fresh
@@ -1046,7 +1055,16 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             ATTEMPT.assert_called_once()
             self.assertTrue(ATTEMPT.call_args[0][1].reauth_pending)
             self.assertEqual(ATTEMPT.call_args[0][6], "")
-            LOG.assert_called_once()
+            LOG_MESSAGES = [CALL.args[2] for CALL in LOG.call_args_list]
+            self.assertTrue(
+                any("command=reauth, args_present=False" in MESSAGE for MESSAGE in LOG_MESSAGES)
+            )
+            self.assertTrue(
+                any("requesting a fresh Apple challenge" in MESSAGE for MESSAGE in LOG_MESSAGES)
+            )
+            self.assertTrue(
+                any("reauth_pending=True" in MESSAGE for MESSAGE in LOG_MESSAGES)
+            )
 
 # --------------------------------------------------------------------------
 # This test confirms handle_command auth flow delegates to attempt_auth.
@@ -1079,7 +1097,14 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                     )
 
             ATTEMPT.assert_called_once()
-            LOG.assert_called_once()
+            LOG_MESSAGES = [CALL.args[2] for CALL in LOG.call_args_list]
+            self.assertTrue(
+                any("command=auth, args_present=True" in MESSAGE for MESSAGE in LOG_MESSAGES)
+            )
+            self.assertTrue(
+                any("submitting redacted code to Apple" in MESSAGE for MESSAGE in LOG_MESSAGES)
+            )
+            self.assertFalse(any("123456" in MESSAGE for MESSAGE in LOG_MESSAGES))
             self.assertEqual(RESULT.auth_state, EXPECTED_STATE)
             self.assertTrue(RESULT.is_authenticated)
             self.assertFalse(RESULT.backup_requested)

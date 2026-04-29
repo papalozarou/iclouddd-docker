@@ -114,6 +114,42 @@ class CommandBatchReadResult:
 
 
 # ------------------------------------------------------------------------------
+# This function writes a debug line through the injected worker logger.
+#
+# 1. "RUNTIME_CONTEXT" is shared worker runtime state.
+# 2. "DEPS" groups runtime callbacks used by worker orchestration.
+# 3. "MESSAGE" is the already-redacted debug detail to write.
+#
+# Returns: None.
+# ------------------------------------------------------------------------------
+def log_debug(
+    RUNTIME_CONTEXT: WorkerRuntimeContext,
+    DEPS: WorkerRuntimeDeps,
+    MESSAGE: str,
+) -> None:
+    LOG_LINE_FN = getattr(DEPS, "log_line_fn", None)
+    if LOG_LINE_FN is None:
+        return
+
+    LOG_LINE_FN(RUNTIME_CONTEXT.log_file, "debug", MESSAGE)
+
+
+# ------------------------------------------------------------------------------
+# This function formats the current auth state for debug diagnostics.
+#
+# 1. "AUTH_RUNTIME_STATE" is current worker auth state snapshot.
+#
+# Returns: Redacted auth state summary.
+# ------------------------------------------------------------------------------
+def format_auth_runtime_state(AUTH_RUNTIME_STATE: WorkerAuthState) -> str:
+    return (
+        f"is_authenticated={AUTH_RUNTIME_STATE.is_authenticated}, "
+        f"auth_pending={AUTH_RUNTIME_STATE.auth_state.auth_pending}, "
+        f"reauth_pending={AUTH_RUNTIME_STATE.auth_state.reauth_pending}"
+    )
+
+
+# ------------------------------------------------------------------------------
 # This function captures the startup cutover cursor for Telegram polling.
 #
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
@@ -131,10 +167,22 @@ def capture_startup_command_polling_state(
     RUNTIME_CONTEXT: WorkerRuntimeContext,
     DEPS: WorkerRuntimeDeps,
 ) -> CommandPollingState:
+    log_debug(
+        RUNTIME_CONTEXT,
+        DEPS,
+        f"Capturing startup command cursor: offset={STARTUP_CUTOVER_OFFSET}.",
+    )
     BATCH = DEPS.poll_command_batch_fn(
         RUNTIME_CONTEXT.telegram,
         RUNTIME_CONTEXT.config.container_username,
         STARTUP_CUTOVER_OFFSET,
+    )
+    log_debug(
+        RUNTIME_CONTEXT,
+        DEPS,
+        "Startup command cursor captured: "
+        f"discarded_commands={len(BATCH.commands)}, "
+        f"next_update_offset={BATCH.next_update_offset}.",
     )
     return CommandPollingState(
         phase="live_polling",
@@ -156,10 +204,24 @@ def read_command_batch(
     POLLING_STATE: CommandPollingState,
     DEPS: WorkerRuntimeDeps,
 ) -> CommandBatchReadResult:
+    log_debug(
+        RUNTIME_CONTEXT,
+        DEPS,
+        "Polling Telegram commands: "
+        f"phase={POLLING_STATE.phase}, "
+        f"next_update_offset={POLLING_STATE.next_update_offset}.",
+    )
     BATCH = DEPS.poll_command_batch_fn(
         RUNTIME_CONTEXT.telegram,
         RUNTIME_CONTEXT.config.container_username,
         POLLING_STATE.next_update_offset,
+    )
+    log_debug(
+        RUNTIME_CONTEXT,
+        DEPS,
+        "Telegram command poll result: "
+        f"command_count={len(BATCH.commands)}, "
+        f"next_update_offset={BATCH.next_update_offset}.",
     )
     return CommandBatchReadResult(
         commands=[(EVENT.command, EVENT.args) for EVENT in BATCH.commands],
@@ -189,18 +251,39 @@ def wait_for_one_shot_auth(
     DEPS: WorkerRuntimeDeps,
 ) -> WorkerAuthState:
     START_EPOCH = int(DEPS.time_fn())
+    log_debug(
+        RUNTIME_CONTEXT,
+        DEPS,
+        "One-shot auth wait started: "
+        f"wait_seconds={RUN_ONCE_AUTH_WAIT_SECONDS}, "
+        f"poll_seconds={RUN_ONCE_AUTH_POLL_SECONDS}, "
+        f"{format_auth_runtime_state(AUTH_RUNTIME_STATE)}.",
+    )
 
     while True:
         if (
             AUTH_RUNTIME_STATE.is_authenticated
             and not AUTH_RUNTIME_STATE.auth_state.reauth_pending
         ):
+            log_debug(
+                RUNTIME_CONTEXT,
+                DEPS,
+                "One-shot auth wait completed: "
+                f"{format_auth_runtime_state(AUTH_RUNTIME_STATE)}.",
+            )
             return AUTH_RUNTIME_STATE
 
         NOW_EPOCH = int(DEPS.time_fn())
         ELAPSED_SECONDS = NOW_EPOCH - START_EPOCH
 
         if ELAPSED_SECONDS >= RUN_ONCE_AUTH_WAIT_SECONDS:
+            log_debug(
+                RUNTIME_CONTEXT,
+                DEPS,
+                "One-shot auth wait timed out: "
+                f"elapsed_seconds={ELAPSED_SECONDS}, "
+                f"{format_auth_runtime_state(AUTH_RUNTIME_STATE)}.",
+            )
             return AUTH_RUNTIME_STATE
 
         READ_RESULT = read_command_batch(
@@ -209,8 +292,24 @@ def wait_for_one_shot_auth(
             DEPS,
         )
         POLLING_STATE = READ_RESULT.polling_state
+        REMAINING_SECONDS = max(RUN_ONCE_AUTH_WAIT_SECONDS - ELAPSED_SECONDS, 0)
+        log_debug(
+            RUNTIME_CONTEXT,
+            DEPS,
+            "One-shot auth poll: "
+            f"elapsed_seconds={ELAPSED_SECONDS}, "
+            f"remaining_seconds={REMAINING_SECONDS}, "
+            f"next_update_offset={POLLING_STATE.next_update_offset}, "
+            f"command_count={len(READ_RESULT.commands)}.",
+        )
 
         for COMMAND, ARGS in READ_RESULT.commands:
+            log_debug(
+                RUNTIME_CONTEXT,
+                DEPS,
+                "Telegram command received during auth wait: "
+                f"command={COMMAND}, args_present={bool(ARGS)}.",
+            )
             HANDLE_RESULT = DEPS.handle_command_fn(
                 COMMAND,
                 ARGS,
@@ -224,10 +323,24 @@ def wait_for_one_shot_auth(
                 auth_state=HANDLE_RESULT.auth_state,
                 is_authenticated=HANDLE_RESULT.is_authenticated,
             )
+            log_debug(
+                RUNTIME_CONTEXT,
+                DEPS,
+                "Telegram command handled during auth wait: "
+                f"command={COMMAND}, reason_code={HANDLE_RESULT.reason_code}, "
+                f"{format_auth_runtime_state(AUTH_RUNTIME_STATE)}.",
+            )
             if (
                 AUTH_RUNTIME_STATE.is_authenticated
                 and not AUTH_RUNTIME_STATE.auth_state.reauth_pending
             ):
+                log_debug(
+                    RUNTIME_CONTEXT,
+                    DEPS,
+                    "One-shot auth wait completed after command: "
+                    f"command={COMMAND}, "
+                    f"{format_auth_runtime_state(AUTH_RUNTIME_STATE)}.",
+                )
                 return AUTH_RUNTIME_STATE
 
         DEPS.sleep_fn(RUN_ONCE_AUTH_POLL_SECONDS)
@@ -281,6 +394,12 @@ def run_one_shot_worker(
         not AUTH_RUNTIME_STATE.is_authenticated
         or AUTH_RUNTIME_STATE.auth_state.reauth_pending
     ):
+        log_debug(
+            RUNTIME_CONTEXT,
+            DEPS,
+            "One-shot backup waiting for authentication: "
+            f"{format_auth_runtime_state(AUTH_RUNTIME_STATE)}.",
+        )
         DEPS.notify_fn(
             RUNTIME_CONTEXT.telegram,
             DEPS.build_one_shot_waiting_for_auth_message_fn(
@@ -297,6 +416,12 @@ def run_one_shot_worker(
         )
 
     if not AUTH_RUNTIME_STATE.is_authenticated:
+        log_debug(
+            RUNTIME_CONTEXT,
+            DEPS,
+            "One-shot backup skipped after auth wait: "
+            f"{format_auth_runtime_state(AUTH_RUNTIME_STATE)}.",
+        )
         DEPS.notify_fn(
             RUNTIME_CONTEXT.telegram,
             DEPS.build_backup_skipped_auth_incomplete_message_fn(
@@ -309,6 +434,12 @@ def run_one_shot_worker(
         )
 
     if AUTH_RUNTIME_STATE.auth_state.reauth_pending:
+        log_debug(
+            RUNTIME_CONTEXT,
+            DEPS,
+            "One-shot backup skipped because reauthentication is pending: "
+            f"{format_auth_runtime_state(AUTH_RUNTIME_STATE)}.",
+        )
         DEPS.notify_fn(
             RUNTIME_CONTEXT.telegram,
             DEPS.build_backup_skipped_reauth_pending_message_fn(
@@ -325,11 +456,17 @@ def run_one_shot_worker(
         RUNTIME_CONTEXT.telegram,
         RUNTIME_CONTEXT.log_file,
     ):
+        log_debug(
+            RUNTIME_CONTEXT,
+            DEPS,
+            "One-shot backup blocked by safety net.",
+        )
         return WorkerRunResult(
             exit_code=4,
             stop_status="One-shot backup blocked by safety net.",
         )
 
+    log_debug(RUNTIME_CONTEXT, DEPS, "One-shot backup starting.")
     DEPS.run_backup_fn(
         CLIENT,
         RUNTIME_CONTEXT.config,
@@ -371,6 +508,15 @@ def run_scheduled_worker_loop(
             RUNTIME_CONTEXT.config,
             INITIAL_EPOCH,
         )
+    log_debug(
+        RUNTIME_CONTEXT,
+        DEPS,
+        "Scheduled worker loop started: "
+        f"schedule_mode={RUNTIME_CONTEXT.config.schedule_mode}, "
+        f"initial_epoch={INITIAL_EPOCH}, "
+        f"next_run_epoch={NEXT_RUN_EPOCH}, "
+        f"{format_auth_runtime_state(AUTH_RUNTIME_STATE)}.",
+    )
 
     while True:
         AUTH_RUNTIME_STATE = WorkerAuthState(
@@ -383,6 +529,12 @@ def run_scheduled_worker_loop(
             ),
             is_authenticated=AUTH_RUNTIME_STATE.is_authenticated,
         )
+        log_debug(
+            RUNTIME_CONTEXT,
+            DEPS,
+            "Scheduled loop auth reminder state: "
+            f"{format_auth_runtime_state(AUTH_RUNTIME_STATE)}.",
+        )
         READ_RESULT = read_command_batch(
             RUNTIME_CONTEXT,
             POLLING_STATE,
@@ -391,6 +543,12 @@ def run_scheduled_worker_loop(
         POLLING_STATE = READ_RESULT.polling_state
 
         for COMMAND, ARGS in READ_RESULT.commands:
+            log_debug(
+                RUNTIME_CONTEXT,
+                DEPS,
+                "Telegram command received during scheduled loop: "
+                f"command={COMMAND}, args_present={bool(ARGS)}.",
+            )
             HANDLE_RESULT = DEPS.handle_command_fn(
                 COMMAND,
                 ARGS,
@@ -405,11 +563,33 @@ def run_scheduled_worker_loop(
                 is_authenticated=HANDLE_RESULT.is_authenticated,
             )
             BACKUP_REQUESTED = BACKUP_REQUESTED or HANDLE_RESULT.backup_requested
+            log_debug(
+                RUNTIME_CONTEXT,
+                DEPS,
+                "Telegram command handled during scheduled loop: "
+                f"command={COMMAND}, reason_code={HANDLE_RESULT.reason_code}, "
+                f"backup_requested={BACKUP_REQUESTED}, "
+                f"{format_auth_runtime_state(AUTH_RUNTIME_STATE)}.",
+            )
 
         NOW_EPOCH = int(DEPS.time_fn())
         SCHEDULE_DUE = NOW_EPOCH >= NEXT_RUN_EPOCH
+        log_debug(
+            RUNTIME_CONTEXT,
+            DEPS,
+            "Scheduled loop decision: "
+            f"now_epoch={NOW_EPOCH}, "
+            f"next_run_epoch={NEXT_RUN_EPOCH}, "
+            f"schedule_due={SCHEDULE_DUE}, "
+            f"backup_requested={BACKUP_REQUESTED}.",
+        )
 
         if not SCHEDULE_DUE and not BACKUP_REQUESTED:
+            log_debug(
+                RUNTIME_CONTEXT,
+                DEPS,
+                "Scheduled loop sleeping: reason=no_due_backup, seconds=5.",
+            )
             DEPS.sleep_fn(5)
             continue
 
@@ -417,8 +597,20 @@ def run_scheduled_worker_loop(
             RUNTIME_CONTEXT.config,
             NOW_EPOCH,
         )
+        log_debug(
+            RUNTIME_CONTEXT,
+            DEPS,
+            f"Next scheduled backup calculated: next_run_epoch={NEXT_RUN_EPOCH}.",
+        )
 
         if not AUTH_RUNTIME_STATE.is_authenticated:
+            log_debug(
+                RUNTIME_CONTEXT,
+                DEPS,
+                "Scheduled backup skipped because authentication is incomplete: "
+                f"backup_requested={BACKUP_REQUESTED}, "
+                f"{format_auth_runtime_state(AUTH_RUNTIME_STATE)}.",
+            )
             DEPS.notify_fn(
                 RUNTIME_CONTEXT.telegram,
                 DEPS.build_backup_skipped_auth_incomplete_message_fn(
@@ -430,6 +622,13 @@ def run_scheduled_worker_loop(
             continue
 
         if AUTH_RUNTIME_STATE.auth_state.reauth_pending:
+            log_debug(
+                RUNTIME_CONTEXT,
+                DEPS,
+                "Scheduled backup skipped because reauthentication is pending: "
+                f"backup_requested={BACKUP_REQUESTED}, "
+                f"{format_auth_runtime_state(AUTH_RUNTIME_STATE)}.",
+            )
             DEPS.notify_fn(
                 RUNTIME_CONTEXT.telegram,
                 DEPS.build_backup_skipped_reauth_pending_message_fn(
@@ -445,11 +644,22 @@ def run_scheduled_worker_loop(
             RUNTIME_CONTEXT.telegram,
             RUNTIME_CONTEXT.log_file,
         ):
+            log_debug(
+                RUNTIME_CONTEXT,
+                DEPS,
+                "Scheduled backup blocked by safety net: "
+                f"backup_requested={BACKUP_REQUESTED}.",
+            )
             BACKUP_REQUESTED = False
             DEPS.sleep_fn(30)
             continue
 
         BACKUP_TRIGGER = "manual" if BACKUP_REQUESTED else "scheduled"
+        log_debug(
+            RUNTIME_CONTEXT,
+            DEPS,
+            f"Backup trigger selected: trigger={BACKUP_TRIGGER}.",
+        )
         DEPS.run_backup_fn(
             CLIENT,
             RUNTIME_CONTEXT.config,
@@ -480,6 +690,11 @@ def run_worker_runtime(
     POLLING_STATE = capture_startup_command_polling_state(
         RUNTIME_CONTEXT,
         DEPS,
+    )
+    log_debug(
+        RUNTIME_CONTEXT,
+        DEPS,
+        "Starting startup authentication attempt with Apple.",
     )
     AUTH_RESULT = DEPS.attempt_auth_fn(
         CLIENT,

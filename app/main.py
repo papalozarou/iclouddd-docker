@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 import threading
 
@@ -36,6 +36,32 @@ HEARTBEAT_TOUCH_INTERVAL_SECONDS = 30
 
 
 # ------------------------------------------------------------------------------
+# This data class owns a running heartbeat updater thread.
+#
+# 1. "stop_event" is the signal watched by the updater loop.
+# 2. "thread" is the background writer that touches the heartbeat file.
+#
+# N.B.
+# The worker must join this thread during shutdown. Setting the stop event alone
+# leaves a small race where tests or container cleanup can remove the logs
+# directory while the heartbeat writer is still finishing its final iteration.
+# ------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class HeartbeatUpdater:
+    stop_event: threading.Event
+    thread: threading.Thread
+
+    # --------------------------------------------------------------------------
+    # This method stops the heartbeat loop and waits for the writer to exit.
+    #
+    # Returns: None.
+    # --------------------------------------------------------------------------
+    def stop(self) -> None:
+        self.stop_event.set()
+        self.thread.join()
+
+
+# ------------------------------------------------------------------------------
 # This function updates the healthcheck heartbeat file timestamp.
 #
 # 1. "PATH" is the heartbeat file path.
@@ -55,11 +81,16 @@ def update_heartbeat(PATH: Path) -> None:
 #
 # 1. "PATH" is the heartbeat file path.
 #
-# Returns: Stop-event used to end the updater loop on process exit.
+# Returns: Heartbeat updater controller used for clean process shutdown.
 # ------------------------------------------------------------------------------
-def start_heartbeat_updater(PATH: Path) -> threading.Event:
+def start_heartbeat_updater(PATH: Path) -> HeartbeatUpdater:
     STOP_EVENT = threading.Event()
 
+    # --------------------------------------------------------------------------
+    # This function writes heartbeat timestamps until shutdown is requested.
+    #
+    # Returns: None.
+    # --------------------------------------------------------------------------
     def run_heartbeat_loop() -> None:
         update_heartbeat(PATH)
 
@@ -68,7 +99,7 @@ def start_heartbeat_updater(PATH: Path) -> threading.Event:
 
     THREAD = threading.Thread(target=run_heartbeat_loop, daemon=True)
     THREAD.start()
-    return STOP_EVENT
+    return HeartbeatUpdater(stop_event=STOP_EVENT, thread=THREAD)
 
 
 # ------------------------------------------------------------------------------
@@ -340,7 +371,7 @@ def main() -> int:
     LOG_FILE = CONFIG.worker_log_path
     TELEGRAM = TelegramConfig(CONFIG.telegram_bot_token, CONFIG.telegram_chat_id)
     RUNTIME_CONTEXT: WorkerRuntimeContext | None = None
-    HEARTBEAT_STOP_EVENT: threading.Event | None = None
+    HEARTBEAT_UPDATER: HeartbeatUpdater | None = None
     STOP_STATUS = "Worker process exited."
 
     try:
@@ -369,7 +400,7 @@ def main() -> int:
 
             return 1
 
-        HEARTBEAT_STOP_EVENT = start_heartbeat_updater(CONFIG.heartbeat_path)
+        HEARTBEAT_UPDATER = start_heartbeat_updater(CONFIG.heartbeat_path)
 
         notify(
             RUNTIME_CONTEXT.telegram,
@@ -417,8 +448,8 @@ def main() -> int:
                 RUNTIME_CONTEXT.apple_id_label,
                 STOP_STATUS,
             )
-        if HEARTBEAT_STOP_EVENT is not None:
-            HEARTBEAT_STOP_EVENT.set()
+        if HEARTBEAT_UPDATER is not None:
+            HEARTBEAT_UPDATER.stop()
 
 
 if __name__ == "__main__":

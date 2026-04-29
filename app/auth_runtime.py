@@ -92,6 +92,23 @@ class AuthRuntimeDeps:
     now_iso_fn: Callable[[], str] = now_iso
     save_auth_state_fn: Callable[[Path, AuthState], None] = save_auth_state
     notify_fn: Callable[[TelegramConfig, str], None] = notify
+    log_line_fn: Callable[[Path, str, str], None] | None = None
+    log_file_path: Path | None = None
+
+
+# ------------------------------------------------------------------------------
+# This function writes an authentication debug line when logging is available.
+#
+# 1. "DEPS" carries the optional logger callback and destination path.
+# 2. "MESSAGE" is the already-redacted debug detail to write.
+#
+# Returns: None.
+# ------------------------------------------------------------------------------
+def log_auth_debug(DEPS: AuthRuntimeDeps, MESSAGE: str) -> None:
+    if DEPS.log_line_fn is None or DEPS.log_file_path is None:
+        return
+
+    DEPS.log_line_fn(DEPS.log_file_path, "debug", MESSAGE)
 
 
 # ------------------------------------------------------------------------------
@@ -119,6 +136,17 @@ def attempt_auth(
     RUNTIME_DEPS = DEPS or AuthRuntimeDeps()
     CODE = PROVIDED_CODE.strip()
     APPLE_ID_LABEL = format_apple_id_label(APPLE_ID)
+    ATTEMPT_MODE = "complete_challenge" if CODE else "start_challenge"
+
+    log_auth_debug(
+        RUNTIME_DEPS,
+        "Authentication attempt started: "
+        f"mode={ATTEMPT_MODE}, "
+        f"apple_id_label={APPLE_ID_LABEL}, "
+        f"code_present={bool(CODE)}, "
+        f"auth_pending={AUTH_STATE.auth_pending}, "
+        f"reauth_pending={AUTH_STATE.reauth_pending}.",
+    )
 
     if CODE:
         IS_SUCCESS, DETAILS = CLIENT.complete_authentication(CODE)
@@ -137,6 +165,13 @@ def attempt_auth(
             TELEGRAM,
             build_authentication_complete_message(APPLE_ID_LABEL, DETAILS),
         )
+        log_auth_debug(
+            RUNTIME_DEPS,
+            "Authentication attempt completed: "
+            "reason=authenticated, "
+            "auth_pending=False, "
+            "reauth_pending=False.",
+        )
         return AuthAttemptResult(
             auth_state=NEW_STATE,
             is_authenticated=True,
@@ -151,6 +186,13 @@ def attempt_auth(
             TELEGRAM,
             build_authentication_required_message(APPLE_ID_LABEL, USERNAME),
         )
+        log_auth_debug(
+            RUNTIME_DEPS,
+            "Authentication attempt completed: "
+            "reason=mfa_required, "
+            "auth_pending=True, "
+            f"reauth_pending={NEW_STATE.reauth_pending}.",
+        )
         return AuthAttemptResult(
             auth_state=NEW_STATE,
             is_authenticated=False,
@@ -163,6 +205,13 @@ def attempt_auth(
     RUNTIME_DEPS.notify_fn(
         TELEGRAM,
         build_authentication_failed_message(APPLE_ID_LABEL, DETAILS),
+    )
+    log_auth_debug(
+        RUNTIME_DEPS,
+        "Authentication attempt completed: "
+        "reason=auth_failed, "
+        "auth_pending=True, "
+        f"reauth_pending={NEW_STATE.reauth_pending}.",
     )
     return AuthAttemptResult(
         auth_state=NEW_STATE,
@@ -194,11 +243,32 @@ def process_reauth_reminders(
 ) -> AuthState:
     RUNTIME_DEPS = DEPS or AuthRuntimeDeps()
     DAYS_LEFT = REAUTH_DAYS_LEFT_FN(AUTH_STATE.last_auth_utc, INTERVAL_DAYS)
+    log_auth_debug(
+        RUNTIME_DEPS,
+        "Reauthentication reminder check: "
+        f"days_left={DAYS_LEFT}, "
+        f"interval_days={INTERVAL_DAYS}, "
+        f"reminder_stage={AUTH_STATE.reminder_stage}, "
+        f"reauth_pending={AUTH_STATE.reauth_pending}.",
+    )
 
     if DAYS_LEFT > 5:
         NEW_STATE = replace(AUTH_STATE, reminder_stage="none", reauth_pending=False)
         if NEW_STATE != AUTH_STATE:
             RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
+            log_auth_debug(
+                RUNTIME_DEPS,
+                "Reauthentication reminder state saved: "
+                "reason=outside_warning_window, "
+                "reminder_stage=none, "
+                "reauth_pending=False.",
+            )
+        else:
+            log_auth_debug(
+                RUNTIME_DEPS,
+                "Reauthentication reminder unchanged: "
+                "reason=outside_warning_window.",
+            )
         return NEW_STATE
 
     if DAYS_LEFT <= 2 and AUTH_STATE.reminder_stage != "prompt2":
@@ -208,6 +278,13 @@ def process_reauth_reminders(
         )
         NEW_STATE = replace(AUTH_STATE, reminder_stage="prompt2", reauth_pending=True)
         RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
+        log_auth_debug(
+            RUNTIME_DEPS,
+            "Reauthentication reminder state saved: "
+            "reason=prompt2_due, "
+            "reminder_stage=prompt2, "
+            "reauth_pending=True.",
+        )
         return NEW_STATE
 
     if DAYS_LEFT <= 5 and AUTH_STATE.reminder_stage == "none":
@@ -217,6 +294,17 @@ def process_reauth_reminders(
         )
         NEW_STATE = replace(AUTH_STATE, reminder_stage="alert5")
         RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
+        log_auth_debug(
+            RUNTIME_DEPS,
+            "Reauthentication reminder state saved: "
+            "reason=alert5_due, "
+            "reminder_stage=alert5, "
+            f"reauth_pending={NEW_STATE.reauth_pending}.",
+        )
         return NEW_STATE
 
+    log_auth_debug(
+        RUNTIME_DEPS,
+        "Reauthentication reminder unchanged: reason=no_stage_transition.",
+    )
     return AUTH_STATE

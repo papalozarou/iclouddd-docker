@@ -135,6 +135,8 @@ def attempt_auth(
             now_iso_fn=now_iso,
             save_auth_state_fn=save_auth_state,
             notify_fn=notify,
+            log_line_fn=log_line,
+            log_file_path=getattr(CLIENT.config, "worker_log_path", None),
         ),
     )
     if AUTH_RESULT.is_authenticated:
@@ -280,6 +282,7 @@ def poll_command_batch(
     TELEGRAM: TelegramConfig,
     USERNAME: str,
     UPDATE_OFFSET: int | None,
+    LOG_FILE: Path | None = None,
 ) -> command_runtime.CommandPollBatch:
     FETCH_UPDATES_FN = fetch_updates
 
@@ -289,6 +292,17 @@ def poll_command_batch(
                 TELEGRAM_CONFIG,
                 OFFSET,
                 TIMEOUT=0,
+                LOG_LINE_FN=log_line,
+                LOG_FILE=LOG_FILE,
+            )
+        )
+    else:
+        FETCH_UPDATES_FN = (
+            lambda TELEGRAM_CONFIG, OFFSET: fetch_updates(
+                TELEGRAM_CONFIG,
+                OFFSET,
+                LOG_LINE_FN=log_line,
+                LOG_FILE=LOG_FILE,
             )
         )
 
@@ -500,7 +514,14 @@ def main() -> int:
             worker_runtime.WorkerRuntimeDeps(
                 attempt_auth_fn=attempt_auth,
                 process_reauth_reminders_fn=process_reauth_reminders,
-                poll_command_batch_fn=poll_command_batch,
+                poll_command_batch_fn=(
+                    lambda TELEGRAM_CONFIG, USERNAME, UPDATE_OFFSET: poll_command_batch(
+                        TELEGRAM_CONFIG,
+                        USERNAME,
+                        UPDATE_OFFSET,
+                        LOG_FILE,
+                    )
+                ),
                 handle_command_fn=handle_command,
                 enforce_safety_net_fn=enforce_safety_net,
                 run_backup_fn=run_backup,

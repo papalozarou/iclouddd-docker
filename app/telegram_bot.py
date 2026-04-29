@@ -6,8 +6,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import requests
-from typing import Any
+from typing import Any, Callable
 
 
 # ------------------------------------------------------------------------------
@@ -170,11 +171,33 @@ def send_message(CONFIG: TelegramConfig, TEXT: str, TIMEOUT: int = 20) -> bool:
 
 
 # ------------------------------------------------------------------------------
+# This function writes a Telegram polling debug line when logging is available.
+#
+# 1. "LOG_LINE_FN" is an optional logger callback.
+# 2. "LOG_FILE" is the optional worker log destination.
+# 3. "MESSAGE" is the already-redacted debug detail to write.
+#
+# Returns: None.
+# ------------------------------------------------------------------------------
+def log_telegram_debug(
+    LOG_LINE_FN: Callable[[Path, str, str], None] | None,
+    LOG_FILE: Path | None,
+    MESSAGE: str,
+) -> None:
+    if LOG_LINE_FN is None or LOG_FILE is None:
+        return
+
+    LOG_LINE_FN(LOG_FILE, "debug", MESSAGE)
+
+
+# ------------------------------------------------------------------------------
 # This function requests recent updates with optional offset tracking.
 #
 # 1. "CONFIG" carries token and chat configuration.
 # 2. "OFFSET" is update offset.
 # 3. "TIMEOUT" is long-poll timeout in seconds.
+# 4. "LOG_LINE_FN" is an optional logger callback.
+# 5. "LOG_FILE" is the optional worker log destination.
 #
 # Returns: List of update dictionaries from Telegram, or empty list on errors.
 #
@@ -185,8 +208,23 @@ def fetch_updates(
     CONFIG: TelegramConfig,
     OFFSET: int | None,
     TIMEOUT: int = 30,
+    LOG_LINE_FN: Callable[[Path, str, str], None] | None = None,
+    LOG_FILE: Path | None = None,
 ) -> list[dict[str, Any]]:
-    if not CONFIG.bot_token or not CONFIG.chat_id:
+    if not CONFIG.bot_token:
+        log_telegram_debug(
+            LOG_LINE_FN,
+            LOG_FILE,
+            "Telegram update poll skipped: reason=bot_token_missing.",
+        )
+        return []
+
+    if not CONFIG.chat_id:
+        log_telegram_debug(
+            LOG_LINE_FN,
+            LOG_FILE,
+            "Telegram update poll skipped: reason=chat_id_missing.",
+        )
         return []
 
     PARAMS: dict[str, Any] = {"timeout": TIMEOUT}
@@ -194,21 +232,55 @@ def fetch_updates(
     if OFFSET is not None:
         PARAMS["offset"] = OFFSET
 
+    log_telegram_debug(
+        LOG_LINE_FN,
+        LOG_FILE,
+        "Telegram update poll started: "
+        f"offset={OFFSET}, "
+        f"timeout={TIMEOUT}.",
+    )
+
     try:
         RESPONSE = requests.get(
             get_endpoint(CONFIG.bot_token, "getUpdates"),
             params=PARAMS,
             timeout=TIMEOUT + 5,
         )
-    except requests.RequestException:
+    except requests.RequestException as ERROR:
+        log_telegram_debug(
+            LOG_LINE_FN,
+            LOG_FILE,
+            "Telegram update poll failed: "
+            "reason=request_exception, "
+            f"error_type={type(ERROR).__name__}.",
+        )
         return []
 
     if not response_is_ok(RESPONSE):
+        log_telegram_debug(
+            LOG_LINE_FN,
+            LOG_FILE,
+            "Telegram update poll failed: reason=api_rejected_or_bad_json.",
+        )
         return []
 
     PAYLOAD = RESPONSE.json()
     RESULT = PAYLOAD.get("result", [])
-    return RESULT if isinstance(RESULT, list) else []
+
+    if not isinstance(RESULT, list):
+        log_telegram_debug(
+            LOG_LINE_FN,
+            LOG_FILE,
+            "Telegram update poll failed: reason=result_not_list.",
+        )
+        return []
+
+    log_telegram_debug(
+        LOG_LINE_FN,
+        LOG_FILE,
+        f"Telegram update poll completed: updates={len(RESULT)}.",
+    )
+    return RESULT
 
 
 # ------------------------------------------------------------------------------

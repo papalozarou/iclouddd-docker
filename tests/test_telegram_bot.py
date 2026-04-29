@@ -7,6 +7,7 @@
 # ------------------------------------------------------------------------------
 
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from tests._stubs import install_dependency_stubs
@@ -314,6 +315,80 @@ class TestTelegramApiHelpers(unittest.TestCase):
             RESULT = telegram_bot.fetch_updates(CONFIG, OFFSET=None)
 
         self.assertEqual(RESULT, [])
+
+# --------------------------------------------------------------------------
+# This test confirms fetch_updates emits debug diagnostics for disabled
+# polling, transport failures, and successful empty polls.
+# --------------------------------------------------------------------------
+    def test_fetch_updates_emits_debug_diagnostics(self) -> None:
+        LOG_LINE = Mock()
+        LOG_FILE = Path("/tmp/worker.log")
+        CONFIG = TelegramConfig("token", "12345")
+        RESPONSE = Mock(ok=True)
+        RESPONSE.json.return_value = {"ok": True, "result": []}
+
+        with patch("app.telegram_bot.requests.get", return_value=RESPONSE):
+            RESULT = telegram_bot.fetch_updates(
+                CONFIG,
+                OFFSET=17,
+                LOG_LINE_FN=LOG_LINE,
+                LOG_FILE=LOG_FILE,
+            )
+
+        self.assertEqual(RESULT, [])
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in LOG_LINE.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(
+            any("Telegram update poll started:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertTrue(
+            any("Telegram update poll completed: updates=0." in LINE for LINE in DEBUG_LINES)
+        )
+
+        LOG_LINE.reset_mock()
+
+        with patch(
+            "app.telegram_bot.requests.get",
+            side_effect=telegram_bot.requests.RequestException("boom"),
+        ):
+            RESULT = telegram_bot.fetch_updates(
+                CONFIG,
+                OFFSET=None,
+                LOG_LINE_FN=LOG_LINE,
+                LOG_FILE=LOG_FILE,
+            )
+
+        self.assertEqual(RESULT, [])
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in LOG_LINE.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(
+            any("reason=request_exception" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertFalse(any("boom" in LINE for LINE in DEBUG_LINES))
+
+        LOG_LINE.reset_mock()
+        RESULT = telegram_bot.fetch_updates(
+            TelegramConfig("", "12345"),
+            OFFSET=None,
+            LOG_LINE_FN=LOG_LINE,
+            LOG_FILE=LOG_FILE,
+        )
+
+        self.assertEqual(RESULT, [])
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in LOG_LINE.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(
+            any("reason=bot_token_missing" in LINE for LINE in DEBUG_LINES)
+        )
 
 
 # ------------------------------------------------------------------------------

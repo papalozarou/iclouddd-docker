@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 from tests._stubs import install_dependency_stubs
 
@@ -290,24 +290,27 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", True, True, "prompt2")
             CLIENT = Mock()
             CLIENT.complete_authentication.return_value = (True, "ok")
+            LOG_FILE = Path(TMPDIR) / "worker.log"
             CLIENT.config = SimpleNamespace(
                 keychain_service_name="pyiclodoc-drive",
                 icloud_email="alice@example.com",
                 icloud_password="password",
+                worker_log_path=LOG_FILE,
             )
 
             with patch("app.main.now_iso", return_value="2026-03-10T10:00:00+00:00"):
                 with patch("app.main.notify") as NOTIFY:
                     with patch("app.main.save_credentials") as SAVE_CREDENTIALS:
-                        RESULT = attempt_auth(
-                            CLIENT,
-                            AUTH_STATE,
-                            AUTH_STATE_PATH,
-                            TELEGRAM,
-                            "alice",
-                            "alice@example.com",
-                            " 123456 ",
-                        )
+                        with patch("app.main.log_line") as LOG_LINE:
+                            RESULT = attempt_auth(
+                                CLIENT,
+                                AUTH_STATE,
+                                AUTH_STATE_PATH,
+                                TELEGRAM,
+                                "alice",
+                                "alice@example.com",
+                                " 123456 ",
+                            )
 
             self.assertTrue(RESULT.is_authenticated)
             self.assertEqual(RESULT.operator_detail, "ok")
@@ -324,6 +327,19 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             )
             self.assertIn("Authentication complete", NOTIFY.call_args[0][1])
             self.assertIn("🔒 PCD Drive - Authentication complete", NOTIFY.call_args[0][1])
+            DEBUG_LINES = [
+                CALL.args[2]
+                for CALL in LOG_LINE.call_args_list
+                if CALL.args[1] == "debug"
+            ]
+            self.assertTrue(
+                any("Authentication attempt started:" in LINE for LINE in DEBUG_LINES)
+            )
+            self.assertTrue(
+                any("reason=authenticated" in LINE for LINE in DEBUG_LINES)
+            )
+            self.assertTrue(any("code_present=True" in LINE for LINE in DEBUG_LINES))
+            self.assertFalse(any("123456" in LINE for LINE in DEBUG_LINES))
 
 # --------------------------------------------------------------------------
 # This test confirms attempt_auth MFA-required branch sets auth pending.
@@ -607,7 +623,13 @@ class TestMainRuntimeHelpers(unittest.TestCase):
 
         self.assertEqual(RESULT.commands, [])
         self.assertIsNone(RESULT.next_update_offset)
-        FETCH_UPDATES.assert_called_once_with(TELEGRAM, -1, TIMEOUT=0)
+        FETCH_UPDATES.assert_called_once_with(
+            TELEGRAM,
+            -1,
+            TIMEOUT=0,
+            LOG_LINE_FN=ANY,
+            LOG_FILE=None,
+        )
 
 # --------------------------------------------------------------------------
 # This test confirms run_backup sends start/end notifications and logs.

@@ -525,10 +525,14 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             CONFIG.safety_net_done_path.write_text("ok\n", encoding="utf-8")
 
             with patch("app.main.run_first_time_safety_net") as RUN_NET:
-                RESULT = enforce_safety_net(CONFIG, TELEGRAM, LOG_FILE)
+                with patch("app.main.log_line") as LOG_LINE:
+                    RESULT = enforce_safety_net(CONFIG, TELEGRAM, LOG_FILE)
 
             self.assertTrue(RESULT)
             RUN_NET.assert_not_called()
+            DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
+            self.assertTrue(any("Safety net check started:" in LINE for LINE in DEBUG_LINES))
+            self.assertTrue(any("reason=done_marker_exists" in LINE for LINE in DEBUG_LINES))
 
 # --------------------------------------------------------------------------
 # This test confirms passing safety-net creates done marker and unblocks.
@@ -548,12 +552,16 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             )
 
             with patch("app.main.run_first_time_safety_net", return_value=RESULT):
-                with patch("app.main.log_line"):
+                with patch("app.main.log_line") as LOG_LINE:
                     RETURNED = enforce_safety_net(CONFIG, TELEGRAM, LOG_FILE)
 
             self.assertTrue(RETURNED)
             self.assertTrue(CONFIG.safety_net_done_path.exists())
             self.assertFalse(BLOCKED.exists())
+            DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
+            self.assertTrue(any("Safety net scan result:" in LINE for LINE in DEBUG_LINES))
+            self.assertTrue(any("Safety net stale blocked marker removed." in LINE for LINE in DEBUG_LINES))
+            self.assertTrue(any("Safety net done marker written:" in LINE for LINE in DEBUG_LINES))
 
 # --------------------------------------------------------------------------
 # This test confirms blocked safety-net sends notification once.
@@ -572,7 +580,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
 
             with patch("app.main.run_first_time_safety_net", return_value=RESULT):
                 with patch("app.main.notify") as NOTIFY:
-                    with patch("app.main.log_line"):
+                    with patch("app.main.log_line") as LOG_LINE:
                         RETURNED = enforce_safety_net(CONFIG, TELEGRAM, LOG_FILE)
 
             self.assertFalse(RETURNED)
@@ -582,6 +590,9 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 "Expected uid 1000, gid 1000",
                 NOTIFY.call_args[0][1],
             )
+            DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
+            self.assertTrue(any("Safety net scan result:" in LINE for LINE in DEBUG_LINES))
+            self.assertTrue(any("Safety net blocked marker written:" in LINE for LINE in DEBUG_LINES))
 
 # --------------------------------------------------------------------------
 # This test confirms startup cutover polling uses short polling so worker
@@ -1381,6 +1392,16 @@ class TestMainEntrypoint(unittest.TestCase):
             self.assertTrue(
                 any("Auth state after startup attempt:" in CALL.args[2] for CALL in DEBUG_LINES)
             )
+            self.assertTrue(
+                any("Worker bootstrap started:" in CALL.args[2] for CALL in DEBUG_LINES)
+            )
+            self.assertTrue(
+                any("Stored credential lookup completed:" in CALL.args[2] for CALL in DEBUG_LINES)
+            )
+            self.assertTrue(
+                any("Auth state loaded:" in CALL.args[2] for CALL in DEBUG_LINES)
+            )
+            self.assertFalse(any("alice_password_secret" in CALL.args[2] for CALL in DEBUG_LINES))
 
 # --------------------------------------------------------------------------
 # This test confirms main stops and joins the heartbeat updater before exit.

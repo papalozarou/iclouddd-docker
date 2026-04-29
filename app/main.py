@@ -192,20 +192,58 @@ def enforce_safety_net(CONFIG: AppConfig, TELEGRAM: TelegramConfig, LOG_FILE: Pa
     DONE_MARKER = CONFIG.safety_net_done_path
     BLOCKED_MARKER = CONFIG.safety_net_blocked_path
 
+    log_line(
+        LOG_FILE,
+        "debug",
+        "Safety net check started: "
+        f"done_marker={DONE_MARKER.as_posix()}, "
+        f"blocked_marker={BLOCKED_MARKER.as_posix()}, "
+        f"sample_size={CONFIG.safety_net_sample_size}.",
+    )
+
     if DONE_MARKER.exists():
+        log_line(
+            LOG_FILE,
+            "debug",
+            "Safety net check skipped: reason=done_marker_exists.",
+        )
         return True
 
     RESULT = run_first_time_safety_net(CONFIG.output_dir, CONFIG.safety_net_sample_size)
+    log_line(
+        LOG_FILE,
+        "debug",
+        "Safety net scan result: "
+        f"should_block={RESULT.should_block}, "
+        f"expected_uid={RESULT.expected_uid}, "
+        f"expected_gid={RESULT.expected_gid}, "
+        f"mismatched_samples={len(RESULT.mismatched_samples)}.",
+    )
 
     if not RESULT.should_block and BLOCKED_MARKER.exists():
         BLOCKED_MARKER.unlink()
+        log_line(
+            LOG_FILE,
+            "debug",
+            "Safety net stale blocked marker removed.",
+        )
 
     if not RESULT.should_block:
         DONE_MARKER.write_text("ok\n", encoding="utf-8")
+        log_line(
+            LOG_FILE,
+            "debug",
+            f"Safety net done marker written: path={DONE_MARKER.as_posix()}.",
+        )
         log_line(LOG_FILE, "info", "First-run safety net passed.")
         return True
 
     if BLOCKED_MARKER.exists():
+        log_line(
+            LOG_FILE,
+            "debug",
+            "Safety net remains blocked: reason=blocked_marker_exists.",
+        )
         return False
 
     MISMATCH_TEXT = "\n".join(RESULT.mismatched_samples)
@@ -220,6 +258,11 @@ def enforce_safety_net(CONFIG: AppConfig, TELEGRAM: TelegramConfig, LOG_FILE: Pa
         ),
     )
     BLOCKED_MARKER.write_text("blocked\n", encoding="utf-8")
+    log_line(
+        LOG_FILE,
+        "debug",
+        f"Safety net blocked marker written: path={BLOCKED_MARKER.as_posix()}.",
+    )
     return False
 
 
@@ -375,10 +418,31 @@ def main() -> int:
     STOP_STATUS = "Worker process exited."
 
     try:
+        log_line(
+            LOG_FILE,
+            "debug",
+            "Worker bootstrap started: "
+            f"config_dir={CONFIG.config_dir.as_posix()}, "
+            f"output_dir={CONFIG.output_dir.as_posix()}, "
+            f"logs_dir={CONFIG.logs_dir.as_posix()}, "
+            f"run_once={CONFIG.run_once}.",
+        )
         configure_keyring(CONFIG.config_dir)
+        log_line(
+            LOG_FILE,
+            "debug",
+            f"Keyring configured: config_dir={CONFIG.config_dir.as_posix()}.",
+        )
         STORED_EMAIL, STORED_PASSWORD = load_credentials(
             CONFIG.keychain_service_name,
             CONFIG.container_username,
+        )
+        log_line(
+            LOG_FILE,
+            "debug",
+            "Stored credential lookup completed: "
+            f"email_present={bool(STORED_EMAIL)}, "
+            f"password_present={bool(STORED_PASSWORD)}.",
         )
         CONFIG = replace(
             CONFIG,
@@ -393,6 +457,11 @@ def main() -> int:
         )
 
         ERRORS = validate_config(CONFIG)
+        log_line(
+            LOG_FILE,
+            "debug",
+            f"Configuration validation completed: errors={len(ERRORS)}.",
+        )
 
         if ERRORS:
             for LINE in ERRORS:
@@ -401,14 +470,29 @@ def main() -> int:
             return 1
 
         HEARTBEAT_UPDATER = start_heartbeat_updater(CONFIG.heartbeat_path)
+        log_line(
+            LOG_FILE,
+            "debug",
+            f"Heartbeat updater started: path={CONFIG.heartbeat_path.as_posix()}.",
+        )
 
         notify(
             RUNTIME_CONTEXT.telegram,
             build_container_started_message(RUNTIME_CONTEXT.apple_id_label),
         )
 
+        log_line(LOG_FILE, "debug", "Creating iCloud client.")
         CLIENT = ICloudDriveClient(RUNTIME_CONTEXT.config)
         AUTH_STATE = load_auth_state(RUNTIME_CONTEXT.config.auth_state_path)
+        log_line(
+            LOG_FILE,
+            "debug",
+            "Auth state loaded: "
+            f"path={RUNTIME_CONTEXT.config.auth_state_path.as_posix()}, "
+            f"auth_pending={AUTH_STATE.auth_pending}, "
+            f"reauth_pending={AUTH_STATE.reauth_pending}, "
+            f"reminder_stage={AUTH_STATE.reminder_stage}.",
+        )
         RUNTIME_RESULT = worker_runtime.run_worker_runtime(
             RUNTIME_CONTEXT,
             CLIENT,
@@ -450,6 +534,11 @@ def main() -> int:
             )
         if HEARTBEAT_UPDATER is not None:
             HEARTBEAT_UPDATER.stop()
+            log_line(
+                LOG_FILE,
+                "debug",
+                f"Heartbeat updater stopped: path={CONFIG.heartbeat_path.as_posix()}.",
+            )
 
 
 if __name__ == "__main__":

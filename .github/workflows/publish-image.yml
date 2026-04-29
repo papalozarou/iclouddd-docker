@@ -1,17 +1,17 @@
 # ------------------------------------------------------------------------------
-# This workflow builds and publishes the container image for GitHub releases.
+# This workflow builds and publishes the container image for version tags.
 #
-# Release publication and image publication are kept separate so a failed image
-# push does not block GitHub Release creation, while still tying image pushes to
-# a deliberate published release event.
+# Image publication runs from the same pushed tag that creates the GitHub
+# Release. That avoids relying on a release event created by "GITHUB_TOKEN",
+# which GitHub intentionally prevents from triggering another workflow.
 # ------------------------------------------------------------------------------
 
 name: Publish image
 
 on:
-  release:
-    types:
-      - published
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: read
@@ -41,7 +41,7 @@ jobs:
         id: image-meta
         env:
           REPOSITORY: ${{ github.repository }}
-          TAG_NAME: ${{ github.event.release.tag_name }}
+          TAG_NAME: ${{ github.ref_name }}
         run: |
           set -eu
 

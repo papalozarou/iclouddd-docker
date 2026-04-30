@@ -683,14 +683,14 @@ class ICloudDriveClient:
         CHILD_DIRECTORIES: list[tuple[str, Any]] = []
 
         for NAME in NAMES:
-            CLEAN_NAME = str(NAME).strip()
+            CLEAN_NAME = self._normalise_child_name(NAME)
 
             if not CLEAN_NAME:
                 continue
 
             CHILD = self._child_node(NODE, CLEAN_NAME)
 
-            if CHILD is None:
+            if self._should_skip_child_node(NODE, CHILD):
                 continue
 
             RELATIVE_PATH = f"{CURRENT_PATH}/{CLEAN_NAME}".strip("/")
@@ -739,7 +739,7 @@ class ICloudDriveClient:
 
             CHILD = self._child_node(NODE, NAME)
 
-            if CHILD is None:
+            if self._should_skip_child_node(NODE, CHILD):
                 continue
 
             CHILD_DIRECTORIES.append((RELATIVE_PATH, CHILD))
@@ -971,14 +971,14 @@ class ICloudDriveClient:
         RESULT: list[RemoteEntry] = []
 
         for NAME in NAMES:
-            CLEAN_NAME = str(NAME).strip()
+            CLEAN_NAME = self._normalise_child_name(NAME)
 
             if not CLEAN_NAME:
                 continue
 
             CHILD = self._child_node(NODE, CLEAN_NAME)
 
-            if CHILD is None:
+            if self._should_skip_child_node(NODE, CHILD):
                 continue
 
             RELATIVE_PATH = f"{CURRENT_PATH}/{CLEAN_NAME}".strip("/")
@@ -1146,7 +1146,7 @@ class ICloudDriveClient:
 
             CHILD = self._child_node(NODE, NAME)
 
-            if CHILD is None:
+            if self._should_skip_child_node(NODE, CHILD):
                 continue
 
             RESULT.extend(self._walk_node(CHILD, RELATIVE_PATH))
@@ -1194,12 +1194,53 @@ class ICloudDriveClient:
     # --------------------------------------------------------------------------
     def _item_name(self, ITEM: dict[str, Any]) -> str:
         for KEY in ("name", "filename", "displayName", "title"):
-            VALUE = str(ITEM.get(KEY, "")).strip()
+            VALUE = self._normalise_child_name(ITEM.get(KEY, ""))
 
             if VALUE:
                 return VALUE
 
         return ""
+
+    # --------------------------------------------------------------------------
+    # This function normalises one discovered child name for traversal use.
+    #
+    # 1. "VALUE" is the raw child name or metadata field value.
+    #
+    # Returns: Safe relative child name, or empty string when invalid.
+    #
+    # N.B.
+    # - Root markers such as "/", "." and ".." are not real child entries and
+    #   must never be fed back into traversal.
+    # - Embedded slashes are rejected because traversal names are single path
+    #   segments, not relative paths.
+    # --------------------------------------------------------------------------
+    def _normalise_child_name(self, VALUE: Any) -> str:
+        CLEAN_NAME = str(VALUE).strip().strip("/")
+
+        if not CLEAN_NAME:
+            return ""
+
+        if CLEAN_NAME in {".", ".."}:
+            return ""
+
+        if "/" in CLEAN_NAME:
+            return ""
+
+        return CLEAN_NAME
+
+    # --------------------------------------------------------------------------
+    # This function rejects missing or self-referential child nodes.
+    #
+    # 1. "PARENT_NODE" is the current traversal node.
+    # 2. "CHILD_NODE" is the resolved child node candidate.
+    #
+    # Returns: True when traversal should skip the child node.
+    # --------------------------------------------------------------------------
+    def _should_skip_child_node(self, PARENT_NODE: Any, CHILD_NODE: Any) -> bool:
+        if CHILD_NODE is None:
+            return True
+
+        return CHILD_NODE is PARENT_NODE
 
     # --------------------------------------------------------------------------
     # This function extracts a modified timestamp from metadata variants.

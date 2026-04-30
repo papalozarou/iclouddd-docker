@@ -57,7 +57,7 @@ class TestConfigLoad(unittest.TestCase):
         self.assertEqual(CONFIG.download_chunk_mib, 4)
         self.assertEqual(CONFIG.reauth_interval_days, 30)
         self.assertEqual(CONFIG.safety_net_sample_size, 200)
-        self.assertEqual(CONFIG.heartbeat_max_age_seconds, 65)
+        self.assertEqual(CONFIG.heartbeat_max_age_seconds, 900)
         self.assertFalse(CONFIG.run_once)
         self.assertEqual(CONFIG.icloud_email, "")
         self.assertEqual(CONFIG.icloud_password, "")
@@ -87,8 +87,8 @@ class TestConfigLoad(unittest.TestCase):
                 "SYNC_TRAVERSAL_WORKERS": "4",
                 "SYNC_DOWNLOAD_WORKERS": "12",
                 "SYNC_DOWNLOAD_CHUNK_MIB": "8",
+                "HEALTHCHECK_MAX_AGE_SECONDS": "65",
                 "REAUTH_INTERVAL_DAYS": "45",
-                "HEALTHCHECK_MAX_AGE_SECONDS": "120",
                 "SAFETY_NET_SAMPLE_SIZE": "300",
             }
             with patch.dict(os.environ, BASE_ENV | OVERRIDES, clear=True):
@@ -111,7 +111,7 @@ class TestConfigLoad(unittest.TestCase):
         self.assertEqual(CONFIG.sync_workers, 12)
         self.assertEqual(CONFIG.download_chunk_mib, 8)
         self.assertEqual(CONFIG.reauth_interval_days, 45)
-        self.assertEqual(CONFIG.heartbeat_max_age_seconds, 120)
+        self.assertEqual(CONFIG.heartbeat_max_age_seconds, 65)
         self.assertEqual(CONFIG.safety_net_sample_size, 300)
 
 # --------------------------------------------------------------------------
@@ -125,7 +125,7 @@ class TestConfigLoad(unittest.TestCase):
                 "SYNC_TRAVERSAL_WORKERS": "zero",
                 "SYNC_DOWNLOAD_WORKERS": "many",
                 "SYNC_DOWNLOAD_CHUNK_MIB": "huge",
-                "HEALTHCHECK_MAX_AGE_SECONDS": "slow",
+                "HEALTHCHECK_MAX_AGE_SECONDS": "recent",
                 "SAFETY_NET_SAMPLE_SIZE": "10.5",
             }
             with patch.dict(os.environ, BASE_ENV | INVALIDS, clear=True):
@@ -136,7 +136,7 @@ class TestConfigLoad(unittest.TestCase):
         self.assertEqual(CONFIG.sync_workers, 0)
         self.assertEqual(CONFIG.download_chunk_mib, 4)
         self.assertEqual(CONFIG.reauth_interval_days, 30)
-        self.assertEqual(CONFIG.heartbeat_max_age_seconds, 65)
+        self.assertEqual(CONFIG.heartbeat_max_age_seconds, 900)
         self.assertEqual(CONFIG.safety_net_sample_size, 200)
         self.assertEqual(
             CONFIG.config_parse_errors,
@@ -145,7 +145,7 @@ class TestConfigLoad(unittest.TestCase):
                 'SYNC_TRAVERSAL_WORKERS must be an integer. Received "zero".',
                 'SYNC_DOWNLOAD_WORKERS must be "auto" or a positive integer. Received "many".',
                 'SYNC_DOWNLOAD_CHUNK_MIB must be an integer. Received "huge".',
-                'HEALTHCHECK_MAX_AGE_SECONDS must be an integer. Received "slow".',
+                'HEALTHCHECK_MAX_AGE_SECONDS must be an integer. Received "recent".',
                 'SAFETY_NET_SAMPLE_SIZE must be an integer. Received "10.5".',
             ),
         )
@@ -207,8 +207,48 @@ class TestConfigLoad(unittest.TestCase):
 
         ERRORS = validate_config(CONFIG)
         self.assertIn("REAUTH_INTERVAL_DAYS must be an integer of at least 1.", ERRORS)
-        self.assertIn("HEALTHCHECK_MAX_AGE_SECONDS must be an integer of at least 1.", ERRORS)
+        self.assertIn("HEALTHCHECK_MAX_AGE_SECONDS must be an integer of at least 30.", ERRORS)
         self.assertIn("SAFETY_NET_SAMPLE_SIZE must be an integer of at least 1.", ERRORS)
+
+# --------------------------------------------------------------------------
+# This test confirms heartbeat age budgets below the touch interval are
+# rejected during config validation.
+# --------------------------------------------------------------------------
+    def test_validate_config_rejects_sub_interval_heartbeat_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            BASE_ENV = build_base_env(TMPDIR)
+            with patch.dict(
+                os.environ,
+                BASE_ENV | {"HEALTHCHECK_MAX_AGE_SECONDS": "29"},
+                clear=True,
+            ):
+                CONFIG = load_config()
+
+        ERRORS = validate_config(CONFIG)
+        self.assertIn(
+            "HEALTHCHECK_MAX_AGE_SECONDS must be an integer of at least 30.",
+            ERRORS,
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms heartbeat age budgets at or above the touch interval
+# remain valid.
+# --------------------------------------------------------------------------
+    def test_validate_config_accepts_supported_heartbeat_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            BASE_ENV = build_base_env(TMPDIR)
+            with patch.dict(
+                os.environ,
+                BASE_ENV | {"HEALTHCHECK_MAX_AGE_SECONDS": "65"},
+                clear=True,
+            ):
+                CONFIG = load_config()
+
+        ERRORS = validate_config(CONFIG)
+        self.assertNotIn(
+            "HEALTHCHECK_MAX_AGE_SECONDS must be an integer of at least 30.",
+            ERRORS,
+        )
 
 # --------------------------------------------------------------------------
 # This test confirms sync worker auto mode parses to zero override.

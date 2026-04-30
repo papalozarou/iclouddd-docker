@@ -24,6 +24,7 @@ from app.scheduler import (
 )
 from app.runtime_context import WorkerRuntimeContext
 from app.state import AuthState, load_auth_state, load_manifest, now_iso, save_auth_state, save_manifest
+from app.runtime_constants import HEARTBEAT_TOUCH_INTERVAL_SECONDS
 from app.syncer import perform_incremental_sync, run_first_time_safety_net
 from app.telegram_bot import TelegramConfig, fetch_updates, parse_command
 from app.telegram_messages import (
@@ -31,8 +32,7 @@ from app.telegram_messages import (
     build_container_stopped_message,
     build_safety_net_blocked_message,
 )
-
-HEARTBEAT_TOUCH_INTERVAL_SECONDS = 30
+from app.time_utils import now_local
 
 
 # ------------------------------------------------------------------------------

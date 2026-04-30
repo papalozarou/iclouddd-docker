@@ -48,7 +48,7 @@ class AppConfig:
     session_dir: Path
     icloudpd_compat_dir: Path
     safety_net_sample_size: int
-    heartbeat_max_age_seconds: int = 65
+    heartbeat_max_age_seconds: int = 900
     config_parse_errors: tuple[str, ...] = field(default_factory=tuple)
 
     # --------------------------------------------------------------------------
@@ -200,7 +200,7 @@ def load_config() -> AppConfig:
     )
     HEARTBEAT_MAX_AGE_SECONDS, HEARTBEAT_MAX_AGE_ERROR = parse_env_int(
         "HEALTHCHECK_MAX_AGE_SECONDS",
-        65,
+        900,
     )
     SAFETY_NET_SAMPLE_SIZE, SAFETY_NET_SAMPLE_ERROR = parse_env_int(
         "SAFETY_NET_SAMPLE_SIZE",

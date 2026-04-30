@@ -95,17 +95,22 @@ def quarantine_corrupt_json(PATH: Path) -> None:
 # 1. "PATH" is the destination JSON file.
 # 2. "PAYLOAD" is the dictionary to persist.
 #
-# Returns: None.
+# Returns: True when the payload is written successfully.
 #
 # Notes: Atomic replace avoids partial writes during interruption.
 # ------------------------------------------------------------------------------
-def write_json(PATH: Path, PAYLOAD: dict[str, Any]) -> None:
+def write_json(PATH: Path, PAYLOAD: dict[str, Any]) -> bool:
     TEMPORARY_PATH = PATH.with_suffix(PATH.suffix + ".tmp")
 
-    with TEMPORARY_PATH.open("w", encoding="utf-8") as HANDLE:
-        json.dump(PAYLOAD, HANDLE, indent=2, sort_keys=True)
+    try:
+        with TEMPORARY_PATH.open("w", encoding="utf-8") as HANDLE:
+            json.dump(PAYLOAD, HANDLE, indent=2, sort_keys=True)
 
-    TEMPORARY_PATH.replace(PATH)
+        TEMPORARY_PATH.replace(PATH)
+    except OSError:
+        return False
+
+    return True
 
 
 # ------------------------------------------------------------------------------
@@ -150,16 +155,16 @@ def load_auth_state(PATH: Path) -> AuthState:
 # 1. "PATH" is the JSON state file location.
 # 2. "STATE" is the model to persist.
 #
-# Returns: None.
+# Returns: True when the auth state is written successfully.
 # ------------------------------------------------------------------------------
-def save_auth_state(PATH: Path, STATE: AuthState) -> None:
+def save_auth_state(PATH: Path, STATE: AuthState) -> bool:
     PAYLOAD = {
         "last_auth_utc": STATE.last_auth_utc,
         "auth_pending": STATE.auth_pending,
         "reauth_pending": STATE.reauth_pending,
         "reminder_stage": STATE.reminder_stage,
     }
-    write_json(PATH, PAYLOAD)
+    return write_json(PATH, PAYLOAD)
 
 
 # ------------------------------------------------------------------------------

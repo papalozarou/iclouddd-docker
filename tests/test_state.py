@@ -76,13 +76,29 @@ class TestState(unittest.TestCase):
         with tempfile.TemporaryDirectory() as TMPDIR:
             PATH = Path(TMPDIR) / "data.json"
             PAYLOAD = {"a": 1, "b": {"c": 2}}
-            write_json(PATH, PAYLOAD)
+            RESULT = write_json(PATH, PAYLOAD)
 
             self.assertTrue(PATH.exists())
             self.assertFalse((Path(TMPDIR) / "data.json.tmp").exists())
             WRITTEN = json.loads(PATH.read_text(encoding="utf-8"))
 
+        self.assertTrue(RESULT)
         self.assertEqual(WRITTEN, PAYLOAD)
+
+# --------------------------------------------------------------------------
+# This test confirms JSON write failures return False without creating the
+# final state file.
+# --------------------------------------------------------------------------
+    def test_write_json_returns_false_when_open_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "data.json"
+            PAYLOAD = {"a": 1}
+
+            with patch.object(Path, "open", side_effect=OSError("read only")):
+                RESULT = write_json(PATH, PAYLOAD)
+
+        self.assertFalse(RESULT)
+        self.assertFalse(PATH.exists())
 
 # --------------------------------------------------------------------------
 # This test confirms auth-state loading uses safe defaults when missing.
@@ -141,10 +157,29 @@ class TestState(unittest.TestCase):
                 reauth_pending=False,
                 reminder_stage="alert5",
             )
-            save_auth_state(PATH, INPUT_STATE)
+            RESULT = save_auth_state(PATH, INPUT_STATE)
             OUTPUT_STATE = load_auth_state(PATH)
 
+        self.assertTrue(RESULT)
         self.assertEqual(OUTPUT_STATE, INPUT_STATE)
+
+# --------------------------------------------------------------------------
+# This test confirms auth-state save failures return False to callers.
+# --------------------------------------------------------------------------
+    def test_save_auth_state_returns_false_when_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "auth_state.json"
+            INPUT_STATE = AuthState(
+                last_auth_utc="2026-03-09T09:00:00+00:00",
+                auth_pending=True,
+                reauth_pending=False,
+                reminder_stage="alert5",
+            )
+
+            with patch("app.state.write_json", return_value=False):
+                RESULT = save_auth_state(PATH, INPUT_STATE)
+
+        self.assertFalse(RESULT)
 
 # --------------------------------------------------------------------------
 # This test confirms manifest loading keeps only dictionary entries.

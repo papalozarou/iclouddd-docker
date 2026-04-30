@@ -247,6 +247,47 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertIn("🔒 PCD Drive - Authentication complete", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
+# This test confirms successful authentication fails closed when auth-state
+# persistence does not succeed.
+# --------------------------------------------------------------------------
+    def test_attempt_auth_success_path_fails_closed_when_state_save_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            AUTH_STATE_PATH = Path(TMPDIR) / "pyiclodoc-drive-auth_state.json"
+            TELEGRAM = TelegramConfig("token", "12345")
+            AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", True, True, "prompt2")
+            CLIENT = Mock()
+            CLIENT.complete_authentication.return_value = (True, "ok")
+            CLIENT.config = SimpleNamespace(
+                keychain_service_name="pyiclodoc-drive",
+                icloud_email="alice@example.com",
+                icloud_password="password",
+            )
+
+            with patch("app.main.now_iso", return_value="2026-03-10T10:00:00+00:00"):
+                with patch("app.main.notify") as NOTIFY:
+                    with patch("app.main.save_auth_state", return_value=False):
+                        with patch("app.main.save_credentials") as SAVE_CREDENTIALS:
+                            NEW_STATE, IS_AUTHENTICATED, DETAILS = attempt_auth(
+                                CLIENT,
+                                AUTH_STATE,
+                                AUTH_STATE_PATH,
+                                TELEGRAM,
+                                "alice",
+                                "alice@example.com",
+                                " 123456 ",
+                            )
+
+            self.assertFalse(IS_AUTHENTICATED)
+            self.assertEqual(NEW_STATE, AUTH_STATE)
+            self.assertEqual(
+                DETAILS,
+                "Authentication succeeded but auth state could not be saved.",
+            )
+            SAVE_CREDENTIALS.assert_not_called()
+            self.assertIn("Authentication failed", NOTIFY.call_args[0][1])
+            self.assertIn("could not be saved", NOTIFY.call_args[0][1])
+
+# --------------------------------------------------------------------------
 # This test confirms attempt_auth MFA-required branch sets auth pending.
 # --------------------------------------------------------------------------
     def test_attempt_auth_mfa_required_path(self) -> None:
@@ -285,6 +326,46 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertIn('Or "alice reauth 123456"', NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
+# This test confirms MFA-required authentication fails closed when auth-state
+# persistence does not succeed.
+# --------------------------------------------------------------------------
+    def test_attempt_auth_mfa_required_path_fails_closed_when_state_save_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            AUTH_STATE_PATH = Path(TMPDIR) / "pyiclodoc-drive-auth_state.json"
+            TELEGRAM = TelegramConfig("token", "12345")
+            AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
+            CLIENT = Mock()
+            CLIENT.start_authentication.return_value = (False, "Two-factor code is required")
+            CLIENT.config = SimpleNamespace(
+                keychain_service_name="pyiclodoc-drive",
+                icloud_email="alice@example.com",
+                icloud_password="password",
+            )
+
+            with patch("app.main.notify") as NOTIFY:
+                with patch("app.main.save_auth_state", return_value=False):
+                    with patch("app.main.save_credentials") as SAVE_CREDENTIALS:
+                        NEW_STATE, IS_AUTHENTICATED, DETAILS = attempt_auth(
+                            CLIENT,
+                            AUTH_STATE,
+                            AUTH_STATE_PATH,
+                            TELEGRAM,
+                            "alice",
+                            "alice@example.com",
+                            "",
+                        )
+
+            self.assertFalse(IS_AUTHENTICATED)
+            self.assertEqual(NEW_STATE, AUTH_STATE)
+            self.assertEqual(
+                DETAILS,
+                "Authentication requires MFA, but auth state could not be saved.",
+            )
+            SAVE_CREDENTIALS.assert_not_called()
+            self.assertIn("Authentication failed", NOTIFY.call_args[0][1])
+            self.assertNotIn("Authentication required", NOTIFY.call_args[0][1])
+
+# --------------------------------------------------------------------------
 # This test confirms attempt_auth generic failure sends failure message.
 # --------------------------------------------------------------------------
     def test_attempt_auth_failure_path(self) -> None:
@@ -319,6 +400,46 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertIn("Authentication failed", NOTIFY.call_args[0][1])
             self.assertIn("Bad credentials", NOTIFY.call_args[0][1])
             self.assertNotIn("Reason:", NOTIFY.call_args[0][1])
+
+# --------------------------------------------------------------------------
+# This test confirms generic authentication failure also fails closed when
+# auth-state persistence does not succeed.
+# --------------------------------------------------------------------------
+    def test_attempt_auth_failure_path_fails_closed_when_state_save_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            AUTH_STATE_PATH = Path(TMPDIR) / "pyiclodoc-drive-auth_state.json"
+            TELEGRAM = TelegramConfig("token", "12345")
+            AUTH_STATE = AuthState("1970-01-01T00:00:00+00:00", False, False, "none")
+            CLIENT = Mock()
+            CLIENT.start_authentication.return_value = (False, "Bad credentials")
+            CLIENT.config = SimpleNamespace(
+                keychain_service_name="pyiclodoc-drive",
+                icloud_email="alice@example.com",
+                icloud_password="wrong-password",
+            )
+
+            with patch("app.main.notify") as NOTIFY:
+                with patch("app.main.save_auth_state", return_value=False):
+                    with patch("app.main.save_credentials") as SAVE_CREDENTIALS:
+                        NEW_STATE, IS_AUTHENTICATED, DETAILS = attempt_auth(
+                            CLIENT,
+                            AUTH_STATE,
+                            AUTH_STATE_PATH,
+                            TELEGRAM,
+                            "alice",
+                            "alice@example.com",
+                            "",
+                        )
+
+            self.assertFalse(IS_AUTHENTICATED)
+            self.assertEqual(NEW_STATE, AUTH_STATE)
+            self.assertEqual(
+                DETAILS,
+                "Authentication failed, and auth state could not be saved.",
+            )
+            SAVE_CREDENTIALS.assert_not_called()
+            self.assertIn("Authentication failed", NOTIFY.call_args[0][1])
+            self.assertIn("could not be saved", NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
 # This test confirms failed startup auth does not overwrite stored credentials.
@@ -709,6 +830,30 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertIn('Or "alice reauth 123456"', NOTIFY.call_args[0][1])
 
 # --------------------------------------------------------------------------
+# This test confirms two-day reminders are suppressed when auth-state
+# persistence does not succeed.
+# --------------------------------------------------------------------------
+    def test_process_reauth_reminders_skips_two_day_notify_when_state_save_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            AUTH_STATE_PATH = Path(TMPDIR) / "pyiclodoc-drive-auth_state.json"
+            TELEGRAM = TelegramConfig("token", "12345")
+            AUTH_STATE = AuthState("2026-03-01T00:00:00+00:00", False, False, "alert5")
+
+            with patch("app.main.reauth_days_left", return_value=2):
+                with patch("app.main.save_auth_state", return_value=False):
+                    with patch("app.main.notify") as NOTIFY:
+                        NEW_STATE = process_reauth_reminders(
+                            AUTH_STATE,
+                            AUTH_STATE_PATH,
+                            TELEGRAM,
+                            "alice",
+                            30,
+                        )
+
+        self.assertEqual(NEW_STATE, AUTH_STATE)
+        NOTIFY.assert_not_called()
+
+# --------------------------------------------------------------------------
 # This test confirms five-day reminder sends a reauth reminder message.
 # --------------------------------------------------------------------------
     def test_process_reauth_reminders_sends_five_day_reminder(self) -> None:
@@ -733,6 +878,30 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             self.assertIn("Reauthentication will be required within five days.", NOTIFY.call_args[0][1])
             self.assertIn('Send "alice auth 123456"', NOTIFY.call_args[0][1])
             self.assertIn('Or "alice reauth 123456"', NOTIFY.call_args[0][1])
+
+# --------------------------------------------------------------------------
+# This test confirms five-day reminders are suppressed when auth-state
+# persistence does not succeed.
+# --------------------------------------------------------------------------
+    def test_process_reauth_reminders_skips_five_day_notify_when_state_save_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            AUTH_STATE_PATH = Path(TMPDIR) / "pyiclodoc-drive-auth_state.json"
+            TELEGRAM = TelegramConfig("token", "12345")
+            AUTH_STATE = AuthState("2026-03-01T00:00:00+00:00", False, False, "none")
+
+            with patch("app.main.reauth_days_left", return_value=5):
+                with patch("app.main.save_auth_state", return_value=False):
+                    with patch("app.main.notify") as NOTIFY:
+                        NEW_STATE = process_reauth_reminders(
+                            AUTH_STATE,
+                            AUTH_STATE_PATH,
+                            TELEGRAM,
+                            "alice",
+                            30,
+                        )
+
+        self.assertEqual(NEW_STATE, AUTH_STATE)
+        NOTIFY.assert_not_called()
 
 # --------------------------------------------------------------------------
 # This test confirms steady-state reminder processing does not rewrite auth

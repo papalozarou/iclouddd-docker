@@ -74,8 +74,31 @@ def reauth_days_left(LAST_AUTH_UTC: str, INTERVAL_DAYS: int) -> int:
 @dataclass(frozen=True)
 class AuthRuntimeDeps:
     now_iso_fn: Callable[[], str] = now_iso
-    save_auth_state_fn: Callable[[Path, AuthState], None] = save_auth_state
+    save_auth_state_fn: Callable[[Path, AuthState], bool] = save_auth_state
     notify_fn: Callable[[TelegramConfig, str], None] = notify
+
+
+# ------------------------------------------------------------------------------
+# This function persists auth state and reports whether the transition is safe
+# to continue.
+#
+# 1. "AUTH_STATE_PATH" is auth state file path.
+# 2. "CURRENT_STATE" is the durable state before this transition.
+# 3. "NEW_STATE" is the candidate updated state.
+# 4. "RUNTIME_DEPS" groups runtime callbacks used by auth operations.
+#
+# Returns: Tuple "(effective_state, was_saved)".
+# ------------------------------------------------------------------------------
+def save_auth_state_or_keep_current(
+    AUTH_STATE_PATH: Path,
+    CURRENT_STATE: AuthState,
+    NEW_STATE: AuthState,
+    RUNTIME_DEPS: AuthRuntimeDeps,
+) -> tuple[AuthState, bool]:
+    if not RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE):
+        return CURRENT_STATE, False
+
+    return NEW_STATE, True
 
 
 # ------------------------------------------------------------------------------
@@ -116,29 +139,68 @@ def attempt_auth(
             reauth_pending=False,
             reminder_stage="none",
         )
-        RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
+        EFFECTIVE_STATE, WAS_SAVED = save_auth_state_or_keep_current(
+            AUTH_STATE_PATH,
+            AUTH_STATE,
+            NEW_STATE,
+            RUNTIME_DEPS,
+        )
+        if not WAS_SAVED:
+            DETAILS = "Authentication succeeded but auth state could not be saved."
+            RUNTIME_DEPS.notify_fn(
+                TELEGRAM,
+                build_authentication_failed_message(APPLE_ID_LABEL, DETAILS),
+            )
+            return EFFECTIVE_STATE, False, DETAILS
+
         RUNTIME_DEPS.notify_fn(
             TELEGRAM,
             build_authentication_complete_message(APPLE_ID_LABEL, DETAILS),
         )
-        return NEW_STATE, True, DETAILS
+        return EFFECTIVE_STATE, True, DETAILS
 
     if "Two-factor code is required" in DETAILS:
         NEW_STATE = replace(AUTH_STATE, auth_pending=True)
-        RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
+        EFFECTIVE_STATE, WAS_SAVED = save_auth_state_or_keep_current(
+            AUTH_STATE_PATH,
+            AUTH_STATE,
+            NEW_STATE,
+            RUNTIME_DEPS,
+        )
+        if not WAS_SAVED:
+            DETAILS = "Authentication requires MFA, but auth state could not be saved."
+            RUNTIME_DEPS.notify_fn(
+                TELEGRAM,
+                build_authentication_failed_message(APPLE_ID_LABEL, DETAILS),
+            )
+            return EFFECTIVE_STATE, False, DETAILS
+
         RUNTIME_DEPS.notify_fn(
             TELEGRAM,
             build_authentication_required_message(APPLE_ID_LABEL, USERNAME),
         )
-        return NEW_STATE, False, DETAILS
+        return EFFECTIVE_STATE, False, DETAILS
 
     NEW_STATE = replace(AUTH_STATE, auth_pending=True)
-    RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
+    EFFECTIVE_STATE, WAS_SAVED = save_auth_state_or_keep_current(
+        AUTH_STATE_PATH,
+        AUTH_STATE,
+        NEW_STATE,
+        RUNTIME_DEPS,
+    )
+    if not WAS_SAVED:
+        DETAILS = "Authentication failed, and auth state could not be saved."
+        RUNTIME_DEPS.notify_fn(
+            TELEGRAM,
+            build_authentication_failed_message(APPLE_ID_LABEL, DETAILS),
+        )
+        return EFFECTIVE_STATE, False, DETAILS
+
     RUNTIME_DEPS.notify_fn(
         TELEGRAM,
         build_authentication_failed_message(APPLE_ID_LABEL, DETAILS),
     )
-    return NEW_STATE, False, DETAILS
+    return EFFECTIVE_STATE, False, DETAILS
 
 
 # ------------------------------------------------------------------------------
@@ -167,25 +229,49 @@ def process_reauth_reminders(
     if DAYS_LEFT > 5:
         NEW_STATE = replace(AUTH_STATE, reminder_stage="none", reauth_pending=False)
         if NEW_STATE != AUTH_STATE:
-            RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
+            EFFECTIVE_STATE, WAS_SAVED = save_auth_state_or_keep_current(
+                AUTH_STATE_PATH,
+                AUTH_STATE,
+                NEW_STATE,
+                RUNTIME_DEPS,
+            )
+            if not WAS_SAVED:
+                return EFFECTIVE_STATE
+            return EFFECTIVE_STATE
         return NEW_STATE
 
     if DAYS_LEFT <= 2 and AUTH_STATE.reminder_stage != "prompt2":
+        NEW_STATE = replace(AUTH_STATE, reminder_stage="prompt2", reauth_pending=True)
+        EFFECTIVE_STATE, WAS_SAVED = save_auth_state_or_keep_current(
+            AUTH_STATE_PATH,
+            AUTH_STATE,
+            NEW_STATE,
+            RUNTIME_DEPS,
+        )
+        if not WAS_SAVED:
+            return EFFECTIVE_STATE
+
         RUNTIME_DEPS.notify_fn(
             TELEGRAM,
             build_reauthentication_required_message(USERNAME),
         )
-        NEW_STATE = replace(AUTH_STATE, reminder_stage="prompt2", reauth_pending=True)
-        RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
-        return NEW_STATE
+        return EFFECTIVE_STATE
 
     if DAYS_LEFT <= 5 and AUTH_STATE.reminder_stage == "none":
+        NEW_STATE = replace(AUTH_STATE, reminder_stage="alert5")
+        EFFECTIVE_STATE, WAS_SAVED = save_auth_state_or_keep_current(
+            AUTH_STATE_PATH,
+            AUTH_STATE,
+            NEW_STATE,
+            RUNTIME_DEPS,
+        )
+        if not WAS_SAVED:
+            return EFFECTIVE_STATE
+
         RUNTIME_DEPS.notify_fn(
             TELEGRAM,
             build_reauth_reminder_message(USERNAME),
         )
-        NEW_STATE = replace(AUTH_STATE, reminder_stage="alert5")
-        RUNTIME_DEPS.save_auth_state_fn(AUTH_STATE_PATH, NEW_STATE)
-        return NEW_STATE
+        return EFFECTIVE_STATE
 
     return AUTH_STATE

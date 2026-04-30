@@ -52,6 +52,7 @@ from app.syncer import (
     run_first_time_safety_net,
     transfer_if_required,
 )
+from app.icloud_client import TraversalWorkerTimeoutError
 
 
 # ------------------------------------------------------------------------------
@@ -1393,6 +1394,83 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertFalse(SUMMARY.traversal_complete)
         self.assertEqual(SUMMARY.traversal_hard_failures, 1)
         self.assertTrue(SUMMARY.delete_phase_skipped)
+
+# --------------------------------------------------------------------------
+# This test confirms traversal worker stalls downgrade into an incomplete
+# sync run instead of escaping as a fatal exception.
+# --------------------------------------------------------------------------
+    def test_perform_incremental_sync_downgrades_traversal_stall_to_partial_run(self) -> None:
+        class StalledClient:
+            def list_entries(self):
+                raise TraversalWorkerTimeoutError(
+                    "Traversal worker stalled while reading / after 30.0s."
+                )
+
+            def get_traversal_stats_snapshot(self):
+                return (
+                    build_empty_traversal_stats_snapshot()
+                    | {
+                        "dir_hard_failures": 1,
+                        "dir_failure_samples": [
+                            {
+                                "path": "/",
+                                "status": "hard_failure",
+                                "reason": "worker_timeout_after_30.0s",
+                            }
+                        ],
+                    }
+                )
+
+            def download_file(self, REMOTE_PATH, LOCAL_PATH):
+                _ = REMOTE_PATH
+                _ = LOCAL_PATH
+                return DownloadResult(True)
+
+            def download_package_tree(self, REMOTE_PATH, LOCAL_PATH):
+                _ = REMOTE_PATH
+                _ = LOCAL_PATH
+                return DownloadResult(True)
+
+        CLIENT = StalledClient()
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            LOG_FILE = ROOT_DIR / "pyiclodoc-drive-worker.log"
+            STALE_PATH = ROOT_DIR / "docs" / "stale.txt"
+            STALE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            STALE_PATH.write_text("stale", encoding="utf-8")
+
+            with patch("app.syncer.log_line") as LOG_LINE:
+                SUMMARY, NEW_MANIFEST = perform_incremental_sync(
+                    CLIENT,
+                    ROOT_DIR,
+                    {},
+                    LOG_FILE=LOG_FILE,
+                    BACKUP_DELETE_REMOVED=True,
+                )
+
+            self.assertTrue(STALE_PATH.exists())
+
+        self.assertEqual(NEW_MANIFEST, {})
+        self.assertFalse(SUMMARY.traversal_complete)
+        self.assertEqual(SUMMARY.traversal_hard_failures, 1)
+        self.assertTrue(SUMMARY.delete_phase_skipped)
+        self.assertEqual(SUMMARY.total_files, 0)
+        self.assertTrue(
+            any(
+                CALL.args[1] == "error"
+                and "Traversal failed before completion:" in CALL.args[2]
+                for CALL in LOG_LINE.call_args_list
+            )
+        )
+        self.assertTrue(
+            any(
+                CALL.args[1] == "error"
+                and "Traversal incomplete. Delete phase and manifest save will be skipped"
+                in CALL.args[2]
+                for CALL in LOG_LINE.call_args_list
+            )
+        )
 
 # --------------------------------------------------------------------------
 # This test confirms transient exceptions are retried before succeeding.

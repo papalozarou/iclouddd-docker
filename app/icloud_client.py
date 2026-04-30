@@ -91,6 +91,18 @@ class TraversalStatsSnapshot(TypedDict):
 
 
 # ------------------------------------------------------------------------------
+# This exception signals a bounded parallel traversal stall.
+#
+# N.B.
+# Callers should treat this as an incomplete traversal result, not as proof the
+# whole worker process must exit. The client records traversal failure
+# telemetry before raising this exception.
+# ------------------------------------------------------------------------------
+class TraversalWorkerTimeoutError(RuntimeError):
+    pass
+
+
+# ------------------------------------------------------------------------------
 # This class encapsulates iCloud auth, traversal, and download operations.
 # ------------------------------------------------------------------------------
 class ICloudDriveClient:
@@ -603,7 +615,7 @@ class ICloudDriveClient:
                         len(FUTURES),
                         min(len(FUTURES), self.config.traversal_workers),
                     )
-                    raise RuntimeError(
+                    raise TraversalWorkerTimeoutError(
                         "Traversal worker stalled while reading "
                         f"{STALLED_PATH} after "
                         f"{TRAVERSAL_WORKER_WAIT_TIMEOUT_SECONDS:.1f}s."

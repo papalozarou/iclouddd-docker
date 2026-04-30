@@ -19,6 +19,7 @@ from app.icloud_client import (
     DownloadResult,
     ICloudDriveClient,
     RemoteEntry,
+    TraversalWorkerTimeoutError,
     TraversalStatsSnapshot,
 )
 from app.logger import log_line
@@ -829,45 +830,17 @@ def list_entries_with_progress(
             try:
                 RESULT = FUTURE.result(timeout=TIMEOUT_SECONDS)
                 if LOG_FILE is not None:
-                    STATS = get_traversal_stats_snapshot(CLIENT)
-                    SLOW_TOP = format_slow_directory_summary(STATS)
-
-                    log_line(
-                        LOG_FILE,
-                        "debug",
-                        "Traversal queue detail: "
-                        f"pending={STATS.get('directories_pending', 0)}, "
-                        f"active={STATS.get('workers_active', 0)}, "
-                        f"completed_dirs={STATS.get('directories_completed', 0)}",
-                    )
-                    log_line(
-                        LOG_FILE,
-                        "debug",
-                        "Traversal read detail: "
-                        f"dir_reads={STATS.get('dir_reads', 0)}, "
-                        f"retries={STATS.get('dir_retries', 0)}, "
-                        f"non_directory={STATS.get('dir_non_directory', 0)}, "
-                        f"retryable_errors={STATS.get('dir_retryable_errors', 0)}, "
-                        f"hard_failures={STATS.get('dir_hard_failures', 0)}",
-                    )
-                    for SAMPLE in STATS.get("dir_failure_samples", []):
-                        if not isinstance(SAMPLE, dict):
-                            continue
-                        log_line(
-                            LOG_FILE,
-                            "debug",
-                            "Traversal failure sample: "
-                            f"status={SAMPLE.get('status', 'unknown')}, "
-                            f"path={SAMPLE.get('path', '/')}, "
-                            f"reason={SAMPLE.get('reason', '<none>')}",
-                        )
-                    if SLOW_TOP:
-                        log_line(
-                            LOG_FILE,
-                            "debug",
-                            f"Traversal slow-path detail: {SLOW_TOP}",
-                        )
+                    log_traversal_completion_details(LOG_FILE, CLIENT)
                 return RESULT
+            except TraversalWorkerTimeoutError as ERROR:
+                if LOG_FILE is not None:
+                    log_line(
+                        LOG_FILE,
+                        "error",
+                        f"Traversal failed before completion: {ERROR}",
+                    )
+                    log_traversal_completion_details(LOG_FILE, CLIENT)
+                return []
             except TimeoutError:
                 if LOG_FILE is None:
                     continue
@@ -941,6 +914,61 @@ def list_entries_with_progress(
                     "directories_completed": CURRENT_COMPLETED,
                 }
                 PREVIOUS_LOG_EPOCH = NOW_EPOCH
+
+
+# ------------------------------------------------------------------------------
+# This function writes final traversal telemetry after completion or failure.
+#
+# 1. "LOG_FILE" is the worker log destination.
+# 2. "CLIENT" exposes traversal stats through the sync client contract.
+#
+# Returns: None.
+# ------------------------------------------------------------------------------
+def log_traversal_completion_details(
+    LOG_FILE: Path,
+    CLIENT: TraversalStatsClient,
+) -> None:
+    STATS = get_traversal_stats_snapshot(CLIENT)
+    SLOW_TOP = format_slow_directory_summary(STATS)
+
+    log_line(
+        LOG_FILE,
+        "debug",
+        "Traversal queue detail: "
+        f"pending={STATS.get('directories_pending', 0)}, "
+        f"active={STATS.get('workers_active', 0)}, "
+        f"completed_dirs={STATS.get('directories_completed', 0)}",
+    )
+    log_line(
+        LOG_FILE,
+        "debug",
+        "Traversal read detail: "
+        f"dir_reads={STATS.get('dir_reads', 0)}, "
+        f"retries={STATS.get('dir_retries', 0)}, "
+        f"non_directory={STATS.get('dir_non_directory', 0)}, "
+        f"retryable_errors={STATS.get('dir_retryable_errors', 0)}, "
+        f"hard_failures={STATS.get('dir_hard_failures', 0)}",
+    )
+
+    for SAMPLE in STATS.get("dir_failure_samples", []):
+        if not isinstance(SAMPLE, dict):
+            continue
+
+        log_line(
+            LOG_FILE,
+            "debug",
+            "Traversal failure sample: "
+            f"status={SAMPLE.get('status', 'unknown')}, "
+            f"path={SAMPLE.get('path', '/')}, "
+            f"reason={SAMPLE.get('reason', '<none>')}",
+        )
+
+    if SLOW_TOP:
+        log_line(
+            LOG_FILE,
+            "debug",
+            f"Traversal slow-path detail: {SLOW_TOP}",
+        )
 
 
 # ------------------------------------------------------------------------------

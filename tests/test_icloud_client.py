@@ -14,7 +14,7 @@ from tests._stubs import install_dependency_stubs
 install_dependency_stubs()
 
 from app.config import AppConfig
-from app.icloud_client import ICloudDriveClient
+from app.icloud_client import ICloudDriveClient, TraversalWorkerTimeoutError
 
 
 # ------------------------------------------------------------------------------
@@ -463,7 +463,7 @@ class TestICloudClientTraversal(unittest.TestCase):
                 return_value=([], []),
             ):
                 with patch("app.icloud_client.wait", side_effect=fake_wait):
-                    with self.assertRaises(RuntimeError) as ERROR:
+                    with self.assertRaises(TraversalWorkerTimeoutError) as ERROR:
                         CLIENT._walk_node_parallel(object(), "")
 
             self.assertIn("Traversal worker stalled while reading / after 30.0s.", str(ERROR.exception))

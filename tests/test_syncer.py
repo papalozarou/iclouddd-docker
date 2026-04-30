@@ -1471,6 +1471,93 @@ class TestSyncerHelpers(unittest.TestCase):
                 for CALL in LOG_LINE.call_args_list
             )
         )
+        self.assertTrue(
+            any(
+                CALL.args[1] == "debug"
+                and "Traversal incomplete detail: reason=Traversal worker stalled "
+                "while reading / after 30.0s." in CALL.args[2]
+                for CALL in LOG_LINE.call_args_list
+            )
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms traversal timeout stays explicit at the progress wrapper
+# instead of being flattened into a clean empty listing.
+# --------------------------------------------------------------------------
+    def test_list_entries_with_progress_reraises_traversal_stall(self) -> None:
+        class StalledClient:
+            def list_entries(self):
+                raise TraversalWorkerTimeoutError(
+                    "Traversal worker stalled while reading / after 30.0s."
+                )
+
+            def get_traversal_stats_snapshot(self):
+                return (
+                    build_empty_traversal_stats_snapshot()
+                    | {
+                        "dir_hard_failures": 1,
+                        "dir_failure_samples": [
+                            {
+                                "path": "/",
+                                "status": "hard_failure",
+                                "reason": "worker_timeout_after_30.0s",
+                            }
+                        ],
+                    }
+                )
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            with patch("app.syncer.log_line") as LOG_LINE:
+                with self.assertRaises(TraversalWorkerTimeoutError) as ERROR:
+                    list_entries_with_progress(
+                        StalledClient(),
+                        LOG_FILE,
+                        time.monotonic(),
+                    )
+
+        self.assertEqual(
+            str(ERROR.exception),
+            "Traversal worker stalled while reading / after 30.0s.",
+        )
+        self.assertTrue(
+            any(
+                CALL.args[1] == "error"
+                and "Traversal failed before completion: Traversal worker stalled "
+                "while reading / after 30.0s." in CALL.args[2]
+                for CALL in LOG_LINE.call_args_list
+            )
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms a successful empty traversal still returns a clean empty
+# list without being mistaken for traversal failure.
+# --------------------------------------------------------------------------
+    def test_list_entries_with_progress_returns_empty_list_for_successful_empty_traversal(self) -> None:
+        class EmptyClient:
+            def list_entries(self):
+                return []
+
+            def get_traversal_stats_snapshot(self):
+                return build_empty_traversal_stats_snapshot()
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            with patch("app.syncer.log_line") as LOG_LINE:
+                RESULT = list_entries_with_progress(
+                    EmptyClient(),
+                    LOG_FILE,
+                    time.monotonic(),
+                )
+
+        self.assertEqual(RESULT, [])
+        self.assertFalse(
+            any(
+                CALL.args[1] == "error"
+                and "Traversal failed before completion:" in CALL.args[2]
+                for CALL in LOG_LINE.call_args_list
+            )
+        )
 
 # --------------------------------------------------------------------------
 # This test confirms transient exceptions are retried before succeeding.

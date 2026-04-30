@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from app.auth_runtime import AuthAttemptResult
-from app.state import AuthState, save_auth_state
+from app.state import AuthState
 from app.telegram_bot import CommandEvent, TelegramConfig, fetch_updates, parse_command
 from app.telegram_messages import (
     build_backup_requested_message,
@@ -82,7 +82,6 @@ class CommandHandleResult:
 class CommandRuntimeDeps:
     attempt_auth_fn: Callable[..., AuthAttemptResult]
     notify_fn: Callable[[TelegramConfig, str], None]
-    save_auth_state_fn: Callable[[Path, AuthState], None] = save_auth_state
     log_line_fn: Callable | None = None
     log_file_path: Path | None = None
 

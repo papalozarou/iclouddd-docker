@@ -544,13 +544,6 @@ def handle_command(
         DEPS=command_runtime.CommandRuntimeDeps(
             attempt_auth_fn=attempt_auth,
             notify_fn=notify,
-            save_auth_state_fn=(
-                lambda PATH, STATE: save_auth_state(
-                    PATH,
-                    STATE,
-                    CONFIG.worker_log_path,
-                )
-            ),
             log_line_fn=log_line,
             log_file_path=CONFIG.worker_log_path,
         ),

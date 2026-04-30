@@ -35,6 +35,7 @@ class AppConfig:
     traversal_workers: int
     sync_workers: int
     download_chunk_mib: int
+    healthcheck_max_age_seconds: int
     reauth_interval_days: int
     output_dir: Path
     config_dir: Path
@@ -206,6 +207,10 @@ def load_config() -> AppConfig:
         "SYNC_DOWNLOAD_CHUNK_MIB",
         4,
     )
+    HEALTHCHECK_MAX_AGE_SECONDS, HEALTHCHECK_MAX_AGE_ERROR = parse_env_int(
+        "HEALTHCHECK_MAX_AGE_SECONDS",
+        900,
+    )
     REAUTH_INTERVAL_DAYS, REAUTH_INTERVAL_ERROR = parse_env_int(
         "REAUTH_INTERVAL_DAYS",
         30,
@@ -220,6 +225,7 @@ def load_config() -> AppConfig:
         TRAVERSAL_WORKERS_ERROR,
         SYNC_WORKERS_ERROR,
         DOWNLOAD_CHUNK_ERROR,
+        HEALTHCHECK_MAX_AGE_ERROR,
         REAUTH_INTERVAL_ERROR,
         SAFETY_NET_SAMPLE_ERROR,
     ):
@@ -243,6 +249,7 @@ def load_config() -> AppConfig:
         traversal_workers=TRAVERSAL_WORKERS,
         sync_workers=SYNC_WORKERS,
         download_chunk_mib=DOWNLOAD_CHUNK_MIB,
+        healthcheck_max_age_seconds=HEALTHCHECK_MAX_AGE_SECONDS,
         reauth_interval_days=REAUTH_INTERVAL_DAYS,
         output_dir=OUTPUT_DIR,
         config_dir=CONFIG_DIR,

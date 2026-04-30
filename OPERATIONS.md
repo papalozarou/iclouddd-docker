@@ -6,6 +6,9 @@
 - Health checks use `parallel` from the microcheck toolbox image.
 - A background heartbeat updater refreshes `/logs/pyiclodoc-drive-heartbeat.txt` every 30
   seconds in both recurring and one-shot execution paths.
+- `HEALTHCHECK_MAX_AGE_SECONDS` must be at least 30 because any lower value is
+  shorter than the worker heartbeat cadence and can mark a healthy worker as
+  unhealthy.
 - Telegram commands are ignored unless they come from `H_TGM_CHAT_ID`.
 - On startup, the worker drains any older queued Telegram updates before it
   starts active command polling. This prevents stale `backup`, `auth`, and

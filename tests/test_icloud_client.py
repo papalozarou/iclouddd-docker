@@ -49,6 +49,7 @@ def build_config_for_icloud(TMPDIR: str) -> AppConfig:
         traversal_workers=1,
         sync_workers=0,
         download_chunk_mib=4,
+        healthcheck_max_age_seconds=900,
         reauth_interval_days=30,
         output_dir=OUTPUT_DIR,
         config_dir=CONFIG_DIR,

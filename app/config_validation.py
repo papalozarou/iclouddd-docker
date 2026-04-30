@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from app.config import AppConfig
+from app.runtime_constants import HEARTBEAT_TOUCH_INTERVAL_SECONDS
 from app.scheduler import MONTHLY_WEEK_MAP, parse_daily, parse_weekday_list
 
 
@@ -75,6 +76,12 @@ def validate_config(CONFIG: AppConfig) -> list[str]:
 
     if CONFIG.download_chunk_mib < 1 or CONFIG.download_chunk_mib > 16:
         ERRORS.append("SYNC_DOWNLOAD_CHUNK_MIB must be an integer between 1 and 16.")
+
+    if CONFIG.healthcheck_max_age_seconds < HEARTBEAT_TOUCH_INTERVAL_SECONDS:
+        ERRORS.append(
+            "HEALTHCHECK_MAX_AGE_SECONDS must be an integer of at least "
+            f"{HEARTBEAT_TOUCH_INTERVAL_SECONDS}."
+        )
 
     if CONFIG.reauth_interval_days < 1:
         ERRORS.append("REAUTH_INTERVAL_DAYS must be an integer of at least 1.")

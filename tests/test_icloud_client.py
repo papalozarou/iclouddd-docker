@@ -543,6 +543,27 @@ class TestICloudClientTraversal(unittest.TestCase):
             self.assertEqual([ENTRY.path for ENTRY in RESULT], ["docs", "root.txt"])
             self.assertEqual(CHILD_DIRECTORIES, [("docs", DIRECTORY_CHILD)])
 
+    def test_shallow_entries_from_names_skips_root_markers_and_self_references(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
+            ROOT_NODE = object()
+            DIRECTORY_CHILD = FakeDriveChild("folder", MODIFIED="d1")
+
+            with patch.object(
+                CLIENT,
+                "_child_node",
+                return_value=DIRECTORY_CHILD,
+            ) as CHILD_NODE:
+                RESULT, CHILD_DIRECTORIES = CLIENT._shallow_entries_from_names(
+                    ROOT_NODE,
+                    "",
+                    ["/", ".", "docs"],
+                )
+
+            self.assertEqual(CHILD_NODE.call_count, 1)
+            self.assertEqual([ENTRY.path for ENTRY in RESULT], ["docs"])
+            self.assertEqual(CHILD_DIRECTORIES, [("docs", DIRECTORY_CHILD)])
+
     def test_shallow_entries_from_payload_skips_blank_names_and_missing_children(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
@@ -563,6 +584,32 @@ class TestICloudClientTraversal(unittest.TestCase):
 
             self.assertEqual([ENTRY.path for ENTRY in RESULT], ["root.txt", "docs"])
             self.assertEqual(CHILD_DIRECTORIES, [("docs", CHILD_NODE)])
+
+    def test_shallow_entries_from_payload_skips_root_marker_names_and_self_references(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
+            ROOT_NODE = object()
+            DIR_ITEMS = [
+                {"name": "/", "dateModified": "d0"},
+                {"name": "docs", "dateModified": "d1"},
+            ]
+
+            with patch.object(
+                CLIENT,
+                "_child_node",
+                return_value=object(),
+            ) as CHILD_NODE:
+                RESULT, CHILD_DIRECTORIES = CLIENT._shallow_entries_from_payload(
+                    ROOT_NODE,
+                    "",
+                    DIR_ITEMS,
+                    [],
+                )
+
+            self.assertEqual(CHILD_NODE.call_count, 1)
+            self.assertEqual([ENTRY.path for ENTRY in RESULT], ["docs"])
+            self.assertEqual(len(CHILD_DIRECTORIES), 1)
+            self.assertEqual(CHILD_DIRECTORIES[0][0], "docs")
 
     def test_node_dir_and_child_node_error_paths(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:

@@ -201,6 +201,51 @@ def format_auth_runtime_state(AUTH_RUNTIME_STATE: WorkerAuthState) -> str:
 
 
 # ------------------------------------------------------------------------------
+# This function records scheduled-loop follow-up after one backup attempt.
+#
+# 1. "RUNTIME_CONTEXT" is shared worker runtime state.
+# 2. "DEPS" groups runtime callbacks used by worker orchestration.
+# 3. "BACKUP_TRIGGER" is one of "scheduled" or "manual".
+# 4. "BACKUP_RESULT" is the completed backup result.
+# 5. "NEXT_RUN_EPOCH" is the already-computed next scheduled run epoch.
+#
+# Returns: None.
+#
+# N.B.
+# This keeps scheduled-loop operator wording in one place. Backup execution
+# reports what happened during the run, while the worker loop reports what
+# happens next in scheduled mode.
+# ------------------------------------------------------------------------------
+def log_scheduled_backup_follow_up(
+    RUNTIME_CONTEXT: WorkerRuntimeContext,
+    DEPS: WorkerRuntimeDeps,
+    BACKUP_TRIGGER: str,
+    BACKUP_RESULT: BackupRunResult,
+    NEXT_RUN_EPOCH: int,
+) -> None:
+    if BACKUP_RESULT.summary.traversal_complete and BACKUP_RESULT.manifest_updated:
+        return
+
+    log_debug(
+        RUNTIME_CONTEXT,
+        DEPS,
+        "Scheduled backup follow-up: "
+        f"trigger={BACKUP_TRIGGER}, "
+        f"traversal_complete={BACKUP_RESULT.summary.traversal_complete}, "
+        f"manifest_updated={BACKUP_RESULT.manifest_updated}, "
+        f"delete_phase_skipped={BACKUP_RESULT.summary.delete_phase_skipped}, "
+        f"next_run_epoch={NEXT_RUN_EPOCH}.",
+    )
+    DEPS.log_line_fn(
+        RUNTIME_CONTEXT.log_file,
+        "error",
+        "Scheduled backup did not complete successfully. "
+        "The worker is still running and the next scheduled run will retry. "
+        f"Next scheduled epoch: {NEXT_RUN_EPOCH}.",
+    )
+
+
+# ------------------------------------------------------------------------------
 # This function captures the startup cutover cursor for Telegram polling.
 #
 # 1. "RUNTIME_CONTEXT" is shared worker runtime state.
@@ -721,12 +766,19 @@ def run_scheduled_worker_loop(
             DEPS,
             f"Backup trigger selected: trigger={BACKUP_TRIGGER}.",
         )
-        DEPS.run_backup_fn(
+        BACKUP_RESULT = DEPS.run_backup_fn(
             CLIENT,
             RUNTIME_CONTEXT.config,
             RUNTIME_CONTEXT.telegram,
             RUNTIME_CONTEXT.log_file,
             BACKUP_TRIGGER,
+        )
+        log_scheduled_backup_follow_up(
+            RUNTIME_CONTEXT,
+            DEPS,
+            BACKUP_TRIGGER,
+            BACKUP_RESULT,
+            NEXT_RUN_EPOCH,
         )
         BACKUP_REQUESTED = False
         DEPS.sleep_fn(5)

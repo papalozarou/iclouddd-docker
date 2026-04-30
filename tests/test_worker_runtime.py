@@ -181,7 +181,19 @@ class TestWorkerRuntime(unittest.TestCase):
             poll_command_batch_fn=poll_command_batch_fn,
             handle_command_fn=HANDLE_COMMAND_FN,
             enforce_safety_net_fn=ENFORCE_SAFETY_NET_FN,
-            run_backup_fn=Mock(),
+            run_backup_fn=Mock(
+                return_value=BackupRunResult(
+                    summary=SimpleNamespace(
+                        traversal_complete=True,
+                        traversal_hard_failures=0,
+                        delete_phase_skipped=False,
+                    ),
+                    manifest_updated=True,
+                    total_errors=0,
+                    completion_message="complete",
+                    completion_log_message="Backup complete.",
+                )
+            ),
             notify_fn=NOTIFY_FN,
             log_line_fn=Mock(),
             get_next_run_epoch_fn=lambda *_: 200,
@@ -910,6 +922,91 @@ class TestWorkerRuntime(unittest.TestCase):
         ]
         self.assertTrue(
             any("Scheduled loop decision:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertTrue(
+            any("Scheduled loop sleeping: reason=no_due_backup" in LINE for LINE in DEBUG_LINES)
+        )
+
+# --------------------------------------------------------------------------
+# This test confirms a handled traversal failure during a due scheduled run
+# leaves the worker alive, keeps the next schedule, and emits visible retry
+# guidance instead of crashing the loop.
+# --------------------------------------------------------------------------
+    def test_run_scheduled_worker_loop_survives_incomplete_backup_and_retries_later(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            RUNTIME_CONTEXT, _TELEGRAM, AUTH_STATE = self.build_runtime_context(TMPDIR)
+            PROCESS_COMMANDS = Mock(return_value=([], None))
+            NEXT_RUN_EPOCHS: list[int] = []
+            SLEEP_CALLS = {"count": 0}
+            INCOMPLETE_RESULT = BackupRunResult(
+                summary=SimpleNamespace(
+                    traversal_complete=False,
+                    traversal_hard_failures=1,
+                    delete_phase_skipped=True,
+                ),
+                manifest_updated=False,
+                total_errors=1,
+                completion_message="partial",
+                completion_log_message="Backup completed with incomplete traversal.",
+            )
+
+            def get_next_run_epoch_fn(_CONFIG, NOW_EPOCH):
+                NEXT_RUN_EPOCHS.append(NOW_EPOCH)
+                return 200 if len(NEXT_RUN_EPOCHS) == 1 else 500
+
+            def sleep_fn(_SECONDS: float) -> None:
+                SLEEP_CALLS["count"] += 1
+                if SLEEP_CALLS["count"] >= 2:
+                    raise StopWorkerLoop()
+
+            DEPS = self.build_deps(
+                PROCESS_COMMANDS_FN=PROCESS_COMMANDS,
+                HANDLE_COMMAND_FN=Mock(),
+                ENFORCE_SAFETY_NET_FN=Mock(return_value=True),
+                NOTIFY_FN=Mock(),
+                SLEEP_FN=sleep_fn,
+            )
+            DEPS.time_fn = Mock(side_effect=[100, 200, 200, 200])
+            DEPS.get_next_run_epoch_fn = Mock(side_effect=get_next_run_epoch_fn)
+            DEPS.run_backup_fn = Mock(return_value=INCOMPLETE_RESULT)
+
+            with self.assertRaises(StopWorkerLoop):
+                run_scheduled_worker_loop(
+                    RUNTIME_CONTEXT,
+                    Mock(),
+                    WorkerAuthState(auth_state=AUTH_STATE, is_authenticated=True),
+                    CommandPollingState(phase="live_polling", next_update_offset=None),
+                    DEPS,
+                )
+
+        DEPS.run_backup_fn.assert_called_once()
+        self.assertEqual(NEXT_RUN_EPOCHS, [100, 200])
+        ERROR_LINES = [
+            CALL.args[2]
+            for CALL in DEPS.log_line_fn.call_args_list
+            if CALL.args[1] == "error"
+        ]
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in DEPS.log_line_fn.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(
+            any(
+                "Scheduled backup did not complete successfully." in LINE
+                and "next scheduled run will retry" in LINE
+                for LINE in ERROR_LINES
+            )
+        )
+        self.assertTrue(
+            any("Scheduled backup follow-up:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertTrue(
+            any(
+                "Next scheduled backup calculated: next_run_epoch=500."
+                in LINE
+                for LINE in DEBUG_LINES
+            )
         )
         self.assertTrue(
             any("Scheduled loop sleeping: reason=no_due_backup" in LINE for LINE in DEBUG_LINES)

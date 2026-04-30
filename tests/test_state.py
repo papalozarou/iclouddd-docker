@@ -102,12 +102,13 @@ class TestState(unittest.TestCase):
         with tempfile.TemporaryDirectory() as TMPDIR:
             PATH = Path(TMPDIR) / "data.json"
             PAYLOAD = {"a": 1, "b": {"c": 2}}
-            write_json(PATH, PAYLOAD)
+            RESULT = write_json(PATH, PAYLOAD)
 
             self.assertTrue(PATH.exists())
             self.assertFalse((Path(TMPDIR) / "data.json.tmp").exists())
             WRITTEN = json.loads(PATH.read_text(encoding="utf-8"))
 
+        self.assertTrue(RESULT)
         self.assertEqual(WRITTEN, PAYLOAD)
 
 # --------------------------------------------------------------------------
@@ -121,8 +122,9 @@ class TestState(unittest.TestCase):
             PAYLOAD = {"a": 1, "b": {"c": 2}}
 
             with patch("app.state.log_line") as LOG_LINE:
-                write_json(PATH, PAYLOAD, LOG_FILE)
+                RESULT = write_json(PATH, PAYLOAD, LOG_FILE)
 
+        self.assertTrue(RESULT)
         DEBUG_LINES = [
             CALL.args[2]
             for CALL in LOG_LINE.call_args_list
@@ -132,7 +134,8 @@ class TestState(unittest.TestCase):
         self.assertTrue(any("keys=2" in LINE for LINE in DEBUG_LINES))
 
 # --------------------------------------------------------------------------
-# This test confirms write failures warn and leave the destination untouched.
+# This test confirms write failures return False and leave the destination
+# untouched.
 # --------------------------------------------------------------------------
     def test_write_json_warns_when_open_fails(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
@@ -141,8 +144,9 @@ class TestState(unittest.TestCase):
             with patch.object(Path, "open", side_effect=OSError("disk full")):
                 with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
                     with patch("builtins.print") as PRINT:
-                        write_json(PATH, {"a": 1})
+                        RESULT = write_json(PATH, {"a": 1})
 
+            self.assertFalse(RESULT)
             self.assertFalse(PATH.exists())
             self.assertTrue(any("State write failed" in CALL.args[0] for CALL in PRINT.call_args_list))
 
@@ -159,8 +163,9 @@ class TestState(unittest.TestCase):
                 with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
                     with patch("builtins.print"):
                         with patch("app.state.log_line") as LOG_LINE:
-                            write_json(PATH, {"a": 1}, LOG_FILE)
+                            RESULT = write_json(PATH, {"a": 1}, LOG_FILE)
 
+        self.assertFalse(RESULT)
         DEBUG_LINES = [
             CALL.args[2]
             for CALL in LOG_LINE.call_args_list
@@ -184,8 +189,9 @@ class TestState(unittest.TestCase):
             with patch.object(Path, "replace", side_effect=OSError("replace failed")):
                 with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
                     with patch("builtins.print") as PRINT:
-                        write_json(PATH, {"a": 1})
+                        RESULT = write_json(PATH, {"a": 1})
 
+            self.assertFalse(RESULT)
             self.assertFalse(PATH.exists())
             self.assertFalse(TEMP_PATH.exists())
             self.assertTrue(any("State write failed" in CALL.args[0] for CALL in PRINT.call_args_list))
@@ -208,8 +214,9 @@ class TestState(unittest.TestCase):
                 with patch.object(Path, "unlink", new=fake_unlink):
                     with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
                         with patch("builtins.print") as PRINT:
-                            write_json(PATH, {"a": 1})
+                            RESULT = write_json(PATH, {"a": 1})
 
+            self.assertFalse(RESULT)
             self.assertTrue(any("Temporary state cleanup failed" in CALL.args[0] for CALL in PRINT.call_args_list))
 
 # --------------------------------------------------------------------------
@@ -304,6 +311,24 @@ class TestState(unittest.TestCase):
         self.assertTrue(
             any("Auth state loaded from persistence:" in LINE for LINE in DEBUG_LINES)
         )
+
+# --------------------------------------------------------------------------
+# This test confirms auth-state save failures return False to callers.
+# --------------------------------------------------------------------------
+    def test_save_auth_state_returns_false_when_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            PATH = Path(TMPDIR) / "auth_state.json"
+            INPUT_STATE = AuthState(
+                last_auth_utc="2026-03-09T09:00:00+00:00",
+                auth_pending=True,
+                reauth_pending=False,
+                reminder_stage="alert5",
+            )
+
+            with patch("app.state.write_json", return_value=False):
+                RESULT = save_auth_state(PATH, INPUT_STATE)
+
+        self.assertFalse(RESULT)
 
 # --------------------------------------------------------------------------
 # This test confirms manifest loading keeps only dictionary entries.

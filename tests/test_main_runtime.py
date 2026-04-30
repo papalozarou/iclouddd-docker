@@ -34,7 +34,7 @@ from app.main import (
 )
 from app.scheduler import get_monthly_weekday_day
 from app.worker_runtime import CommandPollingState, WorkerAuthState, wait_for_one_shot_auth
-from app.state import AuthState
+from app.state import AuthState, load_auth_state, save_auth_state
 from app.syncer import SyncResult
 from app.telegram_bot import TelegramConfig
 
@@ -484,6 +484,52 @@ class TestMainRuntimeHelpers(unittest.TestCase):
             SAVE_CREDENTIALS.assert_not_called()
             self.assertIn("Authentication failed", NOTIFY.call_args[0][1])
             self.assertIn("could not be saved", NOTIFY.call_args[0][1])
+
+# --------------------------------------------------------------------------
+# This test confirms a failed auth-state save leaves the previously persisted
+# auth state in place for the next startup.
+# --------------------------------------------------------------------------
+    def test_attempt_auth_failed_save_preserves_persisted_state_for_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            AUTH_STATE_PATH = Path(TMPDIR) / "pyiclodoc-drive-auth_state.json"
+            TELEGRAM = TelegramConfig("token", "12345")
+            PERSISTED_STATE = AuthState(
+                "2026-03-01T00:00:00+00:00",
+                True,
+                False,
+                "alert5",
+            )
+            CLIENT = Mock()
+            CLIENT.complete_authentication.return_value = (True, "ok")
+            CLIENT.config = SimpleNamespace(
+                keychain_service_name="pyiclodoc-drive",
+                icloud_email="alice@example.com",
+                icloud_password="password",
+            )
+
+            self.assertTrue(save_auth_state(AUTH_STATE_PATH, PERSISTED_STATE))
+
+            with patch("app.main.now_iso", return_value="2026-03-10T10:00:00+00:00"):
+                with patch("app.main.notify"):
+                    with patch("app.main.save_auth_state", return_value=False):
+                        RESULT = attempt_auth(
+                            CLIENT,
+                            PERSISTED_STATE,
+                            AUTH_STATE_PATH,
+                            TELEGRAM,
+                            "alice",
+                            "alice@example.com",
+                            " 123456 ",
+                        )
+
+            RELOADED_STATE = load_auth_state(AUTH_STATE_PATH)
+            self.assertEqual(RESULT.auth_state, PERSISTED_STATE)
+            self.assertFalse(RESULT.is_authenticated)
+            self.assertEqual(
+                RESULT.reason_code,
+                "state_save_failed_after_success",
+            )
+            self.assertEqual(RELOADED_STATE, PERSISTED_STATE)
 
 # --------------------------------------------------------------------------
 # This test confirms attempt_auth MFA-required branch sets auth pending.

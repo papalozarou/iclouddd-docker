@@ -143,6 +143,42 @@ class TestScripts(unittest.TestCase):
             self.assertNotEqual(RESULT.returncode, 0)
 
 # --------------------------------------------------------------------------
+# This test confirms healthcheck uses the shared default heartbeat budget
+# when no explicit env override is set.
+# --------------------------------------------------------------------------
+    def test_healthcheck_uses_default_max_age_budget_when_unset(self) -> None:
+        REPO_ROOT = get_repo_root()
+        HEALTHCHECK_PATH = REPO_ROOT / "scripts" / "healthcheck.sh"
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            ROOT_DIR = Path(TMPDIR)
+            HEARTBEAT_PATH = ROOT_DIR / "pyiclodoc-drive-heartbeat.txt"
+            HEARTBEAT_PATH.write_text("ok\n", encoding="utf-8")
+            OLD_EPOCH = int(os.path.getmtime(HEARTBEAT_PATH)) - 70
+            os.utime(HEARTBEAT_PATH, (OLD_EPOCH, OLD_EPOCH))
+
+            BIN_DIR = ROOT_DIR / "bin"
+            BIN_DIR.mkdir(parents=True, exist_ok=True)
+            PARALLEL_PATH = BIN_DIR / "parallel"
+            PARALLEL_PATH.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            PARALLEL_PATH.chmod(PARALLEL_PATH.stat().st_mode | stat.S_IXUSR)
+
+            ENV = os.environ.copy()
+            ENV["PATH"] = f"{BIN_DIR}{os.pathsep}{ENV.get('PATH', '')}"
+            ENV["HEARTBEAT_FILE"] = str(HEARTBEAT_PATH)
+            ENV.pop("HEALTHCHECK_MAX_AGE_SECONDS", None)
+
+            RESULT = subprocess.run(
+                ["sh", str(HEALTHCHECK_PATH)],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=ENV,
+            )
+
+            self.assertNotEqual(RESULT.returncode, 0)
+
+# --------------------------------------------------------------------------
 # This test confirms traversal-worker helper caps recommendations at the
 # highest supported traversal-worker tier.
 # --------------------------------------------------------------------------

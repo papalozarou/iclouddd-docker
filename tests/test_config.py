@@ -57,7 +57,7 @@ class TestConfigLoad(unittest.TestCase):
         self.assertEqual(CONFIG.download_chunk_mib, 4)
         self.assertEqual(CONFIG.reauth_interval_days, 30)
         self.assertEqual(CONFIG.safety_net_sample_size, 200)
-        self.assertEqual(CONFIG.heartbeat_max_age_seconds, 900)
+        self.assertEqual(CONFIG.heartbeat_max_age_seconds, 65)
         self.assertFalse(CONFIG.run_once)
         self.assertEqual(CONFIG.icloud_email, "")
         self.assertEqual(CONFIG.icloud_password, "")
@@ -136,7 +136,7 @@ class TestConfigLoad(unittest.TestCase):
         self.assertEqual(CONFIG.sync_workers, 0)
         self.assertEqual(CONFIG.download_chunk_mib, 4)
         self.assertEqual(CONFIG.reauth_interval_days, 30)
-        self.assertEqual(CONFIG.heartbeat_max_age_seconds, 900)
+        self.assertEqual(CONFIG.heartbeat_max_age_seconds, 65)
         self.assertEqual(CONFIG.safety_net_sample_size, 200)
         self.assertEqual(
             CONFIG.config_parse_errors,

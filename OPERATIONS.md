@@ -8,6 +8,8 @@
   seconds in both recurring and one-shot execution paths.
 - `HEALTHCHECK_MAX_AGE_SECONDS` sets the shared heartbeat liveness budget used
   by both the worker self-check and the container healthcheck.
+- If `HEALTHCHECK_MAX_AGE_SECONDS` is unset, both runtime paths default to 65
+  seconds.
 - `HEALTHCHECK_MAX_AGE_SECONDS` must be at least 30 because any lower value is
   shorter than the worker heartbeat cadence and can mark a healthy worker as
   unhealthy.

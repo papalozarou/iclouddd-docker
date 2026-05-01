@@ -101,9 +101,14 @@ COPY scripts/start.sh /app/scripts/start.sh
 COPY scripts/healthcheck.sh /app/scripts/healthcheck.sh
 
 # ------------------------------------------------------------------------------
-# Mark startup scripts as executable so entrypoint and launcher can run.
+# Mark runtime scripts as executable so entrypoint, launcher, and healthcheck
+# can run inside the final image.
 # ------------------------------------------------------------------------------
-RUN chmod +x /app/scripts/entrypoint.sh /app/scripts/start.sh /bin/parallel
+RUN chmod +x \
+    /app/scripts/entrypoint.sh \
+    /app/scripts/start.sh \
+    /app/scripts/healthcheck.sh \
+    /bin/parallel
 
 # ------------------------------------------------------------------------------
 # Declare persistent mount points used by Compose volume bindings.

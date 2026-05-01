@@ -22,6 +22,19 @@ def get_repo_root() -> Path:
 # ------------------------------------------------------------------------------
 class TestScripts(unittest.TestCase):
 # --------------------------------------------------------------------------
+# This test confirms the Docker image marks the runtime shell scripts as
+# executable, including the healthcheck entrypoint Docker runs directly.
+# --------------------------------------------------------------------------
+    def test_dockerfile_marks_runtime_scripts_executable(self) -> None:
+        REPO_ROOT = get_repo_root()
+        DOCKERFILE_TEXT = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn("/app/scripts/entrypoint.sh", DOCKERFILE_TEXT)
+        self.assertIn("/app/scripts/start.sh", DOCKERFILE_TEXT)
+        self.assertIn("/app/scripts/healthcheck.sh", DOCKERFILE_TEXT)
+        self.assertIn("/bin/parallel", DOCKERFILE_TEXT)
+
+# --------------------------------------------------------------------------
 # This test confirms shell scripts pass POSIX syntax checks.
 # --------------------------------------------------------------------------
     def test_scripts_have_valid_shell_syntax(self) -> None:

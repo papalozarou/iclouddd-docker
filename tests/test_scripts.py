@@ -51,6 +51,7 @@ class TestScripts(unittest.TestCase):
         REPO_ROOT = get_repo_root()
         SCRIPT_PATHS = [
             REPO_ROOT / "check-traversal-workers.sh",
+            REPO_ROOT / "scripts" / "check_image_healthcheck.sh",
             REPO_ROOT / "scripts" / "entrypoint.sh",
             REPO_ROOT / "scripts" / "start.sh",
             REPO_ROOT / "scripts" / "healthcheck.sh",

@@ -22,8 +22,18 @@ def get_repo_root() -> Path:
 # ------------------------------------------------------------------------------
 class TestScripts(unittest.TestCase):
 # --------------------------------------------------------------------------
+# This test confirms the Docker image runs the healthcheck through "sh"
+# instead of relying on direct script execution inside the container.
+# --------------------------------------------------------------------------
+    def test_dockerfile_runs_healthcheck_via_shell(self) -> None:
+        REPO_ROOT = get_repo_root()
+        DOCKERFILE_TEXT = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn('CMD ["sh", "/app/scripts/healthcheck.sh"]', DOCKERFILE_TEXT)
+
+# --------------------------------------------------------------------------
 # This test confirms the Docker image marks the runtime shell scripts as
-# executable, including the healthcheck entrypoint Docker runs directly.
+# executable, including the healthcheck script used by the image runtime.
 # --------------------------------------------------------------------------
     def test_dockerfile_marks_runtime_scripts_executable(self) -> None:
         REPO_ROOT = get_repo_root()

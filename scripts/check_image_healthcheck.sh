@@ -56,7 +56,7 @@ HEALTHCHECK_TEST="$(
     --format '{{json .Config.Healthcheck.Test}}'
 )"
 
-[ "${HEALTHCHECK_TEST}" = '["CMD","/app/scripts/healthcheck.sh"]' ] || \
+[ "${HEALTHCHECK_TEST}" = '["CMD-SHELL","/app/scripts/healthcheck.sh"]' ] || \
   failCheck "image healthcheck command did not match expected invocation"
 
 docker run \

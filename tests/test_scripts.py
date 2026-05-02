@@ -94,6 +94,20 @@ class TestScripts(unittest.TestCase):
         self.assertNotIn("MCK_VER", VERIFIER_TEXT)
 
 # --------------------------------------------------------------------------
+# This test confirms the image-level healthcheck verifier expects the shell
+# form recorded by Docker for the current HEALTHCHECK instruction.
+# --------------------------------------------------------------------------
+    def test_healthcheck_verifier_matches_current_docker_healthcheck_form(self) -> None:
+        REPO_ROOT = get_repo_root()
+        VERIFIER_TEXT = (
+            REPO_ROOT / "scripts" / "check_image_healthcheck.sh"
+        ).read_text(encoding="utf-8")
+        DOCKERFILE_TEXT = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn('CMD /app/scripts/healthcheck.sh', DOCKERFILE_TEXT)
+        self.assertIn('["CMD-SHELL","/app/scripts/healthcheck.sh"]', VERIFIER_TEXT)
+
+# --------------------------------------------------------------------------
 # This test confirms shell scripts pass POSIX syntax checks.
 # --------------------------------------------------------------------------
     def test_scripts_have_valid_shell_syntax(self) -> None:

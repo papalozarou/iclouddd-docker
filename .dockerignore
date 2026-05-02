@@ -5,26 +5,26 @@
 
 # ------------------------------------------------------------------------------
 # Project-specific ignores.
-#
-# Add project-specific patterns in this section.
 # ------------------------------------------------------------------------------
-.github/copilot-instructions.md
+.github/
 .git/
 .gitignore
 .shellcheckrc
-*.md
-CODE_REVIEW.md
-README.md
-TODO.md
-scratchpad.sh
-test.sh
-
-# ------------------------------------------------------------------------------
-# AI related
-# ------------------------------------------------------------------------------
-.claude
 AGENTS.md
-CLAUDE.md
+CODE_REVIEW.md
+CONFIGURATION.md
+LICENSE
+OPERATIONS.md
+PROMPT.md
+README.md
+SCHEDULING.md
+TELEGRAM.md
+TODO.md
+check-traversal-workers.sh
+coverage.xml
+scratchpad.sh
+scripts/check_docs.py
+test.sh
 
 # ------------------------------------------------------------------------------
 # Environment and secrets.
@@ -66,6 +66,7 @@ data/
 docker-compose.yml
 logs/
 output/
+tests/
 
 # ------------------------------------------------------------------------------
 # IDE and operating system files.

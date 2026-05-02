@@ -96,14 +96,16 @@ COPY --from=microcheck /bin/parallel /bin/parallel
 # Copy worker application source code and operational scripts into the image.
 # ------------------------------------------------------------------------------
 COPY app /app/app
-COPY scripts/entrypoint.sh /app/scripts/entrypoint.sh
-COPY scripts/start.sh /app/scripts/start.sh
-COPY scripts/healthcheck.sh /app/scripts/healthcheck.sh
+COPY scripts/entrypoint.sh scripts/start.sh scripts/healthcheck.sh /app/scripts/
 
 # ------------------------------------------------------------------------------
 # Mark startup scripts as executable so entrypoint and launcher can run.
 # ------------------------------------------------------------------------------
-RUN chmod +x /app/scripts/entrypoint.sh /app/scripts/start.sh /bin/parallel
+RUN chmod +x \
+    /app/scripts/entrypoint.sh \
+    /app/scripts/start.sh \
+    /app/scripts/healthcheck.sh \
+    /bin/parallel
 
 # ------------------------------------------------------------------------------
 # Declare persistent mount points used by Compose volume bindings.

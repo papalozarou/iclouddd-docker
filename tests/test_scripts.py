@@ -22,6 +22,53 @@ def get_repo_root() -> Path:
 # ------------------------------------------------------------------------------
 class TestScripts(unittest.TestCase):
 # --------------------------------------------------------------------------
+# This test confirms `.dockerignore` excludes local-only files with explicit
+# project rules instead of relying on a broad markdown wildcard.
+# --------------------------------------------------------------------------
+    def test_dockerignore_matches_project_build_contract(self) -> None:
+        REPO_ROOT = get_repo_root()
+        DOCKERIGNORE_TEXT = (REPO_ROOT / ".dockerignore").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("*.md", DOCKERIGNORE_TEXT)
+        self.assertIn(".github/", DOCKERIGNORE_TEXT)
+        self.assertIn("PROMPT.md", DOCKERIGNORE_TEXT)
+        self.assertIn("README.md", DOCKERIGNORE_TEXT)
+        self.assertIn("scripts/check_docs.py", DOCKERIGNORE_TEXT)
+        self.assertIn("tests/", DOCKERIGNORE_TEXT)
+        self.assertNotIn("scripts/entrypoint.sh", DOCKERIGNORE_TEXT)
+        self.assertNotIn("scripts/start.sh", DOCKERIGNORE_TEXT)
+        self.assertNotIn("scripts/healthcheck.sh", DOCKERIGNORE_TEXT)
+
+# --------------------------------------------------------------------------
+# This test confirms the Dockerfile copies only the runtime shell scripts
+# needed by the image instead of the whole local scripts directory.
+# --------------------------------------------------------------------------
+    def test_dockerfile_copies_only_runtime_shell_scripts(self) -> None:
+        REPO_ROOT = get_repo_root()
+        DOCKERFILE_TEXT = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "COPY scripts/entrypoint.sh scripts/start.sh scripts/healthcheck.sh /app/scripts/",
+            DOCKERFILE_TEXT,
+        )
+        self.assertNotIn("COPY scripts /app/scripts", DOCKERFILE_TEXT)
+
+# --------------------------------------------------------------------------
+# This test confirms the Dockerfile marks each runtime shell script as
+# executable, including the healthcheck used by Docker health probing.
+# --------------------------------------------------------------------------
+    def test_dockerfile_marks_runtime_scripts_executable(self) -> None:
+        REPO_ROOT = get_repo_root()
+        DOCKERFILE_TEXT = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn("/app/scripts/entrypoint.sh", DOCKERFILE_TEXT)
+        self.assertIn("/app/scripts/start.sh", DOCKERFILE_TEXT)
+        self.assertIn("/app/scripts/healthcheck.sh", DOCKERFILE_TEXT)
+        self.assertIn("/bin/parallel", DOCKERFILE_TEXT)
+
+# --------------------------------------------------------------------------
 # This test confirms shell scripts pass POSIX syntax checks.
 # --------------------------------------------------------------------------
     def test_scripts_have_valid_shell_syntax(self) -> None:

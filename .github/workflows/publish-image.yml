@@ -46,11 +46,9 @@ jobs:
           set -eu
 
           ALP_VER="$(awk -F= '/^ALP_VER=/{print $2}' .env.example)"
-          MCK_VER="$(awk -F= '/^MCK_VER=/{print $2}' .env.example)"
           IMAGE_NAME="ghcr.io/$(printf '%s' "${REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
 
           echo "alp_ver=${ALP_VER}" >> "${GITHUB_OUTPUT}"
-          echo "mck_ver=${MCK_VER}" >> "${GITHUB_OUTPUT}"
           echo "image_name=${IMAGE_NAME}" >> "${GITHUB_OUTPUT}"
           echo "tag_name=${TAG_NAME}" >> "${GITHUB_OUTPUT}"
 
@@ -75,7 +73,6 @@ jobs:
           docker buildx build \
             --platform linux/amd64 \
             --build-arg "ALP_VER=${{ steps.image-meta.outputs.alp_ver }}" \
-            --build-arg "MCK_VER=${{ steps.image-meta.outputs.mck_ver }}" \
             --tag "${{ steps.image-meta.outputs.image_name }}:${{ steps.image-meta.outputs.tag_name }}" \
             --tag "${{ steps.image-meta.outputs.image_name }}:latest" \
             --push \

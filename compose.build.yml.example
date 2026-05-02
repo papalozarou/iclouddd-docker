@@ -83,7 +83,6 @@ services:
       context: .
       args:
         ALP_VER: "${ALP_VER}"
-        MCK_VER: "${MCK_VER}"
     init: true
     secrets:
       - telegram_bot_token
@@ -127,7 +126,6 @@ services:
       context: .
       args:
         ALP_VER: "${ALP_VER}"
-        MCK_VER: "${MCK_VER}"
     init: true
     secrets:
       - telegram_bot_token

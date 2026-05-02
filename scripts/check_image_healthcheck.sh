@@ -1,0 +1,99 @@
+#!/bin/sh
+# ------------------------------------------------------------------------------
+# This script verifies healthcheck behaviour in a built container image.
+#
+# It proves the runtime contract that source-level tests alone cannot cover:
+#
+# 1. The built image carries the expected Docker healthcheck command.
+# 2. A fresh heartbeat file passes the healthcheck.
+# 3. A stale heartbeat file fails the healthcheck.
+# 4. A missing heartbeat file fails the healthcheck.
+# ------------------------------------------------------------------------------
+
+set -eu
+
+REPO_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+IMAGE_TAG="${1:-pyiclodoc-drive:healthcheck-test}"
+CONTAINER_NAME="pyiclodoc-drive-healthcheck-test-$$"
+TEMP_ROOT="$(mktemp -d)"
+LOGS_DIR="${TEMP_ROOT}/logs"
+
+# ------------------------------------------------------------------------------
+# This function prints an error message and exits non-zero.
+#
+# 1. "${1:?}" is the error message to print.
+# ------------------------------------------------------------------------------
+failCheck() {
+  printf '%s\n' "${1:?}" >&2
+  exit 1
+}
+
+# ------------------------------------------------------------------------------
+# This function removes the temporary verification container and directories on
+# exit.
+# ------------------------------------------------------------------------------
+cleanupContainer() {
+  docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+  rm -rf "${TEMP_ROOT}"
+}
+
+trap cleanupContainer EXIT INT TERM
+
+command -v docker >/dev/null 2>&1 || failCheck "docker is required"
+
+mkdir -p "${LOGS_DIR}"
+chmod 0777 "${LOGS_DIR}"
+
+ALP_VER="$(awk -F= '/^ALP_VER=/{print $2}' "${REPO_ROOT}/.env.example")"
+
+docker build \
+  --build-arg "ALP_VER=${ALP_VER}" \
+  --tag "${IMAGE_TAG}" \
+  "${REPO_ROOT}"
+
+HEALTHCHECK_TEST="$(
+  docker image inspect "${IMAGE_TAG}" \
+    --format '{{json .Config.Healthcheck.Test}}'
+)"
+
+[ "${HEALTHCHECK_TEST}" = '["CMD","/app/scripts/healthcheck.sh"]' ] || \
+  failCheck "image healthcheck command did not match expected invocation"
+
+docker run \
+  --detach \
+  --name "${CONTAINER_NAME}" \
+  --entrypoint sh \
+  --mount "type=bind,src=${LOGS_DIR},dst=/logs" \
+  "${IMAGE_TAG}" \
+  -c 'sleep 300' >/dev/null
+
+docker exec "${CONTAINER_NAME}" sh -c \
+  ': > /logs/pyiclodoc-drive-heartbeat.txt'
+
+docker exec "${CONTAINER_NAME}" sh -c \
+  '/app/scripts/healthcheck.sh'
+
+docker exec "${CONTAINER_NAME}" python3 -c '
+import os
+import time
+PATH = "/logs/pyiclodoc-drive-heartbeat.txt"
+OLD_EPOCH = time.time() - 70
+os.utime(PATH, (OLD_EPOCH, OLD_EPOCH))
+'
+
+if docker exec "${CONTAINER_NAME}" sh -c \
+  '/app/scripts/healthcheck.sh'
+then
+  failCheck "stale heartbeat unexpectedly passed healthcheck"
+fi
+
+docker exec "${CONTAINER_NAME}" sh -c \
+  'rm -f /logs/pyiclodoc-drive-heartbeat.txt'
+
+if docker exec "${CONTAINER_NAME}" sh -c \
+  '/app/scripts/healthcheck.sh'
+then
+  failCheck "missing heartbeat unexpectedly passed healthcheck"
+fi
+
+printf '%s\n' "Image healthcheck verification passed."

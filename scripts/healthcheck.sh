@@ -8,9 +8,6 @@ set -eu
 HEARTBEAT_FILE="${HEARTBEAT_FILE:-/logs/pyiclodoc-drive-heartbeat.txt}"
 MAX_AGE_SECONDS="${HEALTHCHECK_MAX_AGE_SECONDS:-65}"
 
-command -v parallel >/dev/null 2>&1
-parallel "test -f \"$HEARTBEAT_FILE\"" >/dev/null 2>&1
-
 [ -f "$HEARTBEAT_FILE" ]
 
 NOW_EPOCH="$(date +%s)"

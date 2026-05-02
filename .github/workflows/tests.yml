@@ -39,3 +39,19 @@ jobs:
       # ------------------------------------------------------------------------
       - name: Run unit tests
         run: python3 -m unittest -q
+
+  image-healthcheck:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ------------------------------------------------------------------------
+      # Fetch the repository contents for built-image verification.
+      # ------------------------------------------------------------------------
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      # ------------------------------------------------------------------------
+      # Run the image-level healthcheck verification used in local testing.
+      # ------------------------------------------------------------------------
+      - name: Verify built image healthcheck behaviour
+        run: sh ./scripts/check_image_healthcheck.sh

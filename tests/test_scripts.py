@@ -66,7 +66,32 @@ class TestScripts(unittest.TestCase):
         self.assertIn("/app/scripts/entrypoint.sh", DOCKERFILE_TEXT)
         self.assertIn("/app/scripts/start.sh", DOCKERFILE_TEXT)
         self.assertIn("/app/scripts/healthcheck.sh", DOCKERFILE_TEXT)
-        self.assertIn("/bin/parallel", DOCKERFILE_TEXT)
+        self.assertNotIn("/bin/parallel", DOCKERFILE_TEXT)
+
+# --------------------------------------------------------------------------
+# This test confirms the Dockerfile no longer uses the microcheck stage now
+# that healthcheck no longer depends on the copied `parallel` binary.
+# --------------------------------------------------------------------------
+    def test_dockerfile_no_longer_uses_microcheck_stage(self) -> None:
+        REPO_ROOT = get_repo_root()
+        DOCKERFILE_TEXT = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertNotIn("AS microcheck", DOCKERFILE_TEXT)
+        self.assertNotIn("COPY --from=microcheck", DOCKERFILE_TEXT)
+        self.assertNotIn("MCK_VER", DOCKERFILE_TEXT)
+
+# --------------------------------------------------------------------------
+# This test confirms the image-level healthcheck verifier only passes build
+# arguments that the Dockerfile still consumes.
+# --------------------------------------------------------------------------
+    def test_healthcheck_verifier_uses_only_live_build_args(self) -> None:
+        REPO_ROOT = get_repo_root()
+        VERIFIER_TEXT = (
+            REPO_ROOT / "scripts" / "check_image_healthcheck.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('--build-arg "ALP_VER=${ALP_VER}"', VERIFIER_TEXT)
+        self.assertNotIn("MCK_VER", VERIFIER_TEXT)
 
 # --------------------------------------------------------------------------
 # This test confirms shell scripts pass POSIX syntax checks.
@@ -75,6 +100,7 @@ class TestScripts(unittest.TestCase):
         REPO_ROOT = get_repo_root()
         SCRIPT_PATHS = [
             REPO_ROOT / "check-traversal-workers.sh",
+            REPO_ROOT / "scripts" / "check_image_healthcheck.sh",
             REPO_ROOT / "scripts" / "entrypoint.sh",
             REPO_ROOT / "scripts" / "start.sh",
             REPO_ROOT / "scripts" / "healthcheck.sh",
@@ -101,14 +127,7 @@ class TestScripts(unittest.TestCase):
             HEARTBEAT_PATH = ROOT_DIR / "pyiclodoc-drive-heartbeat.txt"
             HEARTBEAT_PATH.write_text("ok\n", encoding="utf-8")
 
-            BIN_DIR = ROOT_DIR / "bin"
-            BIN_DIR.mkdir(parents=True, exist_ok=True)
-            PARALLEL_PATH = BIN_DIR / "parallel"
-            PARALLEL_PATH.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            PARALLEL_PATH.chmod(PARALLEL_PATH.stat().st_mode | stat.S_IXUSR)
-
             ENV = os.environ.copy()
-            ENV["PATH"] = f"{BIN_DIR}{os.pathsep}{ENV.get('PATH', '')}"
             ENV["HEARTBEAT_FILE"] = str(HEARTBEAT_PATH)
             ENV["HEALTHCHECK_MAX_AGE_SECONDS"] = "900"
 
@@ -133,14 +152,7 @@ class TestScripts(unittest.TestCase):
             ROOT_DIR = Path(TMPDIR)
             HEARTBEAT_PATH = ROOT_DIR / "missing-pyiclodoc-drive-heartbeat.txt"
 
-            BIN_DIR = ROOT_DIR / "bin"
-            BIN_DIR.mkdir(parents=True, exist_ok=True)
-            PARALLEL_PATH = BIN_DIR / "parallel"
-            PARALLEL_PATH.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            PARALLEL_PATH.chmod(PARALLEL_PATH.stat().st_mode | stat.S_IXUSR)
-
             ENV = os.environ.copy()
-            ENV["PATH"] = f"{BIN_DIR}{os.pathsep}{ENV.get('PATH', '')}"
             ENV["HEARTBEAT_FILE"] = str(HEARTBEAT_PATH)
             ENV["HEALTHCHECK_MAX_AGE_SECONDS"] = "900"
 
@@ -168,14 +180,7 @@ class TestScripts(unittest.TestCase):
             OLD_EPOCH = int(os.path.getmtime(HEARTBEAT_PATH)) - 70
             os.utime(HEARTBEAT_PATH, (OLD_EPOCH, OLD_EPOCH))
 
-            BIN_DIR = ROOT_DIR / "bin"
-            BIN_DIR.mkdir(parents=True, exist_ok=True)
-            PARALLEL_PATH = BIN_DIR / "parallel"
-            PARALLEL_PATH.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            PARALLEL_PATH.chmod(PARALLEL_PATH.stat().st_mode | stat.S_IXUSR)
-
             ENV = os.environ.copy()
-            ENV["PATH"] = f"{BIN_DIR}{os.pathsep}{ENV.get('PATH', '')}"
             ENV["HEARTBEAT_FILE"] = str(HEARTBEAT_PATH)
             ENV["HEALTHCHECK_MAX_AGE_SECONDS"] = "65"
 
@@ -204,14 +209,7 @@ class TestScripts(unittest.TestCase):
             OLD_EPOCH = int(os.path.getmtime(HEARTBEAT_PATH)) - 70
             os.utime(HEARTBEAT_PATH, (OLD_EPOCH, OLD_EPOCH))
 
-            BIN_DIR = ROOT_DIR / "bin"
-            BIN_DIR.mkdir(parents=True, exist_ok=True)
-            PARALLEL_PATH = BIN_DIR / "parallel"
-            PARALLEL_PATH.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            PARALLEL_PATH.chmod(PARALLEL_PATH.stat().st_mode | stat.S_IXUSR)
-
             ENV = os.environ.copy()
-            ENV["PATH"] = f"{BIN_DIR}{os.pathsep}{ENV.get('PATH', '')}"
             ENV["HEARTBEAT_FILE"] = str(HEARTBEAT_PATH)
             ENV.pop("HEALTHCHECK_MAX_AGE_SECONDS", None)
 

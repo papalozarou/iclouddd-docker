@@ -23,6 +23,7 @@ TODO.md
 check-traversal-workers.sh
 coverage.xml
 scratchpad.sh
+scripts/check_image_healthcheck.sh
 scripts/check_docs.py
 test.sh
 

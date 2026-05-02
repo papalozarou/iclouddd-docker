@@ -4,7 +4,7 @@
 #
 # It proves the runtime contract that source-level tests alone cannot cover:
 #
-# 1. The built image carries the expected Docker healthcheck command.
+# 1. The built image carries the expected shell-invoked Docker healthcheck.
 # 2. A fresh heartbeat file passes the healthcheck.
 # 3. A stale heartbeat file fails the healthcheck.
 # 4. A missing heartbeat file fails the healthcheck.
@@ -56,7 +56,7 @@ HEALTHCHECK_TEST="$(
     --format '{{json .Config.Healthcheck.Test}}'
 )"
 
-[ "${HEALTHCHECK_TEST}" = '["CMD-SHELL","/app/scripts/healthcheck.sh"]' ] || \
+[ "${HEALTHCHECK_TEST}" = '["CMD","sh","/app/scripts/healthcheck.sh"]' ] || \
   failCheck "image healthcheck command did not match expected invocation"
 
 docker run \
@@ -71,7 +71,7 @@ docker exec "${CONTAINER_NAME}" sh -c \
   ': > /logs/pyiclodoc-drive-heartbeat.txt'
 
 docker exec "${CONTAINER_NAME}" sh -c \
-  '/app/scripts/healthcheck.sh'
+  'sh /app/scripts/healthcheck.sh'
 
 docker exec "${CONTAINER_NAME}" python3 -c '
 import os
@@ -82,7 +82,7 @@ os.utime(PATH, (OLD_EPOCH, OLD_EPOCH))
 '
 
 if docker exec "${CONTAINER_NAME}" sh -c \
-  '/app/scripts/healthcheck.sh'
+  'sh /app/scripts/healthcheck.sh'
 then
   failCheck "stale heartbeat unexpectedly passed healthcheck"
 fi
@@ -91,7 +91,7 @@ docker exec "${CONTAINER_NAME}" sh -c \
   'rm -f /logs/pyiclodoc-drive-heartbeat.txt'
 
 if docker exec "${CONTAINER_NAME}" sh -c \
-  '/app/scripts/healthcheck.sh'
+  'sh /app/scripts/healthcheck.sh'
 then
   failCheck "missing heartbeat unexpectedly passed healthcheck"
 fi

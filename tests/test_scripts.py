@@ -69,6 +69,16 @@ class TestScripts(unittest.TestCase):
         self.assertNotIn("/bin/parallel", DOCKERFILE_TEXT)
 
 # --------------------------------------------------------------------------
+# This test confirms the Docker image runs the healthcheck through "sh"
+# instead of relying on direct script execution inside the container.
+# --------------------------------------------------------------------------
+    def test_dockerfile_runs_healthcheck_via_shell(self) -> None:
+        REPO_ROOT = get_repo_root()
+        DOCKERFILE_TEXT = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn('CMD ["sh", "/app/scripts/healthcheck.sh"]', DOCKERFILE_TEXT)
+
+# --------------------------------------------------------------------------
 # This test confirms the Dockerfile no longer uses the microcheck stage now
 # that healthcheck no longer depends on the copied `parallel` binary.
 # --------------------------------------------------------------------------
@@ -94,8 +104,8 @@ class TestScripts(unittest.TestCase):
         self.assertNotIn("MCK_VER", VERIFIER_TEXT)
 
 # --------------------------------------------------------------------------
-# This test confirms the image-level healthcheck verifier expects the shell
-# form recorded by Docker for the current HEALTHCHECK instruction.
+# This test confirms the image-level healthcheck verifier expects the exec-form
+# array recorded by Docker for the shell-invoked HEALTHCHECK instruction.
 # --------------------------------------------------------------------------
     def test_healthcheck_verifier_matches_current_docker_healthcheck_form(self) -> None:
         REPO_ROOT = get_repo_root()
@@ -104,8 +114,8 @@ class TestScripts(unittest.TestCase):
         ).read_text(encoding="utf-8")
         DOCKERFILE_TEXT = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
 
-        self.assertIn('CMD /app/scripts/healthcheck.sh', DOCKERFILE_TEXT)
-        self.assertIn('["CMD-SHELL","/app/scripts/healthcheck.sh"]', VERIFIER_TEXT)
+        self.assertIn('CMD ["sh", "/app/scripts/healthcheck.sh"]', DOCKERFILE_TEXT)
+        self.assertIn('["CMD","sh","/app/scripts/healthcheck.sh"]', VERIFIER_TEXT)
 
 # --------------------------------------------------------------------------
 # This test confirms shell scripts pass POSIX syntax checks.

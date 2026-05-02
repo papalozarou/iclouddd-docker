@@ -3,7 +3,8 @@
 ## Runtime notes
 
 - Compose `init: true` is required by the provided service definitions.
-- Health checks run the bundled shell script directly inside the worker image.
+- Health checks run the bundled shell script through `sh` inside the worker
+  image.
 - A background heartbeat updater refreshes `/logs/pyiclodoc-drive-heartbeat.txt` every 30
   seconds in both recurring and one-shot execution paths.
 - `HEALTHCHECK_MAX_AGE_SECONDS` sets the shared heartbeat liveness budget used

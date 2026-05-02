@@ -112,9 +112,11 @@ VOLUME ["/config", "/output", "/logs"]
 # 2. Time out after ten seconds.
 # 3. Allow thirty seconds start period.
 # 4. Mark unhealthy after three consecutive failures.
+# 5. Invoke the script through "sh" so health does not depend on direct script
+#    execution semantics alone.
 # ------------------------------------------------------------------------------
 HEALTHCHECK --interval=1m --timeout=10s --start-period=30s --retries=3 \
-  CMD /app/scripts/healthcheck.sh
+  CMD ["sh", "/app/scripts/healthcheck.sh"]
 
 # ------------------------------------------------------------------------------
 # Start the worker entrypoint script.

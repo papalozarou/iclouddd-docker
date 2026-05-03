@@ -39,10 +39,7 @@ COPY requirements.txt /build/requirements.txt
 RUN python3 -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir -r /build/requirements.txt && \
     VENV_SITE_PACKAGES="$(
-      /opt/venv/bin/python - <<'PY'
-import sysconfig
-print(sysconfig.get_path("purelib"))
-PY
+      /opt/venv/bin/python -c 'import sysconfig; print(sysconfig.get_path("purelib"))'
     )" && \
     rm -rf \
       "${VENV_SITE_PACKAGES}/pip" \

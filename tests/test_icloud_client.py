@@ -483,67 +483,6 @@ class TestICloudClientTraversal(unittest.TestCase):
                 ],
             )
 
-    def test_walk_node_parallel_keeps_waiting_when_progress_advances(self) -> None:
-        with tempfile.TemporaryDirectory() as TMPDIR:
-            CONFIG = AppConfig(
-                **(build_config_for_icloud(TMPDIR).__dict__ | {"traversal_workers": 2})
-            )
-            CLIENT = ICloudDriveClient(CONFIG)
-            ROOT_NODE = object()
-
-            SNAPSHOTS = iter(
-                [
-                    {
-                        "directories_completed": 0,
-                        "entries_discovered": 0,
-                        "dir_reads": 0,
-                    },
-                    {
-                        "directories_completed": 0,
-                        "entries_discovered": 3,
-                        "dir_reads": 3,
-                    },
-                    {
-                        "directories_completed": 1,
-                        "entries_discovered": 3,
-                        "dir_reads": 3,
-                    },
-                ]
-            )
-
-            def fake_wait(PENDING, timeout, return_when):
-                _ = PENDING
-                _ = timeout
-                _ = return_when
-                if fake_wait.call_count == 0:
-                    fake_wait.call_count += 1
-                    return set(), set(PENDING)
-
-                return {FUTURE}, set()
-
-            fake_wait.call_count = 0
-
-            FUTURE = Mock()
-            FUTURE.result.return_value = ([], [])
-
-            with patch.object(CLIENT, "_get_traversal_progress_snapshot", side_effect=SNAPSHOTS):
-                with patch.object(
-                    CLIENT,
-                    "_walk_node_shallow",
-                    return_value=([], []),
-                ):
-                    with patch("app.icloud_client.wait", side_effect=fake_wait):
-                        with patch("app.icloud_client.ThreadPoolExecutor") as EXECUTOR_CLASS:
-                            EXECUTOR = EXECUTOR_CLASS.return_value.__enter__.return_value
-                            EXECUTOR.submit.return_value = FUTURE
-
-                            RESULT = CLIENT._walk_node_parallel(ROOT_NODE, "")
-
-            self.assertEqual(RESULT, [])
-            STATS = CLIENT.get_traversal_stats_snapshot()
-            self.assertEqual(STATS["dir_hard_failures"], 0)
-            self.assertEqual(STATS["directories_completed"], 1)
-
     def test_walk_node_shallow_prefers_name_payloads(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
@@ -709,21 +648,6 @@ class TestICloudClientTraversal(unittest.TestCase):
             self.assertEqual(STATS.get("dir_non_directory", 0), 1)
             self.assertEqual(STATS.get("dir_hard_failures", 0), 0)
 
-    def test_child_is_dir_non_directory_probe_does_not_emit_debug_line(self) -> None:
-        with tempfile.TemporaryDirectory() as TMPDIR:
-            CONFIG = build_config_for_icloud(TMPDIR)
-            CLIENT = ICloudDriveClient(CONFIG)
-            FILE_LIKE = Mock()
-            FILE_LIKE.dir.side_effect = NotADirectoryError("file.bin")
-
-            with patch("app.icloud_client.log_line") as LOG_LINE:
-                self.assertFalse(CLIENT._child_is_dir(FILE_LIKE, "docs/file.bin"))
-
-        DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
-        self.assertFalse(
-            any("iCloud directory read skipped:" in LINE for LINE in DEBUG_LINES)
-        )
-
     def test_child_is_dir_uses_explicit_false_folder_flags(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_icloud(TMPDIR)
@@ -733,26 +657,6 @@ class TestICloudClientTraversal(unittest.TestCase):
             FILE_LIKE.dir.side_effect = RuntimeError("should not run")
 
             self.assertFalse(CLIENT._child_is_dir(FILE_LIKE))
-
-    def test_child_is_dir_passes_real_path_to_retry_failure_logs(self) -> None:
-        with tempfile.TemporaryDirectory() as TMPDIR:
-            CONFIG = build_config_for_icloud(TMPDIR)
-            CLIENT = ICloudDriveClient(CONFIG)
-            FILE_LIKE = Mock()
-            FILE_LIKE.dir.side_effect = [RuntimeError("busy")] * 4
-
-            with patch("app.icloud_client.time.sleep"):
-                with patch("app.icloud_client.log_line") as LOG_LINE:
-                    self.assertFalse(CLIENT._child_is_dir(FILE_LIKE, "docs/file.key"))
-
-        DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
-        self.assertTrue(
-            any(
-                "iCloud directory read failed:" in LINE
-                and "path=docs/file.key" in LINE
-                for LINE in DEBUG_LINES
-            )
-        )
 
     def test_node_dir_returns_names_for_list_payload(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:

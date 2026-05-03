@@ -28,11 +28,29 @@ RUN apk add --no-cache \
 
 # ------------------------------------------------------------------------------
 # Build Python dependencies in "/opt/venv" for transfer into the runtime stage.
+#
+# N.B.
+# The build stage needs "pip" to install requirements, but the final runtime
+# image does not. Prune it here so the copied venv does not carry that dead
+# weight into production.
 # ------------------------------------------------------------------------------
 WORKDIR /build
 COPY requirements.txt /build/requirements.txt
 RUN python3 -m venv /opt/venv && \
-    /opt/venv/bin/pip install --no-cache-dir -r /build/requirements.txt
+    /opt/venv/bin/pip install --no-cache-dir -r /build/requirements.txt && \
+    VENV_SITE_PACKAGES="$(
+      /opt/venv/bin/python - <<'PY'
+import sysconfig
+print(sysconfig.get_path("purelib"))
+PY
+    )" && \
+    rm -rf \
+      "${VENV_SITE_PACKAGES}/pip" \
+      "${VENV_SITE_PACKAGES}"/pip-*.dist-info && \
+    rm -f \
+      /opt/venv/bin/pip \
+      /opt/venv/bin/pip3 \
+      /opt/venv/bin/pip3.*
 
 # ------------------------------------------------------------------------------
 # Build the final runtime image with only required runtime dependencies.

@@ -79,6 +79,20 @@ class TestScripts(unittest.TestCase):
         self.assertIn('CMD ["sh", "/app/scripts/healthcheck.sh"]', DOCKERFILE_TEXT)
 
 # --------------------------------------------------------------------------
+# This test confirms the Dockerfile prunes `pip` from the built runtime venv
+# after dependency installation, so the final image does not ship dead package
+# management tooling.
+# --------------------------------------------------------------------------
+    def test_dockerfile_prunes_pip_from_runtime_venv(self) -> None:
+        REPO_ROOT = get_repo_root()
+        DOCKERFILE_TEXT = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+        self.assertIn('print(sysconfig.get_path("purelib"))', DOCKERFILE_TEXT)
+        self.assertIn('${VENV_SITE_PACKAGES}/pip', DOCKERFILE_TEXT)
+        self.assertIn('pip-*.dist-info', DOCKERFILE_TEXT)
+        self.assertIn('/opt/venv/bin/pip3.*', DOCKERFILE_TEXT)
+
+# --------------------------------------------------------------------------
 # This test confirms the Dockerfile no longer uses the microcheck stage now
 # that healthcheck no longer depends on the copied `parallel` binary.
 # --------------------------------------------------------------------------

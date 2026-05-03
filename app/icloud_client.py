@@ -91,6 +91,15 @@ class TraversalStatsSnapshot(TypedDict):
 
 
 # ------------------------------------------------------------------------------
+# This typed dictionary stores the counters used to detect live progress.
+# ------------------------------------------------------------------------------
+class TraversalProgressSnapshot(TypedDict):
+    directories_completed: int
+    entries_discovered: int
+    dir_reads: int
+
+
+# ------------------------------------------------------------------------------
 # This exception signals a bounded parallel traversal stall.
 #
 # N.B.
@@ -190,6 +199,46 @@ class ICloudDriveClient:
             "dir_failure_samples": list(STATS["dir_failure_samples"]),
             "slow_dirs": list(STATS["slow_dirs"]),
         }
+
+    # --------------------------------------------------------------------------
+    # This function snapshots the counters that prove traversal is advancing.
+    #
+    # Returns: Dictionary of monotonic traversal counters.
+    # --------------------------------------------------------------------------
+    def _get_traversal_progress_snapshot(self) -> TraversalProgressSnapshot:
+        STATS = self.get_traversal_stats_snapshot()
+        return {
+            "directories_completed": int(STATS.get("directories_completed", 0)),
+            "entries_discovered": int(STATS.get("entries_discovered", 0)),
+            "dir_reads": int(STATS.get("dir_reads", 0)),
+        }
+
+    # --------------------------------------------------------------------------
+    # This function checks whether traversal counters advanced since last sample.
+    #
+    # 1. "PREVIOUS_SNAPSHOT" is the last sampled progress counters.
+    # 2. "CURRENT_SNAPSHOT" is the current sampled progress counters.
+    #
+    # Returns: True when traversal made measurable forward progress.
+    # --------------------------------------------------------------------------
+    def _has_traversal_progress_advanced(
+        self,
+        PREVIOUS_SNAPSHOT: TraversalProgressSnapshot,
+        CURRENT_SNAPSHOT: TraversalProgressSnapshot,
+    ) -> bool:
+        if (
+            CURRENT_SNAPSHOT["directories_completed"]
+            > PREVIOUS_SNAPSHOT["directories_completed"]
+        ):
+            return True
+
+        if CURRENT_SNAPSHOT["entries_discovered"] > PREVIOUS_SNAPSHOT["entries_discovered"]:
+            return True
+
+        if CURRENT_SNAPSHOT["dir_reads"] > PREVIOUS_SNAPSHOT["dir_reads"]:
+            return True
+
+        return False
 
     # --------------------------------------------------------------------------
     # This function records discovered entry counters for traversal telemetry.
@@ -583,6 +632,7 @@ class ICloudDriveClient:
     def _walk_node_parallel(self, ROOT_NODE: Any, ROOT_PATH: str) -> list[RemoteEntry]:
         RESULT: list[RemoteEntry] = []
         DIRECTORIES_COMPLETED = 0
+        LAST_PROGRESS_SNAPSHOT = self._get_traversal_progress_snapshot()
 
         with ThreadPoolExecutor(max_workers=self.config.traversal_workers) as EXECUTOR:
             FUTURES = {
@@ -602,6 +652,19 @@ class ICloudDriveClient:
                 )
 
                 if not DONE_FUTURES:
+                    CURRENT_PROGRESS_SNAPSHOT = self._get_traversal_progress_snapshot()
+                    if self._has_traversal_progress_advanced(
+                        LAST_PROGRESS_SNAPSHOT,
+                        CURRENT_PROGRESS_SNAPSHOT,
+                    ):
+                        LAST_PROGRESS_SNAPSHOT = CURRENT_PROGRESS_SNAPSHOT
+                        self._record_traversal_queue_state(
+                            DIRECTORIES_COMPLETED,
+                            len(FUTURES),
+                            min(len(FUTURES), self.config.traversal_workers),
+                        )
+                        continue
+
                     STALLED_PATH = sorted(
                         CURRENT_PATH or "/"
                         for CURRENT_PATH in FUTURES.values()
@@ -631,6 +694,8 @@ class ICloudDriveClient:
                         FUTURES[
                             EXECUTOR.submit(self._walk_node_shallow, CHILD_NODE, CHILD_PATH)
                         ] = CHILD_PATH
+
+                LAST_PROGRESS_SNAPSHOT = self._get_traversal_progress_snapshot()
 
                 self._record_traversal_queue_state(
                     DIRECTORIES_COMPLETED,
@@ -694,7 +759,7 @@ class ICloudDriveClient:
                 continue
 
             RELATIVE_PATH = f"{CURRENT_PATH}/{CLEAN_NAME}".strip("/")
-            IS_DIR = self._child_is_dir(CHILD)
+            IS_DIR = self._child_is_dir(CHILD, RELATIVE_PATH)
 
             if IS_DIR:
                 self._record_traversal_entry(True)
@@ -775,11 +840,6 @@ class ICloudDriveClient:
                     time.monotonic() - STARTED_EPOCH,
                     IS_RETRY,
                     "non_directory",
-                )
-                self._log_debug(
-                    "iCloud directory read skipped: "
-                    f"path={CURRENT_PATH or '/'}, "
-                    "reason=non_directory."
                 )
                 return None
             except ValueError:
@@ -982,7 +1042,7 @@ class ICloudDriveClient:
                 continue
 
             RELATIVE_PATH = f"{CURRENT_PATH}/{CLEAN_NAME}".strip("/")
-            IS_DIR = self._child_is_dir(CHILD)
+            IS_DIR = self._child_is_dir(CHILD, RELATIVE_PATH)
 
             if IS_DIR:
                 self._record_traversal_entry(True)
@@ -1052,7 +1112,7 @@ class ICloudDriveClient:
     #
     # Returns: True for directories, otherwise False.
     # --------------------------------------------------------------------------
-    def _child_is_dir(self, CHILD: Any) -> bool:
+    def _child_is_dir(self, CHILD: Any, CURRENT_PATH: str = "") -> bool:
         CHILD_TYPE = str(getattr(CHILD, "type", "")).lower()
 
         if CHILD_TYPE in {"folder", "directory", "dir"}:
@@ -1070,7 +1130,7 @@ class ICloudDriveClient:
         if getattr(CHILD, "isFolder", None) is False:
             return False
 
-        PAYLOAD = self._read_dir_payload_with_retry(CHILD)
+        PAYLOAD = self._read_dir_payload_with_retry(CHILD, CURRENT_PATH)
 
         if PAYLOAD is None:
             return False

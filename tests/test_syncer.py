@@ -1484,6 +1484,48 @@ class TestSyncerHelpers(unittest.TestCase):
 # This test confirms traversal timeout stays explicit at the progress wrapper
 # instead of being flattened into a clean empty listing.
 # --------------------------------------------------------------------------
+    def test_list_entries_with_progress_returns_after_advancing_stats(self) -> None:
+        class AdvancingClient:
+            def __init__(self):
+                self.started_epoch = time.monotonic()
+
+            def list_entries(self):
+                time.sleep(0.05)
+                return [RemoteEntry("docs/file.txt", False, 10, "m1")]
+
+            def get_traversal_stats_snapshot(self):
+                elapsed_seconds = time.monotonic() - self.started_epoch
+                if elapsed_seconds < 0.015:
+                    return build_empty_traversal_stats_snapshot()
+
+                return (
+                    build_empty_traversal_stats_snapshot()
+                    | {
+                        "entries_discovered": 1,
+                        "files_discovered": 1,
+                        "dir_reads": 1,
+                    }
+                )
+
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            with patch("app.syncer.TRAVERSAL_PROGRESS_LOG_INTERVAL_SECONDS", 0.01):
+                with patch("app.syncer.log_line") as LOG_LINE:
+                    RESULT = list_entries_with_progress(
+                        AdvancingClient(),
+                        LOG_FILE,
+                        time.monotonic(),
+                    )
+
+        self.assertEqual([ENTRY.path for ENTRY in RESULT], ["docs/file.txt"])
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in LOG_LINE.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(any("Traversal progress detail:" in LINE for LINE in DEBUG_LINES))
+        self.assertTrue(any("dir_reads=1" in LINE for LINE in DEBUG_LINES))
+
     def test_list_entries_with_progress_reraises_traversal_stall(self) -> None:
         class StalledClient:
             def list_entries(self):

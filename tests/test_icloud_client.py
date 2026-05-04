@@ -483,6 +483,39 @@ class TestICloudClientTraversal(unittest.TestCase):
                 ],
             )
 
+    def test_walk_node_parallel_keeps_waiting_while_progress_advances(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = AppConfig(**(build_config_for_icloud(TMPDIR).__dict__ | {"traversal_workers": 2}))
+            CLIENT = ICloudDriveClient(CONFIG)
+            WAIT_CALLS = {"count": 0}
+
+            def fake_wait(PENDING, timeout, return_when):
+                _ = return_when
+                self.assertEqual(timeout, 30.0)
+                WAIT_CALLS["count"] += 1
+
+                if WAIT_CALLS["count"] == 1:
+                    CLIENT._record_directory_read("docs/file.txt", 0.01, False, "non_directory")
+                    return set(), set(PENDING)
+
+                FUTURE = next(iter(PENDING))
+                return {FUTURE}, set()
+
+            with patch.object(
+                CLIENT,
+                "_walk_node_shallow",
+                return_value=([SimpleNamespace(path="docs/file.txt")], []),
+            ):
+                with patch("app.icloud_client.wait", side_effect=fake_wait):
+                    RESULT = CLIENT._walk_node_parallel(object(), "")
+
+            self.assertEqual([ENTRY.path for ENTRY in RESULT], ["docs/file.txt"])
+            self.assertEqual(WAIT_CALLS["count"], 2)
+            STATS = CLIENT.get_traversal_stats_snapshot()
+            self.assertEqual(STATS["dir_hard_failures"], 0)
+            self.assertEqual(STATS["directories_completed"], 1)
+            self.assertEqual(STATS["dir_non_directory"], 1)
+
     def test_walk_node_shallow_prefers_name_payloads(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
@@ -643,10 +676,20 @@ class TestICloudClientTraversal(unittest.TestCase):
             FILE_LIKE = Mock()
             FILE_LIKE.dir.side_effect = NotADirectoryError("file.bin")
 
-            self.assertFalse(CLIENT._child_is_dir(FILE_LIKE))
+            with patch("app.icloud_client.log_line") as LOG_LINE:
+                self.assertFalse(CLIENT._child_is_dir(FILE_LIKE, "docs/file.bin"))
+
             STATS = CLIENT.get_traversal_stats_snapshot()
             self.assertEqual(STATS.get("dir_non_directory", 0), 1)
             self.assertEqual(STATS.get("dir_hard_failures", 0), 0)
+            DEBUG_LINES = [
+                CALL.args[2]
+                for CALL in LOG_LINE.call_args_list
+                if CALL.args[1] == "debug"
+            ]
+            self.assertFalse(
+                any("reason=non_directory." in LINE for LINE in DEBUG_LINES)
+            )
 
     def test_child_is_dir_uses_explicit_false_folder_flags(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
@@ -713,6 +756,35 @@ class TestICloudClientTraversal(unittest.TestCase):
             self.assertEqual(len(FAILURE_SAMPLES), 2)
             self.assertEqual(FAILURE_SAMPLES[0]["status"], "retryable_error")
             self.assertIn("RuntimeError", FAILURE_SAMPLES[0]["reason"])
+
+    def test_child_is_dir_uses_real_child_path_for_retry_logs_and_failure_samples(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+            FILE_LIKE = Mock()
+            FILE_LIKE.dir.side_effect = [
+                RuntimeError("transient"),
+                RuntimeError("transient"),
+                RuntimeError("transient"),
+                RuntimeError("transient"),
+            ]
+
+            with patch("app.icloud_client.log_line") as LOG_LINE:
+                self.assertFalse(CLIENT._child_is_dir(FILE_LIKE, "docs/file.key"))
+
+            DEBUG_LINES = [
+                CALL.args[2]
+                for CALL in LOG_LINE.call_args_list
+                if CALL.args[1] == "debug"
+            ]
+            self.assertTrue(
+                any("path=docs/file.key" in LINE for LINE in DEBUG_LINES)
+            )
+            self.assertFalse(any("path=/, " in LINE for LINE in DEBUG_LINES))
+            STATS = CLIENT.get_traversal_stats_snapshot()
+            FAILURE_SAMPLES = STATS.get("dir_failure_samples", [])
+            self.assertTrue(FAILURE_SAMPLES)
+            self.assertEqual(FAILURE_SAMPLES[-1]["path"], "docs/file.key")
 
     def test_traversal_stats_snapshot_detaches_mutable_lists(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:

@@ -91,6 +91,17 @@ class TraversalStatsSnapshot(TypedDict):
 
 
 # ------------------------------------------------------------------------------
+# This typed dictionary stores the traversal counters used to decide whether
+# useful work is still advancing during a parallel wait window.
+# ------------------------------------------------------------------------------
+class TraversalProgressSnapshot(TypedDict):
+    directories_completed: int
+    entries_discovered: int
+    dir_reads: int
+    dir_retries: int
+
+
+# ------------------------------------------------------------------------------
 # This exception signals a bounded parallel traversal stall.
 #
 # N.B.
@@ -370,6 +381,40 @@ class ICloudDriveClient:
             )
 
     # --------------------------------------------------------------------------
+    # This function returns the traversal counters used for stall decisions.
+    #
+    # Returns: Snapshot of counters that should increase while useful traversal
+    # work is still happening.
+    # --------------------------------------------------------------------------
+    def _get_traversal_progress_snapshot(self) -> TraversalProgressSnapshot:
+        with self._stats_lock:
+            return {
+                "directories_completed": self._traversal_stats["directories_completed"],
+                "entries_discovered": self._traversal_stats["entries_discovered"],
+                "dir_reads": self._traversal_stats["dir_reads"],
+                "dir_retries": self._traversal_stats["dir_retries"],
+            }
+
+    # --------------------------------------------------------------------------
+    # This function checks whether traversal progress advanced between two
+    # snapshots.
+    #
+    # 1. "PREVIOUS_SNAPSHOT" is the earlier progress snapshot.
+    # 2. "CURRENT_SNAPSHOT" is the later progress snapshot.
+    #
+    # Returns: True when at least one monitored progress counter increased.
+    # --------------------------------------------------------------------------
+    def _has_traversal_progress_advanced(
+        self,
+        PREVIOUS_SNAPSHOT: TraversalProgressSnapshot,
+        CURRENT_SNAPSHOT: TraversalProgressSnapshot,
+    ) -> bool:
+        return any(
+            int(CURRENT_SNAPSHOT[KEY]) > int(PREVIOUS_SNAPSHOT[KEY])
+            for KEY in CURRENT_SNAPSHOT
+        )
+
+    # --------------------------------------------------------------------------
     # This function aligns cookie and session paths with an
     # icloudpd-compatible folder layout.
     #
@@ -593,6 +638,7 @@ class ICloudDriveClient:
                 len(FUTURES),
                 min(len(FUTURES), self.config.traversal_workers),
             )
+            LAST_PROGRESS_SNAPSHOT = self._get_traversal_progress_snapshot()
 
             while FUTURES:
                 DONE_FUTURES, _ = wait(
@@ -602,6 +648,19 @@ class ICloudDriveClient:
                 )
 
                 if not DONE_FUTURES:
+                    CURRENT_PROGRESS_SNAPSHOT = self._get_traversal_progress_snapshot()
+                    if self._has_traversal_progress_advanced(
+                        LAST_PROGRESS_SNAPSHOT,
+                        CURRENT_PROGRESS_SNAPSHOT,
+                    ):
+                        LAST_PROGRESS_SNAPSHOT = CURRENT_PROGRESS_SNAPSHOT
+                        self._record_traversal_queue_state(
+                            DIRECTORIES_COMPLETED,
+                            len(FUTURES),
+                            min(len(FUTURES), self.config.traversal_workers),
+                        )
+                        continue
+
                     STALLED_PATH = sorted(
                         CURRENT_PATH or "/"
                         for CURRENT_PATH in FUTURES.values()
@@ -631,6 +690,7 @@ class ICloudDriveClient:
                         FUTURES[
                             EXECUTOR.submit(self._walk_node_shallow, CHILD_NODE, CHILD_PATH)
                         ] = CHILD_PATH
+                    LAST_PROGRESS_SNAPSHOT = self._get_traversal_progress_snapshot()
 
                 self._record_traversal_queue_state(
                     DIRECTORIES_COMPLETED,
@@ -694,7 +754,7 @@ class ICloudDriveClient:
                 continue
 
             RELATIVE_PATH = f"{CURRENT_PATH}/{CLEAN_NAME}".strip("/")
-            IS_DIR = self._child_is_dir(CHILD)
+            IS_DIR = self._child_is_dir(CHILD, RELATIVE_PATH)
 
             if IS_DIR:
                 self._record_traversal_entry(True)
@@ -751,6 +811,7 @@ class ICloudDriveClient:
     # failures.
     #
     # 1. "NODE" is the current drive node.
+    # 2. "CURRENT_PATH" is the current remote path for log attribution.
     #
     # Returns: Directory payload when available, otherwise None.
     # --------------------------------------------------------------------------
@@ -775,11 +836,6 @@ class ICloudDriveClient:
                     time.monotonic() - STARTED_EPOCH,
                     IS_RETRY,
                     "non_directory",
-                )
-                self._log_debug(
-                    "iCloud directory read skipped: "
-                    f"path={CURRENT_PATH or '/'}, "
-                    "reason=non_directory."
                 )
                 return None
             except ValueError:
@@ -982,7 +1038,7 @@ class ICloudDriveClient:
                 continue
 
             RELATIVE_PATH = f"{CURRENT_PATH}/{CLEAN_NAME}".strip("/")
-            IS_DIR = self._child_is_dir(CHILD)
+            IS_DIR = self._child_is_dir(CHILD, RELATIVE_PATH)
 
             if IS_DIR:
                 self._record_traversal_entry(True)
@@ -1049,10 +1105,11 @@ class ICloudDriveClient:
     # This function infers whether a child node is a directory.
     #
     # 1. "CHILD" is a pyicloud drive node.
+    # 2. "CURRENT_PATH" is the remote path used for log attribution.
     #
     # Returns: True for directories, otherwise False.
     # --------------------------------------------------------------------------
-    def _child_is_dir(self, CHILD: Any) -> bool:
+    def _child_is_dir(self, CHILD: Any, CURRENT_PATH: str = "") -> bool:
         CHILD_TYPE = str(getattr(CHILD, "type", "")).lower()
 
         if CHILD_TYPE in {"folder", "directory", "dir"}:
@@ -1070,7 +1127,7 @@ class ICloudDriveClient:
         if getattr(CHILD, "isFolder", None) is False:
             return False
 
-        PAYLOAD = self._read_dir_payload_with_retry(CHILD)
+        PAYLOAD = self._read_dir_payload_with_retry(CHILD, CURRENT_PATH)
 
         if PAYLOAD is None:
             return False
@@ -1323,7 +1380,7 @@ class ICloudDriveClient:
             )
             return DownloadResult(False, "path_not_found")
 
-        if self._child_is_dir(FILE_OBJ):
+        if self._child_is_dir(FILE_OBJ, REMOTE_PATH):
             self._log_debug(
                 "iCloud file download failed: reason=directory_node."
             )
@@ -1364,7 +1421,7 @@ class ICloudDriveClient:
             )
             return DownloadResult(False, "path_not_found")
 
-        if not self._child_is_dir(ROOT_NODE):
+        if not self._child_is_dir(ROOT_NODE, REMOTE_PATH):
             self._log_debug(
                 "iCloud package download fallback started: "
                 "reason=direct_node_not_directory."
@@ -1394,7 +1451,7 @@ class ICloudDriveClient:
             )
             return DownloadResult(False, "not_directory_node")
 
-        RESULT = self._download_package_node(ROOT_NODE, LOCAL_PATH)
+        RESULT = self._download_package_node(ROOT_NODE, REMOTE_PATH, LOCAL_PATH)
         if RESULT.is_success:
             self._log_debug(
                 "iCloud package download completed: "
@@ -1453,11 +1510,17 @@ class ICloudDriveClient:
     # paths.
     #
     # 1. "NODE" is current package node.
-    # 2. "LOCAL_PATH" is local path for this node.
+    # 2. "REMOTE_PATH" is remote path for this node.
+    # 3. "LOCAL_PATH" is local path for this node.
     #
     # Returns: "DownloadResult" describing the final transfer outcome.
     # --------------------------------------------------------------------------
-    def _download_package_node(self, NODE: Any, LOCAL_PATH: Path) -> DownloadResult:
+    def _download_package_node(
+        self,
+        NODE: Any,
+        REMOTE_PATH: str,
+        LOCAL_PATH: Path,
+    ) -> DownloadResult:
         LOCAL_PATH.mkdir(parents=True, exist_ok=True)
         CHILDREN = self._package_child_names(NODE)
 
@@ -1469,9 +1532,14 @@ class ICloudDriveClient:
             if CHILD_NODE is None:
                 return DownloadResult(False, "package_child_missing")
 
+            CHILD_REMOTE_PATH = f"{REMOTE_PATH}/{NAME}".strip("/")
             CHILD_LOCAL_PATH = LOCAL_PATH / NAME
-            if self._child_is_dir(CHILD_NODE):
-                RESULT = self._download_package_node(CHILD_NODE, CHILD_LOCAL_PATH)
+            if self._child_is_dir(CHILD_NODE, CHILD_REMOTE_PATH):
+                RESULT = self._download_package_node(
+                    CHILD_NODE,
+                    CHILD_REMOTE_PATH,
+                    CHILD_LOCAL_PATH,
+                )
                 if RESULT.is_success:
                     continue
 
@@ -1585,7 +1653,7 @@ class ICloudDriveClient:
         if FILE_OBJ is None:
             return False, "path_not_found"
 
-        if self._child_is_dir(FILE_OBJ):
+        if self._child_is_dir(FILE_OBJ, REMOTE_PATH):
             return False, "directory_node"
 
         return self._download_file_object(FILE_OBJ, LOCAL_PATH)

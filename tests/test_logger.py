@@ -75,6 +75,52 @@ class TestLogger(unittest.TestCase):
             self.assertEqual(CONTENTS, EXPECTED)
 
 # --------------------------------------------------------------------------
+# This test confirms single-line log events collapse embedded newlines into
+# one emitted record.
+# --------------------------------------------------------------------------
+    def test_log_line_collapses_embedded_newlines_for_single_line_events(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+
+            with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
+                with patch("builtins.print") as PRINT:
+                    logger.log_line(
+                        LOG_FILE,
+                        "info",
+                        "Traversal progress detail:\n\nelapsed_seconds=30.0",
+                    )
+
+            EXPECTED = (
+                "[2026-03-09 12:34:56 UTC] [INFO] "
+                "Traversal progress detail: elapsed_seconds=30.0"
+            )
+            PRINT.assert_called_once_with(EXPECTED, flush=True)
+            CONTENTS = LOG_FILE.read_text(encoding="utf-8").strip()
+            self.assertEqual(CONTENTS, EXPECTED)
+
+# --------------------------------------------------------------------------
+# This test confirms explicitly multi-line console events keep their line
+# structure without adding blank records.
+# --------------------------------------------------------------------------
+    def test_log_console_line_preserves_explicit_multiline_payloads(self) -> None:
+        with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
+            with patch("builtins.print") as PRINT:
+                logger.log_console_line(
+                    "error",
+                    "Line one.\nLine two.\n",
+                    True,
+                )
+
+        EXPECTED = [
+            f"{logger.ANSI_RED}[2026-03-09 12:34:56 UTC] [ERROR] Line one.{logger.ANSI_RESET}",
+            f"{logger.ANSI_RED}[2026-03-09 12:34:56 UTC] [ERROR] Line two.{logger.ANSI_RESET}",
+        ]
+        self.assertEqual(
+            [CALL.args[0] for CALL in PRINT.call_args_list],
+            EXPECTED,
+        )
+
+# --------------------------------------------------------------------------
 # This test confirms debug lines are suppressed when LOG_LEVEL is info.
 # --------------------------------------------------------------------------
     def test_log_line_suppresses_debug_when_info_level(self) -> None:

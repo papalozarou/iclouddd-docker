@@ -22,7 +22,7 @@ from app.icloud_client import (
     TraversalWorkerTimeoutError,
     TraversalStatsSnapshot,
 )
-from app.logger import log_line
+from app.logger import log_console_line, log_line
 
 TRANSFER_PROGRESS_LOG_INTERVAL_SECONDS = 30.0
 TRAVERSAL_PROGRESS_LOG_INTERVAL_SECONDS = 30.0
@@ -545,10 +545,10 @@ def perform_incremental_sync(
                                 f"File transfer exception: {ENTRY.path} "
                                 f"({type(ERROR).__name__}: {ERROR})",
                             )
-                        print(
+                        log_console_line(
+                            "error",
                             "File transfer worker failed: "
                             f"{type(ERROR).__name__}: {ERROR}",
-                            flush=True,
                         )
                         ERRORS += 1
                         ERROR_REASON = "worker_exception"
@@ -838,6 +838,7 @@ def list_entries_with_progress(
         "files_discovered": 0,
         "directories_discovered": 0,
         "directories_completed": 0,
+        "directories_pending": 0,
     }
     PREVIOUS_LOG_EPOCH = STARTED_EPOCH
 
@@ -871,11 +872,17 @@ def list_entries_with_progress(
                 CURRENT_FILES = int(STATS.get("files_discovered", 0))
                 CURRENT_DIRECTORIES = int(STATS.get("directories_discovered", 0))
                 CURRENT_COMPLETED = int(STATS.get("directories_completed", 0))
+                CURRENT_PENDING = int(STATS.get("directories_pending", 0))
                 ENTRY_DELTA = max(CURRENT_ENTRIES - int(PREVIOUS_SNAPSHOT["entries_discovered"]), 0)
+                FILE_DELTA = max(
+                    CURRENT_FILES - int(PREVIOUS_SNAPSHOT["files_discovered"]),
+                    0,
+                )
                 DIR_DELTA = max(
                     CURRENT_COMPLETED - int(PREVIOUS_SNAPSHOT["directories_completed"]),
                     0,
                 )
+                PENDING_DELTA = CURRENT_PENDING - int(PREVIOUS_SNAPSHOT["directories_pending"])
                 ENTRIES_PER_SECOND = ENTRY_DELTA / WINDOW_SECONDS
                 DIRS_PER_SECOND = DIR_DELTA / WINDOW_SECONDS
                 SLOW_TOP = format_slow_directory_summary(STATS)
@@ -893,8 +900,17 @@ def list_entries_with_progress(
                 log_line(
                     LOG_FILE,
                     "debug",
+                    "Traversal delta detail: "
+                    f"entries_added={ENTRY_DELTA}, "
+                    f"files_added={FILE_DELTA}, "
+                    f"completed_dirs_added={DIR_DELTA}, "
+                    f"pending_delta={PENDING_DELTA:+d}",
+                )
+                log_line(
+                    LOG_FILE,
+                    "debug",
                     "Traversal queue detail: "
-                    f"pending={STATS.get('directories_pending', 0)}, "
+                    f"pending={CURRENT_PENDING}, "
                     f"active={STATS.get('workers_active', 0)}, "
                     f"completed_dirs={CURRENT_COMPLETED}",
                 )
@@ -930,6 +946,7 @@ def list_entries_with_progress(
                     "files_discovered": CURRENT_FILES,
                     "directories_discovered": CURRENT_DIRECTORIES,
                     "directories_completed": CURRENT_COMPLETED,
+                    "directories_pending": CURRENT_PENDING,
                 }
                 PREVIOUS_LOG_EPOCH = NOW_EPOCH
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Lock
 import gzip
 import os
 import shutil
@@ -22,6 +23,7 @@ LOG_LEVELS = {
 ANSI_RED = "\033[31m"
 ANSI_RESET = "\033[0m"
 ROTATED_FILE_PATTERN = "{name}.{stamp}.log"
+LOG_EMIT_LOCK = Lock()
 
 
 # ------------------------------------------------------------------------------
@@ -121,24 +123,153 @@ def should_log(LEVEL: str, CONFIG: LoggerConfig | None = None) -> bool:
 # 1. "LOG_FILE" is the destination log file.
 # 2. "LEVEL" is severity.
 # 3. "MESSAGE" is log content.
+# 4. "ALLOW_MULTILINE" preserves explicit multi-line payloads when true.
 #
 # Returns: None.
 # ------------------------------------------------------------------------------
-def log_line(LOG_FILE: Path, LEVEL: str, MESSAGE: str) -> None:
+def log_line(
+    LOG_FILE: Path,
+    LEVEL: str,
+    MESSAGE: str,
+    ALLOW_MULTILINE: bool = False,
+) -> None:
     LOGGER_CONFIG = load_logger_config()
 
     if not should_log(LEVEL, LOGGER_CONFIG):
         return
 
-    rotate_log_if_needed(LOG_FILE, LOGGER_CONFIG)
+    emit_log_lines(
+        LOG_FILE,
+        LEVEL,
+        MESSAGE,
+        LOGGER_CONFIG,
+        ALLOW_MULTILINE,
+    )
 
+
+# ------------------------------------------------------------------------------
+# This function prints a structured log line without a worker log file.
+#
+# 1. "LEVEL" is severity.
+# 2. "MESSAGE" is log content.
+# 3. "ALLOW_MULTILINE" preserves explicit multi-line payloads when true.
+#
+# Returns: None.
+# ------------------------------------------------------------------------------
+def log_console_line(
+    LEVEL: str,
+    MESSAGE: str,
+    ALLOW_MULTILINE: bool = False,
+) -> None:
+    LOGGER_CONFIG = load_logger_config()
+
+    if not should_log(LEVEL, LOGGER_CONFIG):
+        return
+
+    emit_log_lines(
+        None,
+        LEVEL,
+        MESSAGE,
+        LOGGER_CONFIG,
+        ALLOW_MULTILINE,
+    )
+
+
+# ------------------------------------------------------------------------------
+# This function emits one or more log records through the shared logger seam.
+#
+# 1. "LOG_FILE" is the optional worker log destination.
+# 2. "LEVEL" is severity.
+# 3. "MESSAGE" is log content.
+# 4. "CONFIG" is the resolved logger policy for this emission.
+# 5. "ALLOW_MULTILINE" preserves explicit multi-line payloads when true.
+#
+# Returns: None.
+# ------------------------------------------------------------------------------
+def emit_log_lines(
+    LOG_FILE: Path | None,
+    LEVEL: str,
+    MESSAGE: str,
+    CONFIG: LoggerConfig,
+    ALLOW_MULTILINE: bool = False,
+) -> None:
     LEVEL_UPPER = LEVEL.upper()
-    LINE = f"[{get_timestamp()}] [{LEVEL_UPPER}] {MESSAGE}"
-    CONSOLE_LINE = format_console_line(LINE, LEVEL_UPPER)
-    print(CONSOLE_LINE, flush=True)
+    PLAIN_LINES = build_log_lines(
+        LEVEL_UPPER,
+        MESSAGE,
+        ALLOW_MULTILINE,
+    )
 
-    with LOG_FILE.open("a", encoding="utf-8") as HANDLE:
-        HANDLE.write(f"{LINE}\n")
+    with LOG_EMIT_LOCK:
+        if LOG_FILE is not None:
+            rotate_log_if_needed(LOG_FILE, CONFIG)
+
+        for LINE in PLAIN_LINES:
+            CONSOLE_LINE = format_console_line(LINE, LEVEL_UPPER)
+            print(CONSOLE_LINE, flush=True)
+
+        if LOG_FILE is None:
+            return
+
+        with LOG_FILE.open("a", encoding="utf-8") as HANDLE:
+            for LINE in PLAIN_LINES:
+                HANDLE.write(f"{LINE}\n")
+
+
+# ------------------------------------------------------------------------------
+# This function builds plain log lines for console and file emission.
+#
+# 1. "LEVEL_UPPER" is uppercase severity token.
+# 2. "MESSAGE" is log content.
+# 3. "ALLOW_MULTILINE" preserves explicit multi-line payloads when true.
+#
+# Returns: Plain structured log lines without console-only formatting.
+# ------------------------------------------------------------------------------
+def build_log_lines(
+    LEVEL_UPPER: str,
+    MESSAGE: str,
+    ALLOW_MULTILINE: bool = False,
+) -> list[str]:
+    TIMESTAMP = get_timestamp()
+    CONTENT_LINES = normalise_log_message(MESSAGE, ALLOW_MULTILINE)
+    return [f"[{TIMESTAMP}] [{LEVEL_UPPER}] {LINE}" for LINE in CONTENT_LINES]
+
+
+# ------------------------------------------------------------------------------
+# This function normalises log message content before emission.
+#
+# 1. "MESSAGE" is log content.
+# 2. "ALLOW_MULTILINE" preserves explicit multi-line payloads when true.
+#
+# Returns: Message content split into structured line payloads.
+#
+# N.B.
+# Single-line log events collapse embedded newlines into spaces so accidental
+# blank records do not leak into container output. Explicit multi-line payloads
+# still keep their intended line structure, but leading and trailing empty
+# lines are removed.
+# ------------------------------------------------------------------------------
+def normalise_log_message(
+    MESSAGE: str,
+    ALLOW_MULTILINE: bool = False,
+) -> list[str]:
+    NORMALISED = MESSAGE.replace("\r\n", "\n").replace("\r", "\n")
+
+    if ALLOW_MULTILINE:
+        TRIMMED = NORMALISED.strip("\n")
+        if TRIMMED == "":
+            return [""]
+        return TRIMMED.split("\n")
+
+    MESSAGE_PARTS = [
+        PART.strip()
+        for PART in NORMALISED.split("\n")
+        if PART.strip()
+    ]
+    if not MESSAGE_PARTS:
+        return [""]
+
+    return [" ".join(MESSAGE_PARTS)]
 
 
 # ------------------------------------------------------------------------------

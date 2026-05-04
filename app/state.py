@@ -10,7 +10,7 @@ from pathlib import Path
 import json
 from typing import Any
 
-from app.logger import get_timestamp, log_line
+from app.logger import get_timestamp, log_console_line, log_line
 from app.time_utils import now_local_iso
 
 
@@ -100,7 +100,7 @@ def read_json(PATH: Path, LOG_FILE: Path | None = None) -> dict[str, Any]:
 # Returns: None.
 # ------------------------------------------------------------------------------
 def warn_state_issue(MESSAGE: str) -> None:
-    print(f"[{get_timestamp()}] [ERROR] {MESSAGE}", flush=True)
+    log_console_line("error", MESSAGE)
 
 
 # ------------------------------------------------------------------------------

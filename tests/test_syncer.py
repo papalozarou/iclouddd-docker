@@ -860,7 +860,7 @@ class TestSyncerHelpers(unittest.TestCase):
         CLIENT = FakeClient(ENTRIES, {})
 
         with tempfile.TemporaryDirectory() as TMPDIR:
-            with patch("builtins.print") as PRINT:
+            with patch("app.syncer.log_console_line") as LOG_CONSOLE_LINE:
                 SUMMARY, NEW_MANIFEST = perform_incremental_sync(CLIENT, Path(TMPDIR), {})
 
         self.assertEqual(SUMMARY.total_files, 1)
@@ -869,7 +869,12 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertEqual(SUMMARY.skipped_files, 0)
         self.assertEqual(SUMMARY.error_files, 1)
         self.assertNotIn("docs/explode.txt", NEW_MANIFEST)
-        self.assertTrue(any("File transfer worker failed:" in CALL.args[0] for CALL in PRINT.call_args_list))
+        self.assertTrue(
+            any(
+                "File transfer worker failed:" in CALL.args[1]
+                for CALL in LOG_CONSOLE_LINE.call_args_list
+            )
+        )
 
 # --------------------------------------------------------------------------
 # This test confirms incremental sync emits debug diagnostics when a log
@@ -1009,6 +1014,7 @@ class TestSyncerHelpers(unittest.TestCase):
 
         DEBUG_LINES = [CALL.args[2] for CALL in LOG_LINE.call_args_list if CALL.args[1] == "debug"]
         self.assertTrue(any("Traversal progress detail:" in LINE for LINE in DEBUG_LINES))
+        self.assertTrue(any("Traversal delta detail:" in LINE for LINE in DEBUG_LINES))
         self.assertTrue(any(PROGRESS_LOG_SEPARATOR == LINE for LINE in DEBUG_LINES))
 
 # --------------------------------------------------------------------------
@@ -1524,6 +1530,7 @@ class TestSyncerHelpers(unittest.TestCase):
             if CALL.args[1] == "debug"
         ]
         self.assertTrue(any("Traversal progress detail:" in LINE for LINE in DEBUG_LINES))
+        self.assertTrue(any("Traversal delta detail:" in LINE for LINE in DEBUG_LINES))
         self.assertTrue(any("dir_reads=1" in LINE for LINE in DEBUG_LINES))
 
     def test_list_entries_with_progress_reraises_traversal_stall(self) -> None:

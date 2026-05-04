@@ -30,7 +30,9 @@ This file defines various coding standards for agents to adhere to.
 ## Regression prevention
 - MUST: For any bug fix, define the user-visible behaviour contract before editing
 - MUST: For any bug fix, state the suspected root cause before editing and distinguish evidence from inference where needed
-- MUST: For any bug fix, propose the smallest holistic fix that addresses the root cause and any directly coupled failure paths, not just the reported symptom
+- MUST: For any bug fix, identify the whole root-cause boundary before proposing code changes. Include the failing behaviour, affected adjacent flows, and why narrower symptom fixes would be insufficient
+- MUST: For any bug fix, propose the smallest complete fix that addresses the whole proven root-cause boundary. Do not optimise for the smallest diff when that would leave related failure paths unresolved
+- MUST: If the root-cause boundary is unclear, stop after diagnosis and ask for clarification or approval to investigate further before editing
 - MUST: For any bug fix, define a regression contract that states the pre-fix failure, the expected post-fix behaviour, and the checks or tests that prove it
 - MUST: For any fix to runtime, auth, sync, state, or Telegram logic, add or update regression tests that exercise the full behaviour boundary, not just the modified function
 - MUST: Before merge, perform an explicit regression review covering adjacent flows, documentation alignment, and restart, retry, and backlog behaviour where relevant

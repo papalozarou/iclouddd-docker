@@ -7,8 +7,10 @@
 #
 # Add project-specific patterns in this section.
 # ------------------------------------------------------------------------------
+.context/
 .github/copilot-instructions.md
 .shellcheckrc
+AGENTS.local.md
 CODE_REVIEW.md
 TODO.md
 scratchpad.sh

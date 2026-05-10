@@ -6,11 +6,13 @@
 # ------------------------------------------------------------------------------
 # Project-specific ignores.
 # ------------------------------------------------------------------------------
+.context/
 .github/
 .git/
 .gitignore
 .shellcheckrc
 AGENTS.md
+AGENTS.local.md
 CODE_REVIEW.md
 CONFIGURATION.md
 LICENSE

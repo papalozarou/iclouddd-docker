@@ -146,6 +146,66 @@ class ICloudDriveClient:
         log_line(self.config.worker_log_path, "debug", MESSAGE)
 
     # --------------------------------------------------------------------------
+    # This function logs the start of one traversal path probe.
+    #
+    # 1. "CURRENT_PATH" is the remote path being inspected.
+    # 2. "ATTEMPT" is the one-based probe attempt number.
+    #
+    # Returns: None.
+    # --------------------------------------------------------------------------
+    def _log_traversal_probe_started(
+        self,
+        CURRENT_PATH: str,
+        ATTEMPT: int,
+    ) -> None:
+        self._log_debug(
+            "Traversal probe started: "
+            f"path={CURRENT_PATH or '/'}, "
+            f"attempt={ATTEMPT}."
+        )
+
+    # --------------------------------------------------------------------------
+    # This function logs one discovered traversal child path.
+    #
+    # 1. "RELATIVE_PATH" is the discovered child path.
+    # 2. "SOURCE" is the metadata source used to discover the child.
+    # 3. "KIND" is the known or candidate child kind.
+    #
+    # Returns: None.
+    # --------------------------------------------------------------------------
+    def _log_traversal_child_discovered(
+        self,
+        RELATIVE_PATH: str,
+        SOURCE: str,
+        KIND: str,
+    ) -> None:
+        self._log_debug(
+            "Traversal child discovered: "
+            f"path={RELATIVE_PATH}, "
+            f"kind={KIND}, "
+            f"source={SOURCE}."
+        )
+
+    # --------------------------------------------------------------------------
+    # This function logs one traversal child classification decision.
+    #
+    # 1. "RELATIVE_PATH" is the classified child path.
+    # 2. "KIND" is the resolved child kind.
+    #
+    # Returns: None.
+    # --------------------------------------------------------------------------
+    def _log_traversal_child_classified(
+        self,
+        RELATIVE_PATH: str,
+        KIND: str,
+    ) -> None:
+        self._log_debug(
+            "Traversal child classified: "
+            f"path={RELATIVE_PATH}, "
+            f"kind={KIND}."
+        )
+
+    # --------------------------------------------------------------------------
     # This function creates a clean traversal telemetry dictionary.
     #
     # Returns: Empty traversal statistics dictionary.
@@ -754,14 +814,21 @@ class ICloudDriveClient:
                 continue
 
             RELATIVE_PATH = f"{CURRENT_PATH}/{CLEAN_NAME}".strip("/")
+            self._log_traversal_child_discovered(
+                RELATIVE_PATH,
+                "name_list",
+                "unknown",
+            )
             IS_DIR = self._child_is_dir(CHILD, RELATIVE_PATH)
 
             if IS_DIR:
+                self._log_traversal_child_classified(RELATIVE_PATH, "directory")
                 self._record_traversal_entry(True)
                 ENTRIES.append(self._build_child_entry(RELATIVE_PATH, CHILD, True))
                 CHILD_DIRECTORIES.append((RELATIVE_PATH, CHILD))
                 continue
 
+            self._log_traversal_child_classified(RELATIVE_PATH, "file")
             self._record_traversal_entry(False)
             ENTRIES.append(self._build_child_entry(RELATIVE_PATH, CHILD, False))
 
@@ -794,6 +861,12 @@ class ICloudDriveClient:
                 continue
 
             RELATIVE_PATH = f"{CURRENT_PATH}/{NAME}".strip("/")
+            self._log_traversal_child_discovered(
+                RELATIVE_PATH,
+                "directory_payload",
+                "directory",
+            )
+            self._log_traversal_child_classified(RELATIVE_PATH, "directory")
             self._record_traversal_entry(True)
             ENTRIES.append(self._build_directory_item_entry(RELATIVE_PATH, ITEM))
 
@@ -821,6 +894,7 @@ class ICloudDriveClient:
         while ATTEMPT < DIR_RETRY_ATTEMPTS:
             STARTED_EPOCH = time.monotonic()
             IS_RETRY = ATTEMPT > 0
+            self._log_traversal_probe_started(CURRENT_PATH, ATTEMPT + 1)
             try:
                 PAYLOAD = NODE.dir()
                 self._record_directory_read(
@@ -837,6 +911,10 @@ class ICloudDriveClient:
                     IS_RETRY,
                     "non_directory",
                 )
+                self._log_debug(
+                    "Traversal probe non-directory: "
+                    f"path={CURRENT_PATH or '/'}."
+                )
                 return None
             except ValueError:
                 self._record_directory_read(
@@ -847,7 +925,7 @@ class ICloudDriveClient:
                     "ValueError",
                 )
                 self._log_debug(
-                    "iCloud directory read failed: "
+                    "Traversal probe failure: "
                     f"path={CURRENT_PATH or '/'}, "
                     "reason=value_error."
                 )
@@ -867,7 +945,7 @@ class ICloudDriveClient:
 
                 if IS_FINAL_ATTEMPT:
                     self._log_debug(
-                        "iCloud directory read failed: "
+                        "Traversal probe failure: "
                         f"path={CURRENT_PATH or '/'}, "
                         "reason=retry_limit_reached, "
                         f"error_type={type(ERROR).__name__}."
@@ -875,10 +953,10 @@ class ICloudDriveClient:
                     return None
 
                 self._log_debug(
-                    "iCloud directory read retrying: "
+                    "Traversal probe retry: "
                     f"path={CURRENT_PATH or '/'}, "
                     f"attempt={ATTEMPT}, "
-                    f"error_type={type(ERROR).__name__}."
+                    f"reason={type(ERROR).__name__}."
                 )
                 time.sleep(self._retry_delay_seconds(ATTEMPT))
 
@@ -1038,14 +1116,21 @@ class ICloudDriveClient:
                 continue
 
             RELATIVE_PATH = f"{CURRENT_PATH}/{CLEAN_NAME}".strip("/")
+            self._log_traversal_child_discovered(
+                RELATIVE_PATH,
+                "name_list",
+                "unknown",
+            )
             IS_DIR = self._child_is_dir(CHILD, RELATIVE_PATH)
 
             if IS_DIR:
+                self._log_traversal_child_classified(RELATIVE_PATH, "directory")
                 self._record_traversal_entry(True)
                 RESULT.append(self._build_child_entry(RELATIVE_PATH, CHILD, True))
                 RESULT.extend(self._walk_node(CHILD, RELATIVE_PATH))
                 continue
 
+            self._log_traversal_child_classified(RELATIVE_PATH, "file")
             self._record_traversal_entry(False)
             RESULT.append(self._build_child_entry(RELATIVE_PATH, CHILD, False))
 
@@ -1191,6 +1276,12 @@ class ICloudDriveClient:
                 continue
 
             RELATIVE_PATH = f"{CURRENT_PATH}/{NAME}".strip("/")
+            self._log_traversal_child_discovered(
+                RELATIVE_PATH,
+                "directory_payload",
+                "directory",
+            )
+            self._log_traversal_child_classified(RELATIVE_PATH, "directory")
             self._record_traversal_entry(True)
             RESULT.append(
                 RemoteEntry(
@@ -1230,6 +1321,12 @@ class ICloudDriveClient:
             RELATIVE_PATH = f"{CURRENT_PATH}/{NAME}".strip("/")
             SIZE = self._item_size(ITEM)
             MODIFIED = self._item_modified(ITEM)
+            self._log_traversal_child_discovered(
+                RELATIVE_PATH,
+                "file_payload",
+                "file",
+            )
+            self._log_traversal_child_classified(RELATIVE_PATH, "file")
             self._record_traversal_entry(False)
             RESULT.append(
                 RemoteEntry(

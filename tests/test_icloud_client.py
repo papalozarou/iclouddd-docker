@@ -414,9 +414,12 @@ class TestICloudClientTraversal(unittest.TestCase):
             if CALL.args[1] == "debug"
         ]
         self.assertTrue(
-            any("iCloud directory read retrying:" in LINE for LINE in DEBUG_LINES)
+            any("Traversal probe started:" in LINE for LINE in DEBUG_LINES)
         )
-        self.assertTrue(any("error_type=RuntimeError" in LINE for LINE in DEBUG_LINES))
+        self.assertTrue(
+            any("Traversal probe retry:" in LINE for LINE in DEBUG_LINES)
+        )
+        self.assertTrue(any("reason=RuntimeError" in LINE for LINE in DEBUG_LINES))
         self.assertFalse(any("temporary secret detail" in LINE for LINE in DEBUG_LINES))
 
     def test_walk_node_parallel_collects_and_sorts_entries(self) -> None:
@@ -576,6 +579,54 @@ class TestICloudClientTraversal(unittest.TestCase):
             self.assertEqual([ENTRY.path for ENTRY in RESULT], ["docs", "root.txt"])
             self.assertEqual(CHILD_DIRECTORIES, [("docs", DIRECTORY_CHILD)])
 
+    def test_shallow_entries_from_names_emits_discovery_and_classification_debug(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
+            DIRECTORY_CHILD = FakeDriveChild("folder", MODIFIED="d1")
+            FILE_CHILD = FakeDriveChild("file", SIZE=2, MODIFIED="d2")
+
+            with patch.object(
+                CLIENT,
+                "_child_node",
+                side_effect=[DIRECTORY_CHILD, FILE_CHILD],
+            ):
+                with patch("app.icloud_client.log_line") as LOG_LINE:
+                    RESULT, CHILD_DIRECTORIES = CLIENT._shallow_entries_from_names(
+                        {},
+                        "",
+                        ["docs", "root.txt"],
+                    )
+
+            self.assertEqual([ENTRY.path for ENTRY in RESULT], ["docs", "root.txt"])
+            self.assertEqual(CHILD_DIRECTORIES, [("docs", DIRECTORY_CHILD)])
+            DEBUG_LINES = [
+                CALL.args[2]
+                for CALL in LOG_LINE.call_args_list
+                if CALL.args[1] == "debug"
+            ]
+            self.assertTrue(
+                any(
+                    "Traversal child discovered: path=docs, kind=unknown, "
+                    "source=name_list."
+                    in LINE
+                    for LINE in DEBUG_LINES
+                )
+            )
+            self.assertTrue(
+                any(
+                    "Traversal child classified: path=docs, kind=directory."
+                    in LINE
+                    for LINE in DEBUG_LINES
+                )
+            )
+            self.assertTrue(
+                any(
+                    "Traversal child classified: path=root.txt, kind=file."
+                    in LINE
+                    for LINE in DEBUG_LINES
+                )
+            )
+
     def test_shallow_entries_from_names_skips_root_markers_and_self_references(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CLIENT = ICloudDriveClient(build_config_for_icloud(TMPDIR))
@@ -687,8 +738,12 @@ class TestICloudClientTraversal(unittest.TestCase):
                 for CALL in LOG_LINE.call_args_list
                 if CALL.args[1] == "debug"
             ]
-            self.assertFalse(
-                any("reason=non_directory." in LINE for LINE in DEBUG_LINES)
+            self.assertTrue(
+                any(
+                    "Traversal probe non-directory: path=docs/file.bin."
+                    in LINE
+                    for LINE in DEBUG_LINES
+                )
             )
 
     def test_child_is_dir_uses_explicit_false_folder_flags(self) -> None:
@@ -848,6 +903,39 @@ class TestICloudClientTraversal(unittest.TestCase):
             self.assertEqual(RESULT[0].path, "x.bin")
             self.assertEqual(RESULT[0].size, 9)
             self.assertEqual(RESULT[0].modified, "m")
+
+    def test_entries_from_files_emits_discovery_and_classification_debug(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            CONFIG = build_config_for_icloud(TMPDIR)
+            CLIENT = ICloudDriveClient(CONFIG)
+
+            with patch("app.icloud_client.log_line") as LOG_LINE:
+                RESULT = CLIENT._entries_from_files(
+                    "docs",
+                    [{"filename": "x.bin", "bytes": "9", "modified": "m"}],
+                )
+
+        self.assertEqual(len(RESULT), 1)
+        DEBUG_LINES = [
+            CALL.args[2]
+            for CALL in LOG_LINE.call_args_list
+            if CALL.args[1] == "debug"
+        ]
+        self.assertTrue(
+            any(
+                "Traversal child discovered: path=docs/x.bin, kind=file, "
+                "source=file_payload."
+                in LINE
+                for LINE in DEBUG_LINES
+            )
+        )
+        self.assertTrue(
+            any(
+                "Traversal child classified: path=docs/x.bin, kind=file."
+                in LINE
+                for LINE in DEBUG_LINES
+            )
+        )
 
 
 # ------------------------------------------------------------------------------

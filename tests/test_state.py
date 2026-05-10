@@ -44,13 +44,18 @@ class TestState(unittest.TestCase):
             PATH.write_text("{not-valid", encoding="utf-8")
 
             with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                with patch("builtins.print") as PRINT:
+                with patch("app.state.log_console_line") as LOG_CONSOLE_LINE:
                     RESULT = read_json(PATH)
 
             self.assertEqual(RESULT, {})
             self.assertFalse(PATH.exists())
             self.assertTrue((Path(TMPDIR) / "broken.json.corrupt").exists())
-            self.assertTrue(any("Corrupt JSON state ignored" in CALL.args[0] for CALL in PRINT.call_args_list))
+            self.assertTrue(
+                any(
+                    "Corrupt JSON state ignored" in CALL.args[1]
+                    for CALL in LOG_CONSOLE_LINE.call_args_list
+                )
+            )
 
 # --------------------------------------------------------------------------
 # This test confirms corrupt JSON reads emit debug diagnostics without raw
@@ -63,7 +68,7 @@ class TestState(unittest.TestCase):
             PATH.write_text("{not-valid", encoding="utf-8")
 
             with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                with patch("builtins.print"):
+                with patch("app.state.log_console_line"):
                     with patch("app.state.log_line") as LOG_LINE:
                         RESULT = read_json(PATH, LOG_FILE)
 
@@ -88,12 +93,17 @@ class TestState(unittest.TestCase):
 
             with patch.object(Path, "open", side_effect=OSError("permission denied")):
                 with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                    with patch("builtins.print") as PRINT:
+                    with patch("app.state.log_console_line") as LOG_CONSOLE_LINE:
                         RESULT = read_json(PATH)
 
             self.assertEqual(RESULT, {})
             self.assertTrue(PATH.exists())
-            self.assertTrue(any("State read failed" in CALL.args[0] for CALL in PRINT.call_args_list))
+            self.assertTrue(
+                any(
+                    "State read failed" in CALL.args[1]
+                    for CALL in LOG_CONSOLE_LINE.call_args_list
+                )
+            )
 
 # --------------------------------------------------------------------------
 # This test confirms JSON writes are persisted with the expected structure.
@@ -143,12 +153,17 @@ class TestState(unittest.TestCase):
 
             with patch.object(Path, "open", side_effect=OSError("disk full")):
                 with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                    with patch("builtins.print") as PRINT:
+                    with patch("app.state.log_console_line") as LOG_CONSOLE_LINE:
                         RESULT = write_json(PATH, {"a": 1})
 
             self.assertFalse(RESULT)
             self.assertFalse(PATH.exists())
-            self.assertTrue(any("State write failed" in CALL.args[0] for CALL in PRINT.call_args_list))
+            self.assertTrue(
+                any(
+                    "State write failed" in CALL.args[1]
+                    for CALL in LOG_CONSOLE_LINE.call_args_list
+                )
+            )
 
 # --------------------------------------------------------------------------
 # This test confirms write failures emit debug diagnostics without raw
@@ -161,7 +176,7 @@ class TestState(unittest.TestCase):
 
             with patch.object(Path, "open", side_effect=OSError("disk secret")):
                 with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                    with patch("builtins.print"):
+                    with patch("app.state.log_console_line"):
                         with patch("app.state.log_line") as LOG_LINE:
                             RESULT = write_json(PATH, {"a": 1}, LOG_FILE)
 
@@ -188,13 +203,18 @@ class TestState(unittest.TestCase):
 
             with patch.object(Path, "replace", side_effect=OSError("replace failed")):
                 with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                    with patch("builtins.print") as PRINT:
+                    with patch("app.state.log_console_line") as LOG_CONSOLE_LINE:
                         RESULT = write_json(PATH, {"a": 1})
 
             self.assertFalse(RESULT)
             self.assertFalse(PATH.exists())
             self.assertFalse(TEMP_PATH.exists())
-            self.assertTrue(any("State write failed" in CALL.args[0] for CALL in PRINT.call_args_list))
+            self.assertTrue(
+                any(
+                    "State write failed" in CALL.args[1]
+                    for CALL in LOG_CONSOLE_LINE.call_args_list
+                )
+            )
 
 # --------------------------------------------------------------------------
 # This test confirms temporary cleanup failures are warned and do not raise.
@@ -213,11 +233,16 @@ class TestState(unittest.TestCase):
             with patch.object(Path, "replace", side_effect=OSError("replace failed")):
                 with patch.object(Path, "unlink", new=fake_unlink):
                     with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                        with patch("builtins.print") as PRINT:
+                        with patch("app.state.log_console_line") as LOG_CONSOLE_LINE:
                             RESULT = write_json(PATH, {"a": 1})
 
             self.assertFalse(RESULT)
-            self.assertTrue(any("Temporary state cleanup failed" in CALL.args[0] for CALL in PRINT.call_args_list))
+            self.assertTrue(
+                any(
+                    "Temporary state cleanup failed" in CALL.args[1]
+                    for CALL in LOG_CONSOLE_LINE.call_args_list
+                )
+            )
 
 # --------------------------------------------------------------------------
 # This test confirms auth-state loading uses safe defaults when missing.
@@ -241,7 +266,7 @@ class TestState(unittest.TestCase):
             PATH.write_text("{bad", encoding="utf-8")
 
             with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                with patch("builtins.print"):
+                with patch("app.state.log_console_line"):
                     STATE = load_auth_state(PATH)
 
         self.assertEqual(STATE.last_auth_utc, "1970-01-01T00:00:00+00:00")
@@ -370,7 +395,7 @@ class TestState(unittest.TestCase):
             PATH.write_text("{bad", encoding="utf-8")
 
             with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                with patch("builtins.print"):
+                with patch("app.state.log_console_line"):
                     MANIFEST = load_manifest(PATH)
 
         self.assertEqual(MANIFEST, {})
@@ -400,7 +425,7 @@ class TestState(unittest.TestCase):
             PATH = BLOCKING_PATH / "child.json"
 
             with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                with patch("builtins.print"):
+                with patch("app.state.log_console_line"):
                     IS_SAVED = save_manifest(PATH, {"/a": {"etag": "1"}})
 
         self.assertFalse(IS_SAVED)

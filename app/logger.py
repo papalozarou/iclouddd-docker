@@ -12,6 +12,7 @@ from threading import Lock
 import gzip
 import os
 import shutil
+import sys
 
 from app.time_utils import now_local
 
@@ -206,7 +207,7 @@ def emit_log_lines(
 
         for LINE in PLAIN_LINES:
             CONSOLE_LINE = format_console_line(LINE, LEVEL_UPPER)
-            print(CONSOLE_LINE, flush=True)
+            write_console_line(CONSOLE_LINE)
 
         if LOG_FILE is None:
             return
@@ -214,6 +215,24 @@ def emit_log_lines(
         with LOG_FILE.open("a", encoding="utf-8") as HANDLE:
             for LINE in PLAIN_LINES:
                 HANDLE.write(f"{LINE}\n")
+
+
+# ------------------------------------------------------------------------------
+# This function writes one complete console log record in a single payload.
+#
+# 1. "CONSOLE_LINE" is the already-formatted console output line.
+#
+# Returns: None.
+#
+# N.B.
+# `print()` can emit the payload and trailing newline as separate writes. On the
+# NAS Docker Compose path that can surface as stray prefixed blank lines. This
+# helper writes the full line plus newline in one call so the console sees one
+# complete record per log line.
+# ------------------------------------------------------------------------------
+def write_console_line(CONSOLE_LINE: str) -> None:
+    sys.stdout.write(f"{CONSOLE_LINE}\n")
+    sys.stdout.flush()
 
 
 # ------------------------------------------------------------------------------

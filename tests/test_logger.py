@@ -8,7 +8,7 @@ import tempfile
 import unittest
 import gzip
 import os
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 from app import logger
 
@@ -66,11 +66,11 @@ class TestLogger(unittest.TestCase):
             LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
 
             with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
-                with patch("builtins.print") as PRINT:
+                with patch.object(logger, "write_console_line") as WRITE_CONSOLE_LINE:
                     logger.log_line(LOG_FILE, "info", "Backup starting.")
 
             EXPECTED = "[2026-03-09 12:34:56 UTC] [INFO] Backup starting."
-            PRINT.assert_called_once_with(EXPECTED, flush=True)
+            WRITE_CONSOLE_LINE.assert_called_once_with(EXPECTED)
             CONTENTS = LOG_FILE.read_text(encoding="utf-8").strip()
             self.assertEqual(CONTENTS, EXPECTED)
 
@@ -83,7 +83,7 @@ class TestLogger(unittest.TestCase):
             LOG_FILE = Path(TMPDIR) / "pyiclodoc-drive-worker.log"
 
             with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
-                with patch("builtins.print") as PRINT:
+                with patch.object(logger, "write_console_line") as WRITE_CONSOLE_LINE:
                     logger.log_line(
                         LOG_FILE,
                         "info",
@@ -94,7 +94,7 @@ class TestLogger(unittest.TestCase):
                 "[2026-03-09 12:34:56 UTC] [INFO] "
                 "Traversal progress detail: elapsed_seconds=30.0"
             )
-            PRINT.assert_called_once_with(EXPECTED, flush=True)
+            WRITE_CONSOLE_LINE.assert_called_once_with(EXPECTED)
             CONTENTS = LOG_FILE.read_text(encoding="utf-8").strip()
             self.assertEqual(CONTENTS, EXPECTED)
 
@@ -104,7 +104,7 @@ class TestLogger(unittest.TestCase):
 # --------------------------------------------------------------------------
     def test_log_console_line_preserves_explicit_multiline_payloads(self) -> None:
         with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
-            with patch("builtins.print") as PRINT:
+            with patch.object(logger, "write_console_line") as WRITE_CONSOLE_LINE:
                 logger.log_console_line(
                     "error",
                     "Line one.\nLine two.\n",
@@ -115,10 +115,7 @@ class TestLogger(unittest.TestCase):
             f"{logger.ANSI_RED}[2026-03-09 12:34:56 UTC] [ERROR] Line one.{logger.ANSI_RESET}",
             f"{logger.ANSI_RED}[2026-03-09 12:34:56 UTC] [ERROR] Line two.{logger.ANSI_RESET}",
         ]
-        self.assertEqual(
-            [CALL.args[0] for CALL in PRINT.call_args_list],
-            EXPECTED,
-        )
+        self.assertEqual(WRITE_CONSOLE_LINE.call_args_list, [call(LINE) for LINE in EXPECTED])
 
 # --------------------------------------------------------------------------
 # This test confirms debug lines are suppressed when LOG_LEVEL is info.
@@ -129,10 +126,10 @@ class TestLogger(unittest.TestCase):
 
             with patch.dict("os.environ", {"LOG_LEVEL": "info"}):
                 with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
-                    with patch("builtins.print") as PRINT:
+                    with patch.object(logger, "write_console_line") as WRITE_CONSOLE_LINE:
                         logger.log_line(LOG_FILE, "debug", "Hidden debug.")
 
-            PRINT.assert_not_called()
+            WRITE_CONSOLE_LINE.assert_not_called()
             self.assertFalse(LOG_FILE.exists())
 
 # --------------------------------------------------------------------------
@@ -144,11 +141,11 @@ class TestLogger(unittest.TestCase):
 
             with patch.dict("os.environ", {"LOG_LEVEL": "debug"}):
                 with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
-                    with patch("builtins.print") as PRINT:
+                    with patch.object(logger, "write_console_line") as WRITE_CONSOLE_LINE:
                         logger.log_line(LOG_FILE, "debug", "Visible debug.")
 
             EXPECTED = "[2026-03-09 12:34:56 UTC] [DEBUG] Visible debug."
-            PRINT.assert_called_once_with(EXPECTED, flush=True)
+            WRITE_CONSOLE_LINE.assert_called_once_with(EXPECTED)
             CONTENTS = LOG_FILE.read_text(encoding="utf-8").strip()
             self.assertEqual(CONTENTS, EXPECTED)
 
@@ -161,11 +158,11 @@ class TestLogger(unittest.TestCase):
 
             with patch.dict("os.environ", {"LOG_LEVEL": "info"}):
                 with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
-                    with patch("builtins.print") as PRINT:
+                    with patch.object(logger, "write_console_line") as WRITE_CONSOLE_LINE:
                         logger.log_line(LOG_FILE, "info", "Visible info.")
 
             EXPECTED = "[2026-03-09 12:34:56 UTC] [INFO] Visible info."
-            PRINT.assert_called_once_with(EXPECTED, flush=True)
+            WRITE_CONSOLE_LINE.assert_called_once_with(EXPECTED)
             CONTENTS = LOG_FILE.read_text(encoding="utf-8").strip()
             self.assertEqual(CONTENTS, EXPECTED)
 
@@ -178,13 +175,12 @@ class TestLogger(unittest.TestCase):
 
             with patch.dict("os.environ", {"LOG_LEVEL": "info"}):
                 with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
-                    with patch("builtins.print") as PRINT:
+                    with patch.object(logger, "write_console_line") as WRITE_CONSOLE_LINE:
                         logger.log_line(LOG_FILE, "error", "Visible error.")
 
             EXPECTED = "[2026-03-09 12:34:56 UTC] [ERROR] Visible error."
-            PRINT.assert_called_once_with(
-                f"{logger.ANSI_RED}{EXPECTED}{logger.ANSI_RESET}",
-                flush=True,
+            WRITE_CONSOLE_LINE.assert_called_once_with(
+                f"{logger.ANSI_RED}{EXPECTED}{logger.ANSI_RESET}"
             )
             CONTENTS = LOG_FILE.read_text(encoding="utf-8").strip()
             self.assertEqual(CONTENTS, EXPECTED)
@@ -213,11 +209,24 @@ class TestLogger(unittest.TestCase):
 
             with patch.dict("os.environ", {"LOG_LEVEL": "invalid"}):
                 with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
-                    with patch("builtins.print") as PRINT:
+                    with patch.object(logger, "write_console_line") as WRITE_CONSOLE_LINE:
                         logger.log_line(LOG_FILE, "debug", "Hidden debug.")
 
-            PRINT.assert_not_called()
+            WRITE_CONSOLE_LINE.assert_not_called()
             self.assertFalse(LOG_FILE.exists())
+
+# --------------------------------------------------------------------------
+# This test confirms console lines are written as one newline-terminated
+# payload rather than through `print()`.
+# --------------------------------------------------------------------------
+    def test_write_console_line_writes_single_newline_terminated_payload(self) -> None:
+        STDOUT = Mock()
+
+        with patch.object(logger.sys, "stdout", STDOUT):
+            logger.write_console_line("Visible info.")
+
+        STDOUT.write.assert_called_once_with("Visible info.\n")
+        STDOUT.flush.assert_called_once_with()
 
 # --------------------------------------------------------------------------
 # This test confirms get_log_level falls back to info on invalid values.

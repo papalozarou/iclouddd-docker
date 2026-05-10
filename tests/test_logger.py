@@ -99,26 +99,56 @@ class TestLogger(unittest.TestCase):
             self.assertEqual(CONTENTS, EXPECTED)
 
 # --------------------------------------------------------------------------
-# This test confirms explicitly multi-line console events keep their line
-# structure without adding blank records.
+# This test confirms omitted log-file paths still resolve to the canonical
+# worker log destination.
 # --------------------------------------------------------------------------
-    def test_log_console_line_preserves_explicit_multiline_payloads(self) -> None:
-        with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
-            with patch("builtins.print") as PRINT:
-                logger.log_console_line(
-                    "error",
-                    "Line one.\nLine two.\n",
-                    True,
-                )
+    def test_resolve_log_file_path_derives_worker_log_path_from_logs_dir(self) -> None:
+        with patch.dict("os.environ", {"LOGS_DIR": "/tmp/test-logs"}, clear=True):
+            RESULT = logger.resolve_log_file_path()
 
-        EXPECTED = [
-            f"{logger.ANSI_RED}[2026-03-09 12:34:56 UTC] [ERROR] Line one.{logger.ANSI_RESET}",
-            f"{logger.ANSI_RED}[2026-03-09 12:34:56 UTC] [ERROR] Line two.{logger.ANSI_RESET}",
-        ]
         self.assertEqual(
-            [CALL.args[0] for CALL in PRINT.call_args_list],
-            EXPECTED,
+            RESULT,
+            Path("/tmp/test-logs/pyiclodoc-drive-worker.log"),
         )
+
+# --------------------------------------------------------------------------
+# This test confirms explicitly multi-line error events keep their line
+# structure without adding blank records when the log path is derived.
+# --------------------------------------------------------------------------
+    def test_log_line_preserves_explicit_multiline_payloads_with_derived_log_path(self) -> None:
+        with tempfile.TemporaryDirectory() as TMPDIR:
+            with patch.dict("os.environ", {"LOGS_DIR": TMPDIR}, clear=True):
+                with patch.object(
+                    logger,
+                    "get_timestamp",
+                    return_value="2026-03-09 12:34:56 UTC",
+                ):
+                    with patch("builtins.print") as PRINT:
+                        logger.log_line(
+                            None,
+                            "error",
+                            "Line one.\nLine two.\n",
+                            True,
+                        )
+
+            EXPECTED = [
+                f"{logger.ANSI_RED}[2026-03-09 12:34:56 UTC] [ERROR] Line one.{logger.ANSI_RESET}",
+                f"{logger.ANSI_RED}[2026-03-09 12:34:56 UTC] [ERROR] Line two.{logger.ANSI_RESET}",
+            ]
+            self.assertEqual(
+                [CALL.args[0] for CALL in PRINT.call_args_list],
+                EXPECTED,
+            )
+            CONTENTS = (
+                Path(TMPDIR) / "pyiclodoc-drive-worker.log"
+            ).read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(
+                CONTENTS,
+                [
+                    "[2026-03-09 12:34:56 UTC] [ERROR] Line one.",
+                    "[2026-03-09 12:34:56 UTC] [ERROR] Line two.",
+                ],
+            )
 
 # --------------------------------------------------------------------------
 # This test confirms debug lines are suppressed when LOG_LEVEL is info.

@@ -333,7 +333,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
         TELEGRAM = TelegramConfig("token", "12345")
 
         with patch("app.runtime_helpers.send_message_result") as SEND:
-            with patch("app.runtime_helpers.log_console_line") as LOG_CONSOLE_LINE:
+            with patch("app.runtime_helpers.log_line") as LOG_LINE:
                 SEND.return_value = SimpleNamespace(
                     success=False,
                     disabled=False,
@@ -341,9 +341,10 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 )
                 notify(TELEGRAM, "hello")
 
-        LOG_CONSOLE_LINE.assert_called_once()
-        self.assertIn("Telegram notification failed", LOG_CONSOLE_LINE.call_args[0][1])
-        self.assertIn("Bad Request", LOG_CONSOLE_LINE.call_args[0][1])
+        LOG_LINE.assert_called_once()
+        self.assertIsNone(LOG_LINE.call_args[0][0])
+        self.assertIn("Telegram notification failed", LOG_LINE.call_args[0][2])
+        self.assertIn("Bad Request", LOG_LINE.call_args[0][2])
 
 # --------------------------------------------------------------------------
 # This test confirms notify stays quiet when Telegram integration is disabled.
@@ -352,7 +353,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
         TELEGRAM = TelegramConfig("", "12345")
 
         with patch("app.runtime_helpers.send_message_result") as SEND:
-            with patch("app.runtime_helpers.log_console_line") as LOG_CONSOLE_LINE:
+            with patch("app.runtime_helpers.log_line") as LOG_LINE:
                 SEND.return_value = SimpleNamespace(
                     success=False,
                     disabled=True,
@@ -360,7 +361,7 @@ class TestMainRuntimeHelpers(unittest.TestCase):
                 )
                 notify(TELEGRAM, "hello")
 
-        LOG_CONSOLE_LINE.assert_not_called()
+        LOG_LINE.assert_not_called()
 
 # --------------------------------------------------------------------------
 # This test confirms stop notifications use the standard stopped template.

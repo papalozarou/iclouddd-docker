@@ -1,6 +1,6 @@
 # ------------------------------------------------------------------------------
 # This module provides lightweight structured logging helpers for console and
-# file output.
+# worker-log output.
 # ------------------------------------------------------------------------------
 
 from __future__ import annotations
@@ -118,9 +118,31 @@ def should_log(LEVEL: str, CONFIG: LoggerConfig | None = None) -> bool:
 
 
 # ------------------------------------------------------------------------------
+# This function resolves the canonical worker log path for the process.
+#
+# 1. "LOG_FILE" is the optional destination log file supplied by the caller.
+#
+# Returns: Canonical worker log file path used for both console and file
+# emission.
+#
+# N.B.
+# The logger now owns the fallback path resolution so callers do not choose
+# between console-only and console-plus-file behaviour. When the runtime does
+# not pass a path explicitly, the logger derives the worker log path from
+# "LOGS_DIR" using the same filename as the main worker configuration.
+# ------------------------------------------------------------------------------
+def resolve_log_file_path(LOG_FILE: Path | None = None) -> Path:
+    if LOG_FILE is not None:
+        return LOG_FILE
+
+    LOGS_DIR = Path(os.getenv("LOGS_DIR", "/logs"))
+    return LOGS_DIR / "pyiclodoc-drive-worker.log"
+
+
+# ------------------------------------------------------------------------------
 # This function prints a log line and appends it to the worker log.
 #
-# 1. "LOG_FILE" is the destination log file.
+# 1. "LOG_FILE" is the optional destination log file supplied by the caller.
 # 2. "LEVEL" is severity.
 # 3. "MESSAGE" is log content.
 # 4. "ALLOW_MULTILINE" preserves explicit multi-line payloads when true.
@@ -128,7 +150,7 @@ def should_log(LEVEL: str, CONFIG: LoggerConfig | None = None) -> bool:
 # Returns: None.
 # ------------------------------------------------------------------------------
 def log_line(
-    LOG_FILE: Path,
+    LOG_FILE: Path | None,
     LEVEL: str,
     MESSAGE: str,
     ALLOW_MULTILINE: bool = False,
@@ -139,35 +161,7 @@ def log_line(
         return
 
     emit_log_lines(
-        LOG_FILE,
-        LEVEL,
-        MESSAGE,
-        LOGGER_CONFIG,
-        ALLOW_MULTILINE,
-    )
-
-
-# ------------------------------------------------------------------------------
-# This function prints a structured log line without a worker log file.
-#
-# 1. "LEVEL" is severity.
-# 2. "MESSAGE" is log content.
-# 3. "ALLOW_MULTILINE" preserves explicit multi-line payloads when true.
-#
-# Returns: None.
-# ------------------------------------------------------------------------------
-def log_console_line(
-    LEVEL: str,
-    MESSAGE: str,
-    ALLOW_MULTILINE: bool = False,
-) -> None:
-    LOGGER_CONFIG = load_logger_config()
-
-    if not should_log(LEVEL, LOGGER_CONFIG):
-        return
-
-    emit_log_lines(
-        None,
+        resolve_log_file_path(LOG_FILE),
         LEVEL,
         MESSAGE,
         LOGGER_CONFIG,
@@ -178,7 +172,7 @@ def log_console_line(
 # ------------------------------------------------------------------------------
 # This function emits one or more log records through the shared logger seam.
 #
-# 1. "LOG_FILE" is the optional worker log destination.
+# 1. "LOG_FILE" is the worker log destination.
 # 2. "LEVEL" is severity.
 # 3. "MESSAGE" is log content.
 # 4. "CONFIG" is the resolved logger policy for this emission.
@@ -187,7 +181,7 @@ def log_console_line(
 # Returns: None.
 # ------------------------------------------------------------------------------
 def emit_log_lines(
-    LOG_FILE: Path | None,
+    LOG_FILE: Path,
     LEVEL: str,
     MESSAGE: str,
     CONFIG: LoggerConfig,
@@ -201,15 +195,12 @@ def emit_log_lines(
     )
 
     with LOG_EMIT_LOCK:
-        if LOG_FILE is not None:
-            rotate_log_if_needed(LOG_FILE, CONFIG)
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        rotate_log_if_needed(LOG_FILE, CONFIG)
 
         for LINE in PLAIN_LINES:
             CONSOLE_LINE = format_console_line(LINE, LEVEL_UPPER)
             print(CONSOLE_LINE, flush=True)
-
-        if LOG_FILE is None:
-            return
 
         with LOG_FILE.open("a", encoding="utf-8") as HANDLE:
             for LINE in PLAIN_LINES:

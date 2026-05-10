@@ -860,7 +860,7 @@ class TestSyncerHelpers(unittest.TestCase):
         CLIENT = FakeClient(ENTRIES, {})
 
         with tempfile.TemporaryDirectory() as TMPDIR:
-            with patch("app.syncer.log_console_line") as LOG_CONSOLE_LINE:
+            with patch("app.syncer.log_line") as LOG_LINE:
                 SUMMARY, NEW_MANIFEST = perform_incremental_sync(CLIENT, Path(TMPDIR), {})
 
         self.assertEqual(SUMMARY.total_files, 1)
@@ -871,8 +871,9 @@ class TestSyncerHelpers(unittest.TestCase):
         self.assertNotIn("docs/explode.txt", NEW_MANIFEST)
         self.assertTrue(
             any(
-                "File transfer worker failed:" in CALL.args[1]
-                for CALL in LOG_CONSOLE_LINE.call_args_list
+                CALL.args[0] is None and
+                "File transfer worker failed:" in CALL.args[2]
+                for CALL in LOG_LINE.call_args_list
             )
         )
 

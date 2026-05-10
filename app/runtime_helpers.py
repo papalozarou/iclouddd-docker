@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from app.logger import log_console_line
+from app.logger import log_line
 from app.telegram_bot import TelegramConfig, send_message_result
 
 
@@ -22,7 +22,8 @@ def notify(TELEGRAM: TelegramConfig, MESSAGE: str) -> None:
     if RESULT.success or RESULT.disabled:
         return
 
-    log_console_line(
+    log_line(
+        None,
         "error",
         "Telegram notification failed: "
         f"{RESULT.failure_detail}",

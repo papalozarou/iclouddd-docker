@@ -22,7 +22,7 @@ from app.icloud_client import (
     TraversalWorkerTimeoutError,
     TraversalStatsSnapshot,
 )
-from app.logger import log_console_line, log_line
+from app.logger import log_line
 
 TRANSFER_PROGRESS_LOG_INTERVAL_SECONDS = 30.0
 TRAVERSAL_PROGRESS_LOG_INTERVAL_SECONDS = 30.0
@@ -545,7 +545,8 @@ def perform_incremental_sync(
                                 f"File transfer exception: {ENTRY.path} "
                                 f"({type(ERROR).__name__}: {ERROR})",
                             )
-                        log_console_line(
+                        log_line(
+                            None,
                             "error",
                             "File transfer worker failed: "
                             f"{type(ERROR).__name__}: {ERROR}",

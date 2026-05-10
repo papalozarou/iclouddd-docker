@@ -10,7 +10,7 @@ from pathlib import Path
 import json
 from typing import Any
 
-from app.logger import get_timestamp, log_console_line, log_line
+from app.logger import get_timestamp, log_line
 from app.time_utils import now_local_iso
 
 
@@ -26,7 +26,7 @@ class AuthState:
 
 
 # ------------------------------------------------------------------------------
-# This function writes a state debug line when a worker log is available.
+# This function writes a state debug line through the canonical logger seam.
 #
 # 1. "LOG_FILE" is the optional worker log destination.
 # 2. "MESSAGE" is the already-redacted diagnostic message to write.
@@ -93,14 +93,14 @@ def read_json(PATH: Path, LOG_FILE: Path | None = None) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------------------
-# This function emits a state-layer warning to worker stdout.
+# This function emits a state-layer warning through the canonical logger seam.
 #
 # 1. "MESSAGE" is warning content to print.
 #
 # Returns: None.
 # ------------------------------------------------------------------------------
 def warn_state_issue(MESSAGE: str) -> None:
-    log_console_line("error", MESSAGE)
+    log_line(None, "error", MESSAGE)
 
 
 # ------------------------------------------------------------------------------

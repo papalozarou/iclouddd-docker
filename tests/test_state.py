@@ -43,10 +43,9 @@ class TestState(unittest.TestCase):
             PATH = Path(TMPDIR) / "broken.json"
             PATH.write_text("{not-valid", encoding="utf-8")
 
-            with patch.dict("os.environ", {"LOGS_DIR": TMPDIR}, clear=True):
-                with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                    with patch("builtins.print") as PRINT:
-                        RESULT = read_json(PATH)
+            with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                with patch("builtins.print") as PRINT:
+                    RESULT = read_json(PATH)
 
             self.assertEqual(RESULT, {})
             self.assertFalse(PATH.exists())
@@ -86,22 +85,11 @@ class TestState(unittest.TestCase):
         with tempfile.TemporaryDirectory() as TMPDIR:
             PATH = Path(TMPDIR) / "broken.json"
             PATH.write_text("{}", encoding="utf-8")
-            ORIGINAL_OPEN = Path.open
 
-            with patch.dict("os.environ", {"LOGS_DIR": TMPDIR}, clear=True):
-                def fake_open(
-                    TARGET: Path,
-                    *ARGS,
-                    **KWARGS,
-                ):
-                    if TARGET == PATH:
-                        raise OSError("permission denied")
-                    return ORIGINAL_OPEN(TARGET, *ARGS, **KWARGS)
-
-                with patch.object(Path, "open", autospec=True, side_effect=fake_open):
-                    with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                        with patch("builtins.print") as PRINT:
-                            RESULT = read_json(PATH)
+            with patch.object(Path, "open", side_effect=OSError("permission denied")):
+                with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                    with patch("builtins.print") as PRINT:
+                        RESULT = read_json(PATH)
 
             self.assertEqual(RESULT, {})
             self.assertTrue(PATH.exists())
@@ -152,23 +140,11 @@ class TestState(unittest.TestCase):
     def test_write_json_warns_when_open_fails(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             PATH = Path(TMPDIR) / "data.json"
-            ORIGINAL_OPEN = Path.open
-            TEMP_PATH = Path(TMPDIR) / "data.json.tmp"
 
-            with patch.dict("os.environ", {"LOGS_DIR": TMPDIR}, clear=True):
-                def fake_open(
-                    TARGET: Path,
-                    *ARGS,
-                    **KWARGS,
-                ):
-                    if TARGET == TEMP_PATH:
-                        raise OSError("disk full")
-                    return ORIGINAL_OPEN(TARGET, *ARGS, **KWARGS)
-
-                with patch.object(Path, "open", autospec=True, side_effect=fake_open):
-                    with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                        with patch("builtins.print") as PRINT:
-                            RESULT = write_json(PATH, {"a": 1})
+            with patch.object(Path, "open", side_effect=OSError("disk full")):
+                with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                    with patch("builtins.print") as PRINT:
+                        RESULT = write_json(PATH, {"a": 1})
 
             self.assertFalse(RESULT)
             self.assertFalse(PATH.exists())
@@ -210,11 +186,10 @@ class TestState(unittest.TestCase):
             PATH = Path(TMPDIR) / "data.json"
             TEMP_PATH = Path(TMPDIR) / "data.json.tmp"
 
-            with patch.dict("os.environ", {"LOGS_DIR": TMPDIR}, clear=True):
-                with patch.object(Path, "replace", side_effect=OSError("replace failed")):
-                    with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                        with patch("builtins.print") as PRINT:
-                            RESULT = write_json(PATH, {"a": 1})
+            with patch.object(Path, "replace", side_effect=OSError("replace failed")):
+                with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                    with patch("builtins.print") as PRINT:
+                        RESULT = write_json(PATH, {"a": 1})
 
             self.assertFalse(RESULT)
             self.assertFalse(PATH.exists())
@@ -235,12 +210,11 @@ class TestState(unittest.TestCase):
                     raise OSError("unlink failed")
                 return ORIGINAL_UNLINK(TARGET, *ARGS, **KWARGS)
 
-            with patch.dict("os.environ", {"LOGS_DIR": TMPDIR}, clear=True):
-                with patch.object(Path, "replace", side_effect=OSError("replace failed")):
-                    with patch.object(Path, "unlink", new=fake_unlink):
-                        with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                            with patch("builtins.print") as PRINT:
-                                RESULT = write_json(PATH, {"a": 1})
+            with patch.object(Path, "replace", side_effect=OSError("replace failed")):
+                with patch.object(Path, "unlink", new=fake_unlink):
+                    with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                        with patch("builtins.print") as PRINT:
+                            RESULT = write_json(PATH, {"a": 1})
 
             self.assertFalse(RESULT)
             self.assertTrue(any("Temporary state cleanup failed" in CALL.args[0] for CALL in PRINT.call_args_list))
@@ -266,10 +240,9 @@ class TestState(unittest.TestCase):
             PATH = Path(TMPDIR) / "auth_state.json"
             PATH.write_text("{bad", encoding="utf-8")
 
-            with patch.dict("os.environ", {"LOGS_DIR": TMPDIR}, clear=True):
-                with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                    with patch("builtins.print"):
-                        STATE = load_auth_state(PATH)
+            with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                with patch("builtins.print"):
+                    STATE = load_auth_state(PATH)
 
         self.assertEqual(STATE.last_auth_utc, "1970-01-01T00:00:00+00:00")
         self.assertFalse(STATE.auth_pending)
@@ -396,10 +369,9 @@ class TestState(unittest.TestCase):
             PATH = Path(TMPDIR) / "manifest.json"
             PATH.write_text("{bad", encoding="utf-8")
 
-            with patch.dict("os.environ", {"LOGS_DIR": TMPDIR}, clear=True):
-                with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                    with patch("builtins.print"):
-                        MANIFEST = load_manifest(PATH)
+            with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                with patch("builtins.print"):
+                    MANIFEST = load_manifest(PATH)
 
         self.assertEqual(MANIFEST, {})
 
@@ -427,10 +399,9 @@ class TestState(unittest.TestCase):
             BLOCKING_PATH.write_text("occupied", encoding="utf-8")
             PATH = BLOCKING_PATH / "child.json"
 
-            with patch.dict("os.environ", {"LOGS_DIR": TMPDIR}, clear=True):
-                with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                    with patch("builtins.print"):
-                        IS_SAVED = save_manifest(PATH, {"/a": {"etag": "1"}})
+            with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
+                with patch("builtins.print"):
+                    IS_SAVED = save_manifest(PATH, {"/a": {"etag": "1"}})
 
         self.assertFalse(IS_SAVED)
         self.assertFalse(PATH.exists())

@@ -44,7 +44,7 @@ class TestState(unittest.TestCase):
             PATH.write_text("{not-valid", encoding="utf-8")
 
             with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                with patch("app.state.log_console_line") as LOG_CONSOLE_LINE:
+                with patch("app.state.log_line") as LOG_LINE:
                     RESULT = read_json(PATH)
 
             self.assertEqual(RESULT, {})
@@ -52,8 +52,9 @@ class TestState(unittest.TestCase):
             self.assertTrue((Path(TMPDIR) / "broken.json.corrupt").exists())
             self.assertTrue(
                 any(
-                    "Corrupt JSON state ignored" in CALL.args[1]
-                    for CALL in LOG_CONSOLE_LINE.call_args_list
+                    CALL.args[1] == "error"
+                    and "Corrupt JSON state ignored" in CALL.args[2]
+                    for CALL in LOG_LINE.call_args_list
                 )
             )
 
@@ -68,9 +69,8 @@ class TestState(unittest.TestCase):
             PATH.write_text("{not-valid", encoding="utf-8")
 
             with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                with patch("app.state.log_console_line"):
-                    with patch("app.state.log_line") as LOG_LINE:
-                        RESULT = read_json(PATH, LOG_FILE)
+                with patch("app.state.log_line") as LOG_LINE:
+                    RESULT = read_json(PATH, LOG_FILE)
 
         self.assertEqual(RESULT, {})
         DEBUG_LINES = [
@@ -93,15 +93,16 @@ class TestState(unittest.TestCase):
 
             with patch.object(Path, "open", side_effect=OSError("permission denied")):
                 with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                    with patch("app.state.log_console_line") as LOG_CONSOLE_LINE:
+                    with patch("app.state.log_line") as LOG_LINE:
                         RESULT = read_json(PATH)
 
             self.assertEqual(RESULT, {})
             self.assertTrue(PATH.exists())
             self.assertTrue(
                 any(
-                    "State read failed" in CALL.args[1]
-                    for CALL in LOG_CONSOLE_LINE.call_args_list
+                    CALL.args[1] == "error"
+                    and "State read failed" in CALL.args[2]
+                    for CALL in LOG_LINE.call_args_list
                 )
             )
 
@@ -153,15 +154,16 @@ class TestState(unittest.TestCase):
 
             with patch.object(Path, "open", side_effect=OSError("disk full")):
                 with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                    with patch("app.state.log_console_line") as LOG_CONSOLE_LINE:
+                    with patch("app.state.log_line") as LOG_LINE:
                         RESULT = write_json(PATH, {"a": 1})
 
             self.assertFalse(RESULT)
             self.assertFalse(PATH.exists())
             self.assertTrue(
                 any(
-                    "State write failed" in CALL.args[1]
-                    for CALL in LOG_CONSOLE_LINE.call_args_list
+                    CALL.args[1] == "error"
+                    and "State write failed" in CALL.args[2]
+                    for CALL in LOG_LINE.call_args_list
                 )
             )
 
@@ -176,9 +178,8 @@ class TestState(unittest.TestCase):
 
             with patch.object(Path, "open", side_effect=OSError("disk secret")):
                 with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                    with patch("app.state.log_console_line"):
-                        with patch("app.state.log_line") as LOG_LINE:
-                            RESULT = write_json(PATH, {"a": 1}, LOG_FILE)
+                    with patch("app.state.log_line") as LOG_LINE:
+                        RESULT = write_json(PATH, {"a": 1}, LOG_FILE)
 
         self.assertFalse(RESULT)
         DEBUG_LINES = [
@@ -203,7 +204,7 @@ class TestState(unittest.TestCase):
 
             with patch.object(Path, "replace", side_effect=OSError("replace failed")):
                 with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                    with patch("app.state.log_console_line") as LOG_CONSOLE_LINE:
+                    with patch("app.state.log_line") as LOG_LINE:
                         RESULT = write_json(PATH, {"a": 1})
 
             self.assertFalse(RESULT)
@@ -211,8 +212,9 @@ class TestState(unittest.TestCase):
             self.assertFalse(TEMP_PATH.exists())
             self.assertTrue(
                 any(
-                    "State write failed" in CALL.args[1]
-                    for CALL in LOG_CONSOLE_LINE.call_args_list
+                    CALL.args[1] == "error"
+                    and "State write failed" in CALL.args[2]
+                    for CALL in LOG_LINE.call_args_list
                 )
             )
 
@@ -233,14 +235,15 @@ class TestState(unittest.TestCase):
             with patch.object(Path, "replace", side_effect=OSError("replace failed")):
                 with patch.object(Path, "unlink", new=fake_unlink):
                     with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                        with patch("app.state.log_console_line") as LOG_CONSOLE_LINE:
+                        with patch("app.state.log_line") as LOG_LINE:
                             RESULT = write_json(PATH, {"a": 1})
 
             self.assertFalse(RESULT)
             self.assertTrue(
                 any(
-                    "Temporary state cleanup failed" in CALL.args[1]
-                    for CALL in LOG_CONSOLE_LINE.call_args_list
+                    CALL.args[1] == "error"
+                    and "Temporary state cleanup failed" in CALL.args[2]
+                    for CALL in LOG_LINE.call_args_list
                 )
             )
 
@@ -266,7 +269,7 @@ class TestState(unittest.TestCase):
             PATH.write_text("{bad", encoding="utf-8")
 
             with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                with patch("app.state.log_console_line"):
+                with patch("app.state.log_line"):
                     STATE = load_auth_state(PATH)
 
         self.assertEqual(STATE.last_auth_utc, "1970-01-01T00:00:00+00:00")
@@ -395,7 +398,7 @@ class TestState(unittest.TestCase):
             PATH.write_text("{bad", encoding="utf-8")
 
             with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                with patch("app.state.log_console_line"):
+                with patch("app.state.log_line"):
                     MANIFEST = load_manifest(PATH)
 
         self.assertEqual(MANIFEST, {})
@@ -425,7 +428,7 @@ class TestState(unittest.TestCase):
             PATH = BLOCKING_PATH / "child.json"
 
             with patch("app.state.get_timestamp", return_value="2026-03-14 16:30:00 UTC"):
-                with patch("app.state.log_console_line"):
+                with patch("app.state.log_line"):
                     IS_SAVED = save_manifest(PATH, {"/a": {"etag": "1"}})
 
         self.assertFalse(IS_SAVED)

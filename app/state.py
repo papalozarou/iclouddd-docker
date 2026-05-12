@@ -10,7 +10,7 @@ from pathlib import Path
 import json
 from typing import Any
 
-from app.logger import get_timestamp, log_console_line, log_line
+from app.logger import get_timestamp, log_line
 from app.time_utils import now_local_iso
 
 
@@ -68,6 +68,7 @@ def read_json(PATH: Path, LOG_FILE: Path | None = None) -> dict[str, Any]:
             return PAYLOAD
     except json.JSONDecodeError as ERROR:
         warn_state_issue(
+            LOG_FILE,
             f"Corrupt JSON state ignored at {PATH}: "
             f"{type(ERROR).__name__}: {ERROR}",
         )
@@ -81,6 +82,7 @@ def read_json(PATH: Path, LOG_FILE: Path | None = None) -> dict[str, Any]:
         return {}
     except OSError as ERROR:
         warn_state_issue(
+            LOG_FILE,
             f"State read failed at {PATH}: {type(ERROR).__name__}: {ERROR}",
         )
         log_state_debug(
@@ -93,14 +95,15 @@ def read_json(PATH: Path, LOG_FILE: Path | None = None) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------------------
-# This function emits a state-layer warning to worker stdout.
+# This function emits a state-layer warning through the shared logger seam.
 #
-# 1. "MESSAGE" is warning content to print.
+# 1. "LOG_FILE" is the optional worker log destination.
+# 2. "MESSAGE" is warning content to print.
 #
 # Returns: None.
 # ------------------------------------------------------------------------------
-def warn_state_issue(MESSAGE: str) -> None:
-    log_console_line("error", MESSAGE)
+def warn_state_issue(LOG_FILE: Path | None, MESSAGE: str) -> None:
+    log_line(LOG_FILE, "error", MESSAGE)
 
 
 # ------------------------------------------------------------------------------
@@ -141,6 +144,7 @@ def quarantine_corrupt_json(PATH: Path, LOG_FILE: Path | None = None) -> None:
         )
     except OSError as ERROR:
         warn_state_issue(
+            LOG_FILE,
             f"Failed to quarantine corrupt JSON state at {PATH}: "
             f"{type(ERROR).__name__}: {ERROR}",
         )
@@ -184,6 +188,7 @@ def write_json(
         return True
     except OSError as ERROR:
         warn_state_issue(
+            LOG_FILE,
             f"State write failed at {PATH}: {type(ERROR).__name__}: {ERROR}",
         )
         log_state_debug(
@@ -220,6 +225,7 @@ def cleanup_temporary_state_file(PATH: Path, LOG_FILE: Path | None = None) -> No
         )
     except OSError as ERROR:
         warn_state_issue(
+            LOG_FILE,
             f"Temporary state cleanup failed at {PATH}: "
             f"{type(ERROR).__name__}: {ERROR}",
         )

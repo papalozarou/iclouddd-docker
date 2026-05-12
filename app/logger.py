@@ -119,9 +119,9 @@ def should_log(LEVEL: str, CONFIG: LoggerConfig | None = None) -> bool:
 
 
 # ------------------------------------------------------------------------------
-# This function prints a log line and appends it to the worker log.
+# This function emits one or more log records through the shared logger seam.
 #
-# 1. "LOG_FILE" is the destination log file.
+# 1. "LOG_FILE" is the optional worker log destination.
 # 2. "LEVEL" is severity.
 # 3. "MESSAGE" is log content.
 # 4. "ALLOW_MULTILINE" preserves explicit multi-line payloads when true.
@@ -129,7 +129,7 @@ def should_log(LEVEL: str, CONFIG: LoggerConfig | None = None) -> bool:
 # Returns: None.
 # ------------------------------------------------------------------------------
 def log_line(
-    LOG_FILE: Path,
+    LOG_FILE: Path | None,
     LEVEL: str,
     MESSAGE: str,
     ALLOW_MULTILINE: bool = False,
@@ -141,34 +141,6 @@ def log_line(
 
     emit_log_lines(
         LOG_FILE,
-        LEVEL,
-        MESSAGE,
-        LOGGER_CONFIG,
-        ALLOW_MULTILINE,
-    )
-
-
-# ------------------------------------------------------------------------------
-# This function prints a structured log line without a worker log file.
-#
-# 1. "LEVEL" is severity.
-# 2. "MESSAGE" is log content.
-# 3. "ALLOW_MULTILINE" preserves explicit multi-line payloads when true.
-#
-# Returns: None.
-# ------------------------------------------------------------------------------
-def log_console_line(
-    LEVEL: str,
-    MESSAGE: str,
-    ALLOW_MULTILINE: bool = False,
-) -> None:
-    LOGGER_CONFIG = load_logger_config()
-
-    if not should_log(LEVEL, LOGGER_CONFIG):
-        return
-
-    emit_log_lines(
-        None,
         LEVEL,
         MESSAGE,
         LOGGER_CONFIG,

@@ -102,10 +102,11 @@ class TestLogger(unittest.TestCase):
 # This test confirms explicitly multi-line console events keep their line
 # structure without adding blank records.
 # --------------------------------------------------------------------------
-    def test_log_console_line_preserves_explicit_multiline_payloads(self) -> None:
+    def test_log_line_preserves_explicit_multiline_payloads_without_log_file(self) -> None:
         with patch.object(logger, "get_timestamp", return_value="2026-03-09 12:34:56 UTC"):
             with patch.object(logger, "write_console_line") as WRITE_CONSOLE_LINE:
-                logger.log_console_line(
+                logger.log_line(
+                    None,
                     "error",
                     "Line one.\nLine two.\n",
                     True,

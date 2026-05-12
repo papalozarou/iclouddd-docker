@@ -278,7 +278,7 @@ def attempt_auth(
             save_auth_state_fn=(
                 lambda PATH, STATE: save_auth_state(PATH, STATE, LOG_FILE)
             ),
-            notify_fn=notify,
+            notify_fn=lambda TELEGRAM, MESSAGE: notify(TELEGRAM, MESSAGE, LOG_FILE),
             log_line_fn=log_line,
             log_file_path=LOG_FILE,
         ),
@@ -322,7 +322,7 @@ def process_reauth_reminders(
             save_auth_state_fn=(
                 lambda PATH, STATE: save_auth_state(PATH, STATE, LOG_FILE)
             ),
-            notify_fn=notify,
+            notify_fn=lambda TELEGRAM, MESSAGE: notify(TELEGRAM, MESSAGE, LOG_FILE),
             log_line_fn=log_line,
             log_file_path=LOG_FILE,
         ),
@@ -407,6 +407,7 @@ def enforce_safety_net(CONFIG: AppConfig, TELEGRAM: TelegramConfig, LOG_FILE: Pa
         build_safety_net_blocked_message(
             APPLE_ID_LABEL, RESULT.expected_uid, RESULT.expected_gid, SAMPLE_TEXT
         ),
+        LOG_FILE,
     )
     BLOCKED_MARKER.write_text("blocked\n", encoding="utf-8")
     log_line(
@@ -500,7 +501,7 @@ def run_backup(
                 LOG_FILE,
             ),
             log_line_fn=log_line,
-            notify_fn=notify,
+            notify_fn=lambda TELEGRAM, MESSAGE: notify(TELEGRAM, MESSAGE, LOG_FILE),
             get_build_detail_fn=backup_runtime.get_build_detail,
             format_duration_fn=backup_runtime.format_duration_clock,
             format_speed_fn=backup_runtime.format_average_speed,
@@ -543,7 +544,13 @@ def handle_command(
         APPLE_ID_LABEL,
         DEPS=command_runtime.CommandRuntimeDeps(
             attempt_auth_fn=attempt_auth,
-            notify_fn=notify,
+            notify_fn=(
+                lambda TELEGRAM, MESSAGE: notify(
+                    TELEGRAM,
+                    MESSAGE,
+                    CONFIG.worker_log_path,
+                )
+            ),
             log_line_fn=log_line,
             log_file_path=CONFIG.worker_log_path,
         ),
@@ -556,6 +563,7 @@ def handle_command(
 # 1. "TELEGRAM" is Telegram integration configuration.
 # 2. "APPLE_ID_LABEL" is the formatted Apple ID label.
 # 3. "STOP_STATUS" is the final worker stop summary.
+# 4. "LOG_FILE" is the optional worker log destination.
 #
 # Returns: None.
 # ------------------------------------------------------------------------------
@@ -563,10 +571,12 @@ def notify_container_stopped(
     TELEGRAM: TelegramConfig,
     APPLE_ID_LABEL: str,
     STOP_STATUS: str,
+    LOG_FILE: Path | None = None,
 ) -> None:
     notify(
         TELEGRAM,
         build_container_stopped_message(APPLE_ID_LABEL, STOP_STATUS),
+        LOG_FILE,
     )
 
 
@@ -649,6 +659,7 @@ def main() -> int:
         notify(
             RUNTIME_CONTEXT.telegram,
             build_container_started_message(RUNTIME_CONTEXT.apple_id_label),
+            LOG_FILE,
         )
 
         log_line(LOG_FILE, "debug", "Creating iCloud client.")
@@ -692,7 +703,13 @@ def main() -> int:
                 handle_command_fn=handle_command,
                 enforce_safety_net_fn=enforce_safety_net,
                 run_backup_fn=run_backup,
-                notify_fn=notify,
+                notify_fn=(
+                    lambda TELEGRAM, MESSAGE: notify(
+                        TELEGRAM,
+                        MESSAGE,
+                        LOG_FILE,
+                    )
+                ),
                 log_line_fn=log_line,
                 get_next_run_epoch_fn=get_next_run_epoch,
                 build_one_shot_waiting_for_auth_message_fn=(
@@ -718,12 +735,13 @@ def main() -> int:
     finally:
         if RUNTIME_CONTEXT is None:
             APPLE_ID_LABEL = format_apple_id_label(CONFIG.icloud_email)
-            notify_container_stopped(TELEGRAM, APPLE_ID_LABEL, STOP_STATUS)
+            notify_container_stopped(TELEGRAM, APPLE_ID_LABEL, STOP_STATUS, LOG_FILE)
         else:
             notify_container_stopped(
                 RUNTIME_CONTEXT.telegram,
                 RUNTIME_CONTEXT.apple_id_label,
                 STOP_STATUS,
+                RUNTIME_CONTEXT.log_file,
             )
         if HEARTBEAT_UPDATER is not None:
             HEARTBEAT_UPDATER.stop()

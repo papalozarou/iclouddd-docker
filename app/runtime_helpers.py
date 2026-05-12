@@ -4,7 +4,9 @@
 
 from __future__ import annotations
 
-from app.logger import log_console_line
+from pathlib import Path
+
+from app.logger import log_line
 from app.telegram_bot import TelegramConfig, send_message_result
 
 
@@ -13,16 +15,22 @@ from app.telegram_bot import TelegramConfig, send_message_result
 #
 # 1. "TELEGRAM" is Telegram integration configuration.
 # 2. "MESSAGE" is outgoing message content.
+# 3. "LOG_FILE" is the optional worker log destination.
 #
 # Returns: None.
 # ------------------------------------------------------------------------------
-def notify(TELEGRAM: TelegramConfig, MESSAGE: str) -> None:
+def notify(
+    TELEGRAM: TelegramConfig,
+    MESSAGE: str,
+    LOG_FILE: Path | None = None,
+) -> None:
     RESULT = send_message_result(TELEGRAM, MESSAGE)
 
     if RESULT.success or RESULT.disabled:
         return
 
-    log_console_line(
+    log_line(
+        LOG_FILE,
         "error",
         "Telegram notification failed: "
         f"{RESULT.failure_detail}",

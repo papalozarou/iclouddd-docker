@@ -1141,64 +1141,6 @@ class TestICloudClientDownloads(unittest.TestCase):
                 b"abc",
             )
 
-    # --------------------------------------------------------------------------
-    # This test confirms name-list-only parent payloads emit package lookup
-    # diagnostics without changing the package failure reason.
-    # --------------------------------------------------------------------------
-    def test_download_package_tree_logs_name_list_parent_lookup_failure(self) -> None:
-        with tempfile.TemporaryDirectory() as TMPDIR:
-            CONFIG = build_config_for_icloud(TMPDIR)
-            CLIENT = ICloudDriveClient(CONFIG)
-            ROOT_NODE = SimpleNamespace()
-            PARENT_NODE = FakeNode(
-                ["pkg.bundle", "other.txt"],
-                {"pkg.bundle": ROOT_NODE},
-            )
-            CLIENT.api = Mock()
-
-            def resolve_side_effect(REMOTE_PATH: str):
-                if REMOTE_PATH == "docs/pkg.bundle":
-                    return ROOT_NODE
-                if REMOTE_PATH == "docs":
-                    return PARENT_NODE
-                return None
-
-            with patch.object(CLIENT, "_resolve_file_object", side_effect=resolve_side_effect):
-                with patch("app.icloud_client.log_line") as LOG_LINE:
-                    RESULT = CLIENT.download_package_tree(
-                        "docs/pkg.bundle",
-                        Path(TMPDIR) / "pkg.bundle",
-                    )
-
-            self.assertFalse(RESULT.is_success)
-            self.assertEqual(RESULT.failure_reason, "package_item_missing")
-            DEBUG_LINES = [
-                CALL.args[2]
-                for CALL in LOG_LINE.call_args_list
-                if CALL.args[1] == "debug"
-            ]
-            self.assertTrue(
-                any(
-                    "Traversal probe started: path=docs, attempt=1." in LINE
-                    for LINE in DEBUG_LINES
-                )
-            )
-            DIAGNOSTIC_LINES = [
-                LINE
-                for LINE in DEBUG_LINES
-                if "iCloud package metadata lookup failed:" in LINE
-            ]
-            self.assertEqual(len(DIAGNOSTIC_LINES), 1)
-            self.assertIn("parent_path=docs", DIAGNOSTIC_LINES[0])
-            self.assertIn("item_name=pkg.bundle", DIAGNOSTIC_LINES[0])
-            self.assertIn("names_count=2", DIAGNOSTIC_LINES[0])
-            self.assertIn("dirs_count=0", DIAGNOSTIC_LINES[0])
-            self.assertIn("files_count=0", DIAGNOSTIC_LINES[0])
-            self.assertIn("item_name_in_names=True", DIAGNOSTIC_LINES[0])
-            self.assertIn("names_sample=pkg.bundle|other.txt", DIAGNOSTIC_LINES[0])
-            self.assertIn("dirs_sample=<none>", DIAGNOSTIC_LINES[0])
-            self.assertIn("files_sample=<none>", DIAGNOSTIC_LINES[0])
-
     def test_download_file_falls_back_when_stream_keyword_is_unsupported(self) -> None:
         with tempfile.TemporaryDirectory() as TMPDIR:
             CONFIG = build_config_for_icloud(TMPDIR)

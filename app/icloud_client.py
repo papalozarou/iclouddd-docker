@@ -1788,7 +1788,7 @@ class ICloudDriveClient:
         if PARENT_NODE is None:
             return None
 
-        PARENT_INFO = self._node_dir(PARENT_NODE, PARENT_PATH)
+        PARENT_INFO = self._node_dir(PARENT_NODE)
         SEARCH_ITEMS = PARENT_INFO.get("dirs", []) + PARENT_INFO.get("files", [])
 
         for ITEM in SEARCH_ITEMS:
@@ -1799,124 +1799,7 @@ class ICloudDriveClient:
             if NAME == ITEM_NAME:
                 return ITEM
 
-        self._log_package_item_lookup_failed(PARENT_PATH, ITEM_NAME, PARENT_INFO)
         return None
-
-    # --------------------------------------------------------------------------
-    # This function logs parent metadata shape when package lookup fails.
-    #
-    # 1. "PARENT_PATH" is slash-separated parent directory path.
-    # 2. "ITEM_NAME" is target child name.
-    # 3. "PARENT_INFO" is normalised parent directory metadata.
-    #
-    # Returns: None.
-    #
-    # N.B.
-    # This diagnostic deliberately logs counts and bounded name samples only. It
-    # must not log raw pyicloud payloads because those may contain unexpected
-    # account or file metadata.
-    # --------------------------------------------------------------------------
-    def _log_package_item_lookup_failed(
-        self,
-        PARENT_PATH: str,
-        ITEM_NAME: str,
-        PARENT_INFO: dict[str, Any],
-    ) -> None:
-        NAMES = PARENT_INFO.get("names", [])
-        DIRS = PARENT_INFO.get("dirs", [])
-        FILES = PARENT_INFO.get("files", [])
-        NAME_TEXTS = self._string_item_samples(NAMES)
-        DIR_TEXTS = self._metadata_item_name_samples(DIRS)
-        FILE_TEXTS = self._metadata_item_name_samples(FILES)
-        ITEM_NAME_IN_NAMES = ITEM_NAME in NAME_TEXTS
-
-        self._log_debug(
-            "iCloud package metadata lookup failed: "
-            f"parent_path={PARENT_PATH or '/'}, "
-            f"item_name={ITEM_NAME}, "
-            f"names_count={self._safe_list_count(NAMES)}, "
-            f"dirs_count={self._safe_list_count(DIRS)}, "
-            f"files_count={self._safe_list_count(FILES)}, "
-            f"item_name_in_names={ITEM_NAME_IN_NAMES}, "
-            f"names_sample={self._format_name_sample(NAME_TEXTS)}, "
-            f"dirs_sample={self._format_name_sample(DIR_TEXTS)}, "
-            f"files_sample={self._format_name_sample(FILE_TEXTS)}."
-        )
-
-    # --------------------------------------------------------------------------
-    # This function counts list payloads without trusting external shapes.
-    #
-    # 1. "ITEMS" is a value from normalised directory metadata.
-    #
-    # Returns: List length when "ITEMS" is a list, otherwise zero.
-    # --------------------------------------------------------------------------
-    def _safe_list_count(self, ITEMS: Any) -> int:
-        if isinstance(ITEMS, list):
-            return len(ITEMS)
-
-        return 0
-
-    # --------------------------------------------------------------------------
-    # This function returns bounded string samples from name-list metadata.
-    #
-    # 1. "ITEMS" is a value from the normalised "names" payload.
-    #
-    # Returns: Up to five non-empty item names.
-    # --------------------------------------------------------------------------
-    def _string_item_samples(self, ITEMS: Any) -> list[str]:
-        if not isinstance(ITEMS, list):
-            return []
-
-        RESULT: list[str] = []
-        for ITEM in ITEMS:
-            NAME = str(ITEM).strip()
-            if not NAME:
-                continue
-
-            RESULT.append(NAME)
-            if len(RESULT) >= 5:
-                break
-
-        return RESULT
-
-    # --------------------------------------------------------------------------
-    # This function returns bounded name samples from metadata dictionaries.
-    #
-    # 1. "ITEMS" is a value from normalised directory metadata.
-    #
-    # Returns: Up to five non-empty metadata item names.
-    # --------------------------------------------------------------------------
-    def _metadata_item_name_samples(self, ITEMS: Any) -> list[str]:
-        if not isinstance(ITEMS, list):
-            return []
-
-        RESULT: list[str] = []
-        for ITEM in ITEMS:
-            if not isinstance(ITEM, dict):
-                continue
-
-            NAME = self._item_name(ITEM)
-            if not NAME:
-                continue
-
-            RESULT.append(NAME)
-            if len(RESULT) >= 5:
-                break
-
-        return RESULT
-
-    # --------------------------------------------------------------------------
-    # This function formats bounded name samples for one-line diagnostics.
-    #
-    # 1. "NAMES" is an already bounded list of candidate names.
-    #
-    # Returns: Pipe-separated names, or "<none>" when empty.
-    # --------------------------------------------------------------------------
-    def _format_name_sample(self, NAMES: list[str]) -> str:
-        if not NAMES:
-            return "<none>"
-
-        return "|".join(NAMES)
 
     # --------------------------------------------------------------------------
     # This function extracts package child metadata from a package item payload.

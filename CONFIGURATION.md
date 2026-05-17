@@ -1,35 +1,34 @@
 # Configuration
 
-Most setups only need you to edit four things:
+Start with four things:
 
 1. where backups are stored;
 2. where config and logs are stored;
-3. which iCloud account each worker uses;
-4. how often each worker runs.
+3. which iCloud account each container uses;
+4. how often each container runs.
 
-The example files use two workers, Alice and Bob. Keep that pattern if you want
-to back up more than one iCloud Drive account from the same Compose project.
-Remove or ignore the second worker if you only need one.
+The example files use two containers, Alice and Bob. Keep both if you want to
+back up two iCloud Drive accounts from the same Compose project. Remove or
+ignore the second container if you only need one.
 
 ## Quick setup
 
 1. Copy `.env.example` to `.env`.
 2. Pick either `compose.yml.example` or `compose.build.yml.example`.
 3. Set the host paths in `.env`.
-4. Create the secret files the workers read.
-5. Pick a schedule for each worker.
+4. Create the secret files the containers read.
+5. Pick a schedule for each container.
 6. Start Compose.
 
-The examples wire most container paths for you. Start with the host values and
-service-specific paths before changing lower-level container settings.
+The examples already set most container paths. Start with the host paths.
 
-## Pick where files go
+## Choose where files go
 
-Each worker needs three host paths:
+Each container needs three host paths:
 
-- `<SVC>_CONFIG_PATH`: saved auth state, manifest, and runtime metadata
+- `<SVC>_CONFIG_PATH`: saved auth details, manifest, and runtime metadata
 - `<SVC>_OUTPUT_PATH`: downloaded iCloud Drive files
-- `<SVC>_LOGS_PATH`: worker and health check logs
+- `<SVC>_LOGS_PATH`: container and health check logs
 
 For Alice, those settings are:
 
@@ -41,12 +40,12 @@ ALICE_LOGS_PATH=...
 
 For Bob, use the matching `BOB_` settings.
 
-Keep each worker's paths separate. Sharing an output or config directory between
-workers will make the backup state hard to reason about.
+Keep each container's paths separate. Sharing an output or config directory
+between containers makes it hard to tell which backup owns which files.
 
 ## Add your secrets
 
-Set `H_DKR_SECRETS` to the host directory that contains your secret files.
+Set `H_DKR_SECRETS` to the host directory that stores your secret files.
 
 The example Compose files expect these files:
 
@@ -58,7 +57,7 @@ bob_icloud_email.txt
 bob_icloud_password.txt
 ```
 
-The service settings point each worker at the in-container secret paths:
+These settings point each container at those files:
 
 ```env
 ALICE_TGM_BOT_TOKEN_FILE=/run/secrets/telegram_bot_token
@@ -71,9 +70,9 @@ app-specific password. Apple may still require MFA.
 
 ## Set Telegram access
 
-Set `H_TGM_CHAT_ID` to the only Telegram chat allowed to send commands.
+Set `H_TGM_CHAT_ID` to the Telegram chat allowed to send commands.
 
-If `H_TGM_CHAT_ID` is unset, Telegram command handling is disabled. The worker
+If `H_TGM_CHAT_ID` is unset, Telegram command handling is disabled. The container
 can still run scheduled backups, but you will not be able to send `auth`,
 `reauth`, or `backup` commands through Telegram.
 
@@ -86,7 +85,7 @@ H_UID=1000
 H_GID=1000
 ```
 
-The examples map those through to the container as:
+The examples pass those through to the container as:
 
 ```env
 C_UID=${H_UID}
@@ -94,11 +93,11 @@ C_GID=${H_GID}
 ```
 
 The entrypoint starts as root only long enough to read Docker secrets, then
-drops to `PUID:PGID` before running the worker.
+drops to `PUID:PGID` before running the app.
 
 ## Choose the image
 
-For the released image, use:
+For the published image, use:
 
 ```env
 IMG_NAME=ghcr.io/papalozarou/pyiclodoc-drive
@@ -123,7 +122,7 @@ or scheduling behaviour:
 C_LOG_LEVEL=debug
 ```
 
-Worker logs rotate daily and when they reach the configured size threshold:
+Logs rotate daily and when they reach the size limit:
 
 ```env
 C_LOG_ROTATE_DAILY=true
@@ -131,12 +130,12 @@ C_LOG_ROTATE_MAX_MIB=100
 C_LOG_ROTATE_KEEP_DAYS=14
 ```
 
-Rotated worker logs are compressed as
+Rotated logs are compressed as
 `pyiclodoc-drive-worker.*.log.gz`.
 
 ## Set scheduling
 
-Scheduling is configured per worker:
+Set the schedule per container:
 
 ```env
 ALICE_SCHEDULE_MODE=daily
@@ -153,37 +152,37 @@ ALICE_RESTART_POLICY=no
 N.B.
 
 One-shot mode needs `<SVC>_RESTART_POLICY=no`. If Compose restarts the
-container after exit, the one-shot worker will run again.
+container after exit, the one-shot container will run again.
 
 See [SCHEDULING.md](SCHEDULING.md) for the schedule recipes and validation
 rules.
 
 ## Useful defaults you can leave alone
 
-These usually do not need changing:
+Leave these alone unless you know you need them:
 
 - `C_DKR_SECRETS`: in-container secret root used by `_FILE` settings
-- `SYNC_TRAVERSAL_WORKERS`: bounded directory traversal worker count
-- `SYNC_DOWNLOAD_WORKERS`: changed-file download workers, or `auto`
+- `SYNC_TRAVERSAL_WORKERS`: how many directory scans can run at once
+- `SYNC_DOWNLOAD_WORKERS`: changed-file download count, or `auto`
 - `SYNC_DOWNLOAD_CHUNK_MIB`: download stream chunk size
 - `BACKUP_DELETE_REMOVED`: mirror-delete mode, default `false`
 
-Only change the sync settings when you are tuning a large backup or diagnosing
-performance.
+Only change the sync settings when a large backup is too slow or you are
+diagnosing performance.
 
 ## Default container paths
 
-The worker uses these paths inside the container:
+The container uses these paths:
 
-- `/config`: auth/session state, manifest, and runtime metadata
+- `/config`: auth details, session files, manifest, and runtime metadata
 - `/output`: downloaded iCloud Drive files
-- `/logs`: worker and health check output
+- `/logs`: container and health check output
 
-Compose maps each worker's host paths to these container paths.
+Compose maps each host path to the matching container path.
 
 ## `/config` layout
 
-Each worker mounts `/config` from a different host location:
+Each container mounts `/config` from a different host location:
 
 - `icloud_alice` uses `${ALICE_CONFIG_PATH}`
 - `icloud_bob` uses `${BOB_CONFIG_PATH}`
@@ -212,18 +211,17 @@ N.B.
 - `pyiclodoc-drive-safety_net_blocked.flag` is created when first-run safety
   checks block backup.
 - `icloudpd/cookies` and `icloudpd/session` are compatibility symlinks.
-- `keyring/keyring_pass.cfg` stores the worker keyring backend data.
+- `keyring/keyring_pass.cfg` stores saved credential data.
 - Saved iCloud credentials are only updated after a successful login.
 - JSON state files are written with a temporary file and atomic replace.
 
 ## Full variable reference
 
-These are the environment names used under `services.*.environment` in the
-Compose examples.
+These are the environment names used by the Compose examples.
 
 | Container variable | Accepted values | Source in `.env` |
 | --- | --- | --- |
-| `CONTAINER_USERNAME` | worker label, for example `alice` or `bob` | fixed in Compose |
+| `CONTAINER_USERNAME` | container label, for example `alice` or `bob` | fixed in Compose |
 | `ICLOUD_EMAIL_FILE` | in-container file path containing the Apple ID email | `<SVC>_ICLOUD_EMAIL_FILE` |
 | `ICLOUD_PASSWORD_FILE` | in-container file path containing the Apple ID password | `<SVC>_ICLOUD_PASSWORD_FILE` |
 | `REAUTH_INTERVAL_DAYS` | integer day count, default `30` | `<SVC>_REAUTH_INTERVAL_DAYS` |
@@ -244,7 +242,7 @@ Common host values:
 
 - `H_UID`: host user ID mapped into containers
 - `H_GID`: host group ID mapped into containers
-- `H_TZ`: timezone for worker behaviour and schedule calculations
-- `H_TGM_CHAT_ID`: Telegram chat allowed to control workers
+- `H_TZ`: timezone for container behaviour and schedule calculations
+- `H_TGM_CHAT_ID`: Telegram chat allowed to control containers
 - `H_DKR_SECRETS`: host path containing source secret files
 - `H_DATA_PATH`: base host path for service data directories

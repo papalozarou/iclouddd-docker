@@ -1,13 +1,13 @@
 # Scheduling
 
-Pick one schedule per worker. The examples below use `ALICE_`, but the same
-settings work for `BOB_` or any other worker name you add to Compose.
+Pick one schedule per container. These examples use `ALICE_`, but the same
+settings work for `BOB_` or any other container you add to Compose.
 
 Use lowercase weekday names: `monday` to `sunday`.
 
 N.B.
 
-Set `H_TZ` in `.env` so Compose passes the correct `TZ` value into the worker.
+Set `H_TZ` in `.env` so Compose passes the correct `TZ` into the container.
 Calendar schedules use the container timezone. If the timezone is wrong or
 missing, `02:00` will not necessarily mean 02:00 where the backup host lives.
 
@@ -27,12 +27,12 @@ Set `ALICE_RESTART_POLICY=no`. If the restart policy is `unless-stopped` or
 similar, Compose will start the container again after it exits. That turns a
 one-shot backup into a loop.
 
-One-shot mode ignores recurring schedule values for repeat execution. It still
+One-shot mode does not use recurring schedule values for repeat runs. It still
 waits for Telegram `auth` or `reauth` commands if iCloud needs MFA.
 
 ## Run every day
 
-Use daily mode for the normal "run overnight" setup.
+Use daily mode for the usual "run overnight" setup.
 
 ```env
 ALICE_SCHEDULE_MODE=daily
@@ -81,8 +81,8 @@ ALICE_SCHEDULE_BACKUP_TIME=02:00
 
 ## Run every N minutes
 
-Use interval mode when you want the next run to be based on the previous run
-time, not a fixed clock slot.
+Use interval mode when the next run should be based on the previous run time,
+not a fixed clock slot.
 
 ```env
 ALICE_SCHEDULE_MODE=interval
@@ -93,7 +93,7 @@ ALICE_SCHEDULE_INTERVAL_MINUTES=1440
 
 ## Trigger a manual backup
 
-Send the worker a Telegram backup command:
+Send the container a Telegram backup command:
 
 ```text
 alice backup
@@ -118,7 +118,7 @@ Startup validation fails when:
 - `SCHEDULE_MONTHLY_WEEK` is not `first`, `second`, `third`, `fourth`, or
   `last` for `monthly`
 - `SCHEDULE_INTERVAL_MINUTES` is less than `1` in interval mode, unless the
-  worker is running one-shot
+  container is running one-shot
 
 ## What each mode uses
 
@@ -130,5 +130,5 @@ Startup validation fails when:
 | `twice_weekly` | `SCHEDULE_WEEKDAYS`, `SCHEDULE_BACKUP_TIME` | `SCHEDULE_INTERVAL_MINUTES`, `SCHEDULE_MONTHLY_WEEK` |
 | `monthly` | `SCHEDULE_MONTHLY_WEEK`, `SCHEDULE_WEEKDAYS`, `SCHEDULE_BACKUP_TIME` | `SCHEDULE_INTERVAL_MINUTES` |
 
-`RUN_ONCE=true` can be used with any `SCHEDULE_MODE` value because recurring
-schedule values are not used for repeat execution in one-shot mode.
+`RUN_ONCE=true` can be used with any `SCHEDULE_MODE` value because one-shot mode
+does not repeat.

@@ -1,64 +1,89 @@
 # Telegram
 
-## Command format
+Telegram gives each worker a small control channel. Use it to complete iCloud
+authentication, trigger manual backups, and receive backup status messages.
 
-Commands are only accepted from the chat ID configured in `H_TGM_CHAT_ID`.
-If `H_TGM_CHAT_ID` is unset, Telegram command handling is disabled.
+Commands only work from the chat ID configured in `H_TGM_CHAT_ID`. If that
+value is unset, Telegram command handling is disabled.
 
-Supported command forms:
+## Commands
 
-- `<username> backup`
-- `<username> auth`
-- `<username> auth 123456`
-- `<username> reauth`
-- `<username> reauth 123456`
+Send commands in this form:
 
-N.B.
+```text
+alice backup
+alice auth
+alice auth 123456
+alice reauth
+alice reauth 123456
+```
 
-`<username>` must match the container username for that worker service.
+Replace `alice` with the worker name set by `CONTAINER_USERNAME`.
 
-## Authentication and reauthentication flow
+The supported commands are:
 
-1. On startup, the worker attempts iCloud authentication using saved session
-   state and configured credentials.
-2. If MFA is required, the worker marks auth pending and sends a prompt.
-3. The user sends either `auth <code>` or `reauth <code>` via Telegram to
-   complete the current pending challenge.
-4. `auth <code>` and `reauth <code>` do not start a fresh login attempt; they
-   only validate against the active pending session.
-5. On worker startup, the container captures one Telegram update cursor
-   snapshot and discards only the queued updates already visible at that
-   cursor.
-6. After that snapshot, the worker switches to live polling from the captured
-   offset, so later commands are preserved for active handling.
-7. Startup cutover still completes even if newer Telegram updates keep
-   arriving while the worker is starting.
-8. One-shot and scheduled modes both use the same cutover contract, so a
-   restart does not change which commands count as backlog.
-9. If a worker restart clears in-memory auth session state, send `auth` or
-   `reauth` without a code first to trigger a new challenge prompt.
-10. If successful, pending auth state is cleared and normal backup flow
-    resumes.
+- `<username> backup`: run a backup now
+- `<username> auth`: start or restart the current authentication prompt
+- `<username> auth 123456`: submit an MFA code for authentication
+- `<username> reauth`: start or restart the current reauthentication prompt
+- `<username> reauth 123456`: submit an MFA code for reauthentication
 
-## Password file behaviour
+## First-time authentication
 
-`<SVC>_ICLOUD_PASSWORD_FILE` can hold either:
+On startup, the worker tries to use saved session state and configured
+credentials.
 
-- an Apple Account password; or
-- an app-specific password.
+If iCloud asks for MFA, the worker sends an authentication prompt to Telegram.
+Reply with:
 
-The value is passed directly to `pyicloud`, and final auth/MFA handling still
-follows Apple account policy.
+```text
+alice auth 123456
+```
 
-## Outbound Telegram messages
+`auth 123456` does not start a fresh login. It answers the active challenge
+that iCloud already issued.
 
-Messages use this compact plain-text structure:
+If the worker restarts and loses the in-memory challenge, send this first:
 
-- Emoji header in sentence case.
-- One-line action summary including Apple ID.
-- Optional compact status lines.
+```text
+alice auth
+```
 
-Current message templates include:
+That asks the worker to start a new challenge and send a fresh prompt.
+
+## Reauthentication
+
+Reauthentication uses the same shape as first-time authentication:
+
+```text
+alice reauth
+alice reauth 123456
+```
+
+Use `reauth` when the worker says reauthentication is required. Use
+`reauth 123456` to submit the code from Apple.
+
+## Manual backups
+
+Send:
+
+```text
+alice backup
+```
+
+The worker starts a backup as soon as it can. If another backup is already in
+progress, the command is handled according to the live runtime state and the
+worker reports the outcome in Telegram and logs.
+
+## Messages you will see
+
+Messages use compact plain text:
+
+- an emoji header in sentence case
+- one-line action summary including the Apple ID
+- short status lines where useful
+
+Common headers include:
 
 - `🟢 PCD Drive - Container started`
 - `🛑 PCD Drive - Container stopped`
@@ -73,20 +98,48 @@ Current message templates include:
 - `⚠️ PCD Drive - Safety net blocked`
 - `📣 PCD Drive - Reauth reminder`
 
-Backup completion messages include:
+Backup completion messages can include:
 
 - `Transferred: <done>/<total>`
 - `Skipped: <count>`
-- `Errors: <count>` where the count includes both transfer and delete-phase errors
-- `Delete errors: <count>` when mirror-delete encountered cleanup failures
+- `Errors: <count>`
+- `Delete errors: <count>`
 - `Duration: <hh:mm:ss>`
-- `Average speed: <value> MiB/s` (only when files were downloaded)
+- `Average speed: <value> MiB/s`
 
-Backup start messages include:
+`Errors` includes transfer errors and delete-phase errors. `Average speed` only
+appears when files were downloaded.
+
+Backup start messages include either:
 
 - `Scheduled <plain English schedule>`
 - `Manual, then <plain English schedule>`
 
-Safety-net blocked messages include an explicit expected ownership line:
+Safety-net blocked messages include the ownership the worker expected:
 
-- `Expected uid <uid>, gid <gid>`
+```text
+Expected uid <uid>, gid <gid>
+```
+
+## When commands are ignored
+
+Commands are ignored when:
+
+- they come from a different Telegram chat
+- `H_TGM_CHAT_ID` is unset
+- the username does not match that worker
+- the command is not one of the supported forms above
+
+On startup, the worker discards old queued Telegram updates once, then switches
+to live polling. That stops stale commands from firing after a restart while
+preserving commands that arrive after the worker has started.
+
+## Password files
+
+`<SVC>_ICLOUD_PASSWORD_FILE` can contain either:
+
+- an Apple Account password
+- an app-specific password
+
+The worker passes the value to `pyicloud`. Apple still decides whether MFA is
+required.
